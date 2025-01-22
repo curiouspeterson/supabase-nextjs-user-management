@@ -15,20 +15,19 @@ import { createClient } from '@/utils/supabase/client'
 import { Database } from '@/app/database.types'
 
 type Employee = Database['public']['Tables']['employees']['Row'] & {
-  profiles: Database['public']['Tables']['profiles']['Row']
+  profiles: Pick<Database['public']['Tables']['profiles']['Row'], 'full_name' | 'avatar_url' | 'updated_at'>
+  shift_types?: Pick<Database['public']['Tables']['shift_types']['Row'], 'name' | 'description'>
 }
 
 interface DeleteDialogProps {
   employee: Employee
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  onClose: () => void
   onSuccess?: () => void
 }
 
 export function DeleteDialog({
   employee,
-  open,
-  onOpenChange,
+  onClose,
   onSuccess,
 }: DeleteDialogProps) {
   const [loading, setLoading] = useState(false)
@@ -50,7 +49,7 @@ export function DeleteDialog({
 
       console.log('Employee deleted successfully')
       onSuccess?.()
-      onOpenChange(false)
+      onClose()
     } catch (error) {
       console.error('Error:', error)
       alert('Error deleting employee. Please check the console for details.')
@@ -60,7 +59,7 @@ export function DeleteDialog({
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog open={true} onOpenChange={onClose}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete Employee</AlertDialogTitle>

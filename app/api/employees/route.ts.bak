@@ -1,0 +1,86 @@
+import { createAdminClient } from '@/utils/supabase/admin'
+import { NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
+import crypto from 'crypto'
+
+function generateUniqueEmail(fullName: string): string {
+  // Remove special characters and convert to lowercase
+  const cleanName = fullName.toLowerCase().replace(/[^a-z0-9]/g, '')
+  // Add random suffix to ensure uniqueness
+  const randomSuffix = Math.random().toString(36).substring(2, 7)
+  return `${cleanName}.${randomSuffix}@dispatch911.com`
+}
+
+function generateSecurePassword(): string {
+  // Generate a password that meets requirements:
+  // - At least 8 characters
+  // - Include numbers and special characters
+  const length = 12
+  const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*'
+  let password = ''
+  for (let i = 0; i < length; i++) {
+    password += charset.charAt(Math.floor(Math.random() * charset.length))
+  }
+  return password
+}
+
+export async function POST(request: Request) {
+  try {
+    const requestData = await request.json()
+    const {
+      email,
+      password,
+      fullName,
+      employeeRole,
+      userRole,
+      weeklyHours,
+      defaultShiftType
+    } = requestData
+
+    // Create Supabase client with admin role
+    const supabase = createAdminClient()
+
+    // Create the user with metadata
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName,
+        employee_role: employeeRole,
+        user_role: userRole,
+        weekly_hours: weeklyHours,
+        default_shift_type: defaultShiftType
+      }
+    })
+
+    if (authError) {
+      console.error('Error creating user:', authError)
+      return NextResponse.json(
+        { error: 'Error creating user', details: authError.message },
+        { status: 400 }
+      )
+    }
+
+    if (!authData?.user) {
+      console.error('No user data returned')
+      return NextResponse.json(
+        { error: 'No user data returned' },
+        { status: 500 }
+      )
+    }
+
+    // The trigger will handle creating the profile and employee records
+    return NextResponse.json({ 
+      message: 'Employee created successfully',
+      userId: authData.user.id 
+    })
+
+  } catch (error) {
+    console.error('Error in employee creation:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+} 

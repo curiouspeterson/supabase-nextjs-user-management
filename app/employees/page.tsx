@@ -8,7 +8,8 @@ import { EmployeeDialog } from './employee-dialog'
 import { DeleteDialog } from './delete-dialog'
 
 type Employee = Database['public']['Tables']['employees']['Row'] & {
-  profiles: Database['public']['Tables']['profiles']['Row']
+  profiles: Pick<Database['public']['Tables']['profiles']['Row'], 'full_name' | 'avatar_url' | 'updated_at'>
+  shift_types?: Pick<Database['public']['Tables']['shift_types']['Row'], 'name' | 'description'>
 }
 
 export default function EmployeesPage() {
@@ -48,21 +49,30 @@ export default function EmployeesPage() {
         return
       }
 
-      // Fetch employees with their profile data
+      // Fetch employees with their profile data and shift type
       const { data: employeesData, error: employeesError } = await supabase
         .from('employees')
         .select(`
-          *,
-          profiles (
+          id,
+          employee_role,
+          user_role,
+          weekly_hours_scheduled,
+          default_shift_type_id,
+          profiles:profiles!inner (
             full_name,
             avatar_url,
             updated_at
+          ),
+          shift_types:shift_types!left (
+            name,
+            description
           )
         `)
         .order('employee_role', { ascending: true })
+        .returns<Employee[]>()
 
       if (employeesError) throw employeesError
-      setEmployees(employeesData)
+      setEmployees(employeesData || [])
     } catch (err) {
       console.error('Error:', err)
       setError('An error occurred while loading the page')
@@ -118,6 +128,7 @@ export default function EmployeesPage() {
                 <th className="text-left text-xs font-medium text-muted-foreground p-3">Employee Role</th>
                 <th className="text-left text-xs font-medium text-muted-foreground p-3">User Role</th>
                 <th className="text-left text-xs font-medium text-muted-foreground p-3">Hours Scheduled</th>
+                <th className="text-left text-xs font-medium text-muted-foreground p-3">Default Shift Type</th>
                 <th className="text-right text-xs font-medium text-muted-foreground p-3">Actions</th>
               </tr>
             </thead>
@@ -135,37 +146,50 @@ export default function EmployeesPage() {
                       {employee.employee_role}
                     </div>
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 text-sm">
                     <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
                       ${employee.user_role === 'Employee' ? 'bg-gray-100 text-gray-800' :
-                        employee.user_role === 'Manager' ? 'bg-yellow-100 text-yellow-800' :
+                        employee.user_role === 'Manager' ? 'bg-amber-100 text-amber-800' :
                         'bg-red-100 text-red-800'}`}>
                       {employee.user_role}
                     </div>
                   </td>
                   <td className="p-3 text-sm">{employee.weekly_hours_scheduled} hrs/week</td>
-                  <td className="p-3 text-right space-x-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedEmployee(employee)
-                        setShowEditDialog(true)
-                      }}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEmployeeToDelete(employee)
-                        setShowDeleteDialog(true)
-                      }}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      Delete
-                    </Button>
+                  <td className="p-3 text-sm">
+                    {employee.shift_types ? (
+                      <div className="text-sm">
+                        <div className="font-medium">{employee.shift_types.name}</div>
+                        <div className="text-muted-foreground">
+                          {employee.shift_types.description}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground">No shift type assigned</div>
+                    )}
+                  </td>
+                  <td className="p-3 text-right">
+                    <div className="flex justify-end space-x-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedEmployee(employee)
+                          setShowEditDialog(true)
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setEmployeeToDelete(employee)
+                          setShowDeleteDialog(true)
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -174,33 +198,44 @@ export default function EmployeesPage() {
         </div>
       </div>
 
-      <EmployeeDialog
-        open={showAddDialog}
-        onOpenChange={setShowAddDialog}
-        onSuccess={() => {
-          fetchData()
-          setShowAddDialog(false)
-        }}
-      />
+      {showAddDialog && (
+        <EmployeeDialog
+          mode="add"
+          onClose={() => setShowAddDialog(false)}
+          onSuccess={() => {
+            setShowAddDialog(false)
+            fetchData()
+          }}
+        />
+      )}
 
-      <EmployeeDialog
-        employee={selectedEmployee}
-        open={showEditDialog}
-        onOpenChange={setShowEditDialog}
-        onSuccess={() => {
-          fetchData()
-          setShowEditDialog(false)
-        }}
-      />
+      {showEditDialog && selectedEmployee && (
+        <EmployeeDialog
+          mode="edit"
+          employee={selectedEmployee}
+          onClose={() => {
+            setSelectedEmployee(undefined)
+            setShowEditDialog(false)
+          }}
+          onSuccess={() => {
+            setSelectedEmployee(undefined)
+            setShowEditDialog(false)
+            fetchData()
+          }}
+        />
+      )}
 
-      {employeeToDelete && (
+      {showDeleteDialog && employeeToDelete && (
         <DeleteDialog
           employee={employeeToDelete}
-          open={showDeleteDialog}
-          onOpenChange={setShowDeleteDialog}
-          onSuccess={() => {
-            fetchData()
+          onClose={() => {
+            setEmployeeToDelete(undefined)
             setShowDeleteDialog(false)
+          }}
+          onSuccess={() => {
+            setEmployeeToDelete(undefined)
+            setShowDeleteDialog(false)
+            fetchData()
           }}
         />
       )}

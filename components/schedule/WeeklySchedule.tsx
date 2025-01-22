@@ -13,7 +13,9 @@ type Props = {
 }
 
 type ScheduleWithDetails = Database['public']['Tables']['schedules']['Row'] & {
-  shifts: Database['public']['Tables']['shifts']['Row']
+  shifts: Database['public']['Tables']['shifts']['Row'] & {
+    shift_types: Database['public']['Tables']['shift_types']['Row']
+  }
   employees: Database['public']['Tables']['profiles']['Row'] & Database['public']['Tables']['employees']['Row']
 }
 
@@ -37,7 +39,10 @@ export default function WeeklySchedule({ weekStart = new Date(), employeeId, isM
           .from('schedules')
           .select(`
             *,
-            shifts:shifts(*),
+            shifts!inner(
+              *,
+              shift_types(*)
+            ),
             employees:profiles!inner(*)
           `)
           .eq('week_start_date', formatDate(currentWeek))
@@ -48,9 +53,11 @@ export default function WeeklySchedule({ weekStart = new Date(), employeeId, isM
 
         const { data, error: err } = await query
 
-        if (err) throw err
+        if (err) {
+          throw err
+        }
 
-        setSchedules(data as unknown as ScheduleWithDetails[])
+        setSchedules(data || [])
       } catch (err) {
         console.error('Error fetching schedules:', err)
         setError('Failed to load schedules')
@@ -62,107 +69,130 @@ export default function WeeklySchedule({ weekStart = new Date(), employeeId, isM
     fetchSchedules()
   }, [currentWeek, employeeId, isManager])
 
-  const navigateWeek = (direction: 'prev' | 'next') => {
-    const newDate = new Date(currentWeek)
-    newDate.setDate(newDate.getDate() + (direction === 'next' ? 7 : -7))
-    setCurrentWeek(getWeekStart(newDate))
-  }
-
-  const formatShiftTime = (time: string) => {
+  const formatTime = (time: string) => {
     return new Date(`2000-01-01T${time}`).toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
-      hour12: true
+      hour12: true,
     })
   }
 
   if (loading) {
-    return <div className="flex justify-center p-4">Loading schedules...</div>
+    return <div>Loading...</div>
   }
 
   if (error) {
-    return <div className="text-red-500 p-4">{error}</div>
+    return <div className="text-red-500">{error}</div>
   }
 
   return (
-    <div className="container mx-auto p-4">
-      <div className="flex justify-between items-center mb-4">
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
         <button
-          onClick={() => navigateWeek('prev')}
-          className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300"
+          onClick={() => {
+            const newDate = new Date(currentWeek)
+            newDate.setDate(newDate.getDate() - 7)
+            setCurrentWeek(getWeekStart(newDate))
+          }}
+          className="text-sm text-gray-600 hover:text-gray-900"
         >
           Previous Week
         </button>
-        <h2 className="text-xl font-bold">
-          Week of {currentWeek.toLocaleDateString()}
-        </h2>
+        <div className="text-lg font-semibold">
+          Week of {formatDate(currentWeek)}
+        </div>
         <button
-          onClick={() => navigateWeek('next')}
-          className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300"
+          onClick={() => {
+            const newDate = new Date(currentWeek)
+            newDate.setDate(newDate.getDate() + 7)
+            setCurrentWeek(getWeekStart(newDate))
+          }}
+          className="text-sm text-gray-600 hover:text-gray-900"
         >
           Next Week
         </button>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full bg-white border border-gray-200">
-          <thead>
+      <div className="border rounded-lg overflow-hidden">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
             <tr>
-              <th className="border p-2">Day</th>
-              {isManager && <th className="border p-2">Employee</th>}
-              <th className="border p-2">Shift</th>
-              <th className="border p-2">Time</th>
-              <th className="border p-2">Status</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Day
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Shift Type
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Time
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Duration
+              </th>
+              {isManager && (
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Employee
+                </th>
+              )}
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="bg-white divide-y divide-gray-200">
             {DAYS_OF_WEEK.map((day) => {
               const daySchedules = schedules.filter(
                 (schedule) => schedule.day_of_week === day
               )
 
-              if (daySchedules.length === 0) {
-                return (
-                  <tr key={day}>
-                    <td className="border p-2">{day}</td>
-                    {isManager && <td className="border p-2">-</td>}
-                    <td className="border p-2">-</td>
-                    <td className="border p-2">-</td>
-                    <td className="border p-2">-</td>
-                  </tr>
-                )
-              }
-
-              return daySchedules.map((schedule, index) => (
-                <tr key={`${day}-${index}`}>
-                  {index === 0 && (
-                    <td className="border p-2" rowSpan={daySchedules.length}>
+              return daySchedules.length > 0 ? (
+                daySchedules.map((schedule) => (
+                  <tr key={schedule.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {day}
                     </td>
-                  )}
-                  {isManager && (
-                    <td className="border p-2">
-                      {schedule.employees?.full_name || 'Unknown'}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {schedule.shifts.shift_types.name}
                     </td>
-                  )}
-                  <td className="border p-2">{schedule.shifts?.shift_name}</td>
-                  <td className="border p-2">
-                    {formatShiftTime(schedule.shifts?.start_time)} -{' '}
-                    {formatShiftTime(schedule.shifts?.end_time)}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {formatTime(schedule.shifts.start_time)} -{' '}
+                      {formatTime(schedule.shifts.end_time)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {schedule.shifts.duration_category}
+                    </td>
+                    {isManager && (
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {schedule.employees.full_name}
+                      </td>
+                    )}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                          ${
+                            schedule.schedule_status === 'Draft'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-green-100 text-green-800'
+                          }`}
+                      >
+                        {schedule.schedule_status}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr key={day}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {day}
                   </td>
-                  <td className="border p-2">
-                    <span
-                      className={`px-2 py-1 rounded text-sm ${
-                        schedule.schedule_status === 'Published'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}
-                    >
-                      {schedule.schedule_status}
-                    </span>
+                  <td
+                    colSpan={isManager ? 5 : 4}
+                    className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
+                  >
+                    No shift scheduled
                   </td>
                 </tr>
-              ))
+              )
             })}
           </tbody>
         </table>
