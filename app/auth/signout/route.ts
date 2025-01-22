@@ -2,20 +2,21 @@ import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { type NextRequest, NextResponse } from 'next/server'
 
-export async function POST(req: NextRequest) {
+async function signOutUser(req: NextRequest) {
   const supabase = await createClient()
 
-  // Check if a user's logged in
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Sign out user from all devices
+  await supabase.auth.signOut({ scope: 'global' })
 
-  if (user) {
-    await supabase.auth.signOut()
-  }
-
+  // Revalidate all pages that use user data
   revalidatePath('/', 'layout')
+
+  // Redirect to login page
   return NextResponse.redirect(new URL('/login', req.url), {
     status: 302,
   })
 }
+
+// Handle both GET and POST requests
+export const GET = signOutUser
+export const POST = signOutUser

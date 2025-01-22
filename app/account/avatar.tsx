@@ -2,6 +2,9 @@
 import React, { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import Image from 'next/image'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Loader2, Upload } from 'lucide-react'
 
 export default function Avatar({
   uid,
@@ -15,7 +18,7 @@ export default function Avatar({
   onUpload: (url: string) => void
 }) {
   const supabase = createClient()
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(url)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
 
   useEffect(() => {
@@ -48,7 +51,9 @@ export default function Avatar({
       const fileExt = file.name.split('.').pop()
       const filePath = `${uid}-${Math.random()}.${fileExt}`
 
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file)
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file)
 
       if (uploadError) {
         throw uploadError
@@ -63,23 +68,42 @@ export default function Avatar({
   }
 
   return (
-    <div>
+    <div className="flex flex-col items-center gap-4">
       {avatarUrl ? (
-        <Image
-          width={size}
-          height={size}
-          src={avatarUrl}
-          alt="Avatar"
-          className="avatar image"
-          style={{ height: size, width: size }}
-        />
+        <div className="relative h-32 w-32 overflow-hidden rounded-full border-2 border-border">
+          <Image
+            src={avatarUrl}
+            alt="Avatar"
+            className="object-cover"
+            fill
+            sizes="(max-width: 128px) 100vw, 128px"
+          />
+        </div>
       ) : (
-        <div className="avatar no-image" style={{ height: size, width: size }} />
+        <div 
+          className="flex h-32 w-32 items-center justify-center rounded-full border-2 border-border bg-muted"
+          style={{ fontSize: size / 3 }}
+        >
+          ?
+        </div>
       )}
-      <div style={{ width: size }}>
-        <label className="button primary block" htmlFor="single">
-          {uploading ? 'Uploading ...' : 'Upload'}
-        </label>
+      <div className="flex flex-col items-center gap-2">
+        <Label
+          htmlFor="single"
+          className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          {uploading ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Uploading...
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Upload className="h-4 w-4" />
+              Upload Avatar
+            </div>
+          )}
+        </Label>
         <input
           style={{
             visibility: 'hidden',

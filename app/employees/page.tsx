@@ -1,70 +1,65 @@
 import { Metadata } from 'next'
 import { Button } from '@/components/ui/button'
+import { createClient } from '@/utils/supabase/server'
+import { Database } from '@/app/database.types'
 
 export const metadata: Metadata = {
   title: 'Employees | 911 Dispatch Management',
   description: 'Manage dispatch center employees, roles, and certifications',
 }
 
-interface Employee {
-  id: string
-  name: string
-  role: string
-  status: string
-  shift: string
-  certifications: string[]
-  hireDate: string
+type Employee = Database['public']['Tables']['employees']['Row'] & {
+  profiles: Database['public']['Tables']['profiles']['Row']
 }
 
-const employees: Employee[] = [
-  {
-    id: '1',
-    name: 'Sarah Johnson',
-    role: 'Senior Dispatcher',
-    status: 'Active',
-    shift: 'Day Shift Early',
-    certifications: ['EMD', 'Fire', 'Police'],
-    hireDate: '2020-03-15',
-  },
-  {
-    id: '2',
-    name: 'James Wilson',
-    role: 'Dispatcher',
-    status: 'Active',
-    shift: 'Day Shift Early',
-    certifications: ['EMD', 'Police'],
-    hireDate: '2021-06-22',
-  },
-  {
-    id: '3',
-    name: 'Emily Davis',
-    role: 'Supervisor',
-    status: 'Active',
-    shift: 'Day Shift Early',
-    certifications: ['EMD', 'Fire', 'Police', 'CTO'],
-    hireDate: '2018-11-30',
-  },
-  {
-    id: '4',
-    name: 'Thomas Brown',
-    role: 'Dispatcher',
-    status: 'Training',
-    shift: 'Day Shift',
-    certifications: ['EMD'],
-    hireDate: '2023-12-01',
-  },
-  {
-    id: '5',
-    name: 'Maria Garcia',
-    role: 'Senior Dispatcher',
-    status: 'Active',
-    shift: 'Day Shift',
-    certifications: ['EMD', 'Fire', 'Police'],
-    hireDate: '2019-08-15',
-  },
-]
+export default async function EmployeesPage() {
+  const supabase = await createClient()
 
-export default function EmployeesPage() {
+  // Get current user to check permissions
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    return (
+      <div className="flex-1 flex flex-col w-full px-8 sm:max-w-md justify-center gap-2">
+        <div className="text-center">
+          Please sign in to view employees
+        </div>
+      </div>
+    )
+  }
+
+  // Check if user is a manager or admin
+  const { data: currentEmployee } = await supabase
+    .from('employees')
+    .select('user_role')
+    .eq('id', user.id)
+    .single()
+
+  if (!currentEmployee || !['Manager', 'Admin'].includes(currentEmployee.user_role)) {
+    return (
+      <div className="flex-1 flex flex-col w-full px-8 sm:max-w-md justify-center gap-2">
+        <div className="text-center">
+          You do not have permission to view this page
+        </div>
+      </div>
+    )
+  }
+
+  // Fetch employees with their profile data
+  const { data: employees } = await supabase
+    .from('employees')
+    .select(`
+      *,
+      profiles (
+        full_name,
+        avatar_url,
+        updated_at
+      )
+    `)
+    .order('employee_role', { ascending: true })
+
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
@@ -86,46 +81,35 @@ export default function EmployeesPage() {
             <thead>
               <tr className="border-b bg-muted/50">
                 <th className="text-left text-xs font-medium text-muted-foreground p-3">Name</th>
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">Role</th>
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">Status</th>
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">Shift</th>
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">Certifications</th>
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">Hire Date</th>
+                <th className="text-left text-xs font-medium text-muted-foreground p-3">Employee Role</th>
+                <th className="text-left text-xs font-medium text-muted-foreground p-3">User Role</th>
+                <th className="text-left text-xs font-medium text-muted-foreground p-3">Hours Scheduled</th>
                 <th className="text-right text-xs font-medium text-muted-foreground p-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {employees.map((employee) => (
+              {employees?.map((employee) => (
                 <tr key={employee.id} className="hover:bg-muted/50">
                   <td className="p-3">
-                    <div className="font-medium">{employee.name}</div>
-                  </td>
-                  <td className="p-3 text-sm">{employee.role}</td>
-                  <td className="p-3">
-                    <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                      employee.status === 'Active' ? 'bg-green-100 text-green-800' :
-                      employee.status === 'Training' ? 'bg-blue-100 text-blue-800' :
-                      'bg-yellow-100 text-yellow-800'
-                    }`}>
-                      {employee.status}
-                    </div>
-                  </td>
-                  <td className="p-3 text-sm">{employee.shift}</td>
-                  <td className="p-3">
-                    <div className="flex gap-1">
-                      {employee.certifications.map((cert) => (
-                        <div
-                          key={cert}
-                          className="inline-flex items-center rounded-full px-2 py-0.5 text-xs bg-gray-100 text-gray-800"
-                        >
-                          {cert}
-                        </div>
-                      ))}
-                    </div>
+                    <div className="font-medium">{employee.profiles?.full_name || 'Unnamed'}</div>
                   </td>
                   <td className="p-3 text-sm">
-                    {new Date(employee.hireDate).toLocaleDateString()}
+                    <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
+                      ${employee.employee_role === 'Dispatcher' ? 'bg-blue-100 text-blue-800' : 
+                        employee.employee_role === 'Shift Supervisor' ? 'bg-purple-100 text-purple-800' :
+                        'bg-green-100 text-green-800'}`}>
+                      {employee.employee_role}
+                    </div>
                   </td>
+                  <td className="p-3">
+                    <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
+                      ${employee.user_role === 'Employee' ? 'bg-gray-100 text-gray-800' :
+                        employee.user_role === 'Manager' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-red-100 text-red-800'}`}>
+                      {employee.user_role}
+                    </div>
+                  </td>
+                  <td className="p-3 text-sm">{employee.weekly_hours_scheduled} hrs/week</td>
                   <td className="p-3 text-right">
                     <Button variant="ghost" size="sm">Edit</Button>
                   </td>
