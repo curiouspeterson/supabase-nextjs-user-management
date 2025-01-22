@@ -1,64 +1,98 @@
-import { Metadata } from 'next'
-import { Button } from '@/components/ui/button'
-import { createClient } from '@/utils/supabase/server'
-import { Database } from '@/app/database.types'
+'use client'
 
-export const metadata: Metadata = {
-  title: 'Employees | 911 Dispatch Management',
-  description: 'Manage dispatch center employees, roles, and certifications',
-}
+import { useState, useEffect, useCallback } from 'react'
+import { Button } from '@/components/ui/button'
+import { createClient } from '@/utils/supabase/client'
+import { Database } from '@/app/database.types'
+import { EmployeeDialog } from './employee-dialog'
+import { DeleteDialog } from './delete-dialog'
 
 type Employee = Database['public']['Tables']['employees']['Row'] & {
   profiles: Database['public']['Tables']['profiles']['Row']
 }
 
-export default async function EmployeesPage() {
-  const supabase = await createClient()
+export default function EmployeesPage() {
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee>()
+  const [employeeToDelete, setEmployeeToDelete] = useState<Employee>()
+  const [showAddDialog, setShowAddDialog] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string>()
+  const supabase = createClient()
 
-  // Get current user to check permissions
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(undefined)
 
-  if (!user) {
+      // Get current user
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError) throw userError
+      if (!user) {
+        setError('Please sign in to view employees')
+        return
+      }
+
+      // Check if user is a manager or admin
+      const { data: currentEmployee, error: roleError } = await supabase
+        .from('employees')
+        .select('user_role')
+        .eq('id', user.id)
+        .single()
+
+      if (roleError) throw roleError
+      if (!currentEmployee || !['Manager', 'Admin'].includes(currentEmployee.user_role)) {
+        setError('You do not have permission to view this page')
+        return
+      }
+
+      // Fetch employees with their profile data
+      const { data: employeesData, error: employeesError } = await supabase
+        .from('employees')
+        .select(`
+          *,
+          profiles (
+            full_name,
+            avatar_url,
+            updated_at
+          )
+        `)
+        .order('employee_role', { ascending: true })
+
+      if (employeesError) throw employeesError
+      setEmployees(employeesData)
+    } catch (err) {
+      console.error('Error:', err)
+      setError('An error occurred while loading the page')
+    } finally {
+      setLoading(false)
+    }
+  }, [supabase])
+
+  // Fetch current user and employees data
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  // Show loading state
+  if (loading) {
     return (
       <div className="flex-1 flex flex-col w-full px-8 sm:max-w-md justify-center gap-2">
-        <div className="text-center">
-          Please sign in to view employees
-        </div>
+        <div className="text-center">Loading...</div>
       </div>
     )
   }
 
-  // Check if user is a manager or admin
-  const { data: currentEmployee } = await supabase
-    .from('employees')
-    .select('user_role')
-    .eq('id', user.id)
-    .single()
-
-  if (!currentEmployee || !['Manager', 'Admin'].includes(currentEmployee.user_role)) {
+  // Show error state
+  if (error) {
     return (
       <div className="flex-1 flex flex-col w-full px-8 sm:max-w-md justify-center gap-2">
-        <div className="text-center">
-          You do not have permission to view this page
-        </div>
+        <div className="text-center">{error}</div>
       </div>
     )
   }
-
-  // Fetch employees with their profile data
-  const { data: employees } = await supabase
-    .from('employees')
-    .select(`
-      *,
-      profiles (
-        full_name,
-        avatar_url,
-        updated_at
-      )
-    `)
-    .order('employee_role', { ascending: true })
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -71,7 +105,7 @@ export default async function EmployeesPage() {
         </div>
         <div className="space-x-2">
           <Button variant="outline">Import</Button>
-          <Button>Add Employee</Button>
+          <Button onClick={() => setShowAddDialog(true)}>Add Employee</Button>
         </div>
       </div>
 
@@ -110,8 +144,28 @@ export default async function EmployeesPage() {
                     </div>
                   </td>
                   <td className="p-3 text-sm">{employee.weekly_hours_scheduled} hrs/week</td>
-                  <td className="p-3 text-right">
-                    <Button variant="ghost" size="sm">Edit</Button>
+                  <td className="p-3 text-right space-x-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedEmployee(employee)
+                        setShowEditDialog(true)
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEmployeeToDelete(employee)
+                        setShowDeleteDialog(true)
+                      }}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      Delete
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -119,6 +173,37 @@ export default async function EmployeesPage() {
           </table>
         </div>
       </div>
+
+      <EmployeeDialog
+        open={showAddDialog}
+        onOpenChange={setShowAddDialog}
+        onSuccess={() => {
+          fetchData()
+          setShowAddDialog(false)
+        }}
+      />
+
+      <EmployeeDialog
+        employee={selectedEmployee}
+        open={showEditDialog}
+        onOpenChange={setShowEditDialog}
+        onSuccess={() => {
+          fetchData()
+          setShowEditDialog(false)
+        }}
+      />
+
+      {employeeToDelete && (
+        <DeleteDialog
+          employee={employeeToDelete}
+          open={showDeleteDialog}
+          onOpenChange={setShowDeleteDialog}
+          onSuccess={() => {
+            fetchData()
+            setShowDeleteDialog(false)
+          }}
+        />
+      )}
     </div>
   )
 } 

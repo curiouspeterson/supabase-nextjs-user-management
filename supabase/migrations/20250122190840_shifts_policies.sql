@@ -1,3 +1,9 @@
+-- Drop existing policies if they exist
+drop policy if exists "Enable read access for authenticated users" on shifts;
+drop policy if exists "Enable insert access for authenticated users" on shifts;
+drop policy if exists "Enable update access for authenticated users" on shifts;
+drop policy if exists "Enable delete access for authenticated users" on shifts;
+
 -- Enable RLS
 alter table "public"."shifts" enable row level security;
 
