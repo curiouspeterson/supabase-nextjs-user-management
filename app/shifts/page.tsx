@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { PlusCircle, Loader2 } from 'lucide-react'
@@ -31,7 +31,7 @@ export default function ShiftsPage() {
   const [selectedShift, setSelectedShift] = useState<ShiftTemplate | undefined>()
   const supabase = createClient()
 
-  const fetchShifts = async () => {
+  const fetchShifts = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('shifts')
@@ -48,11 +48,11 @@ export default function ShiftsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [supabase])
 
   useEffect(() => {
     fetchShifts()
-  }, [])
+  }, [fetchShifts])
 
   const handleDelete = async (id: string) => {
     try {

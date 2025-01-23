@@ -1,73 +1,75 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { Database } from '@/app/database.types'
-import { DayOfWeek, formatDate, getWeekStart } from '@/utils/schedule'
+import { DayOfWeek, formatDate, getWeekStart, startOfWeek } from '@/utils/schedule'
 import { SupabaseClient } from '@supabase/supabase-js'
+import { useUser } from '@/lib/hooks'
 
-type Props = {
-  weekStart?: Date
-  employeeId?: string
+type WeeklyScheduleProps = {
   isManager?: boolean
 }
 
 type ScheduleWithDetails = Database['public']['Tables']['schedules']['Row'] & {
-  shifts: Database['public']['Tables']['shifts']['Row'] & {
+  shifts: Array<Database['public']['Tables']['shifts']['Row'] & {
     shift_types: Database['public']['Tables']['shift_types']['Row']
+  }>,
+  employees: Database['public']['Tables']['employees']['Row'] & {
+    profiles: Database['public']['Tables']['profiles']['Row']
   }
-  employees: Database['public']['Tables']['profiles']['Row'] & Database['public']['Tables']['employees']['Row']
 }
 
 const DAYS_OF_WEEK: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as DayOfWeek[]
 
-export default function WeeklySchedule({ weekStart = new Date(), employeeId, isManager = false }: Props) {
+export default function WeeklySchedule({ isManager = false }: WeeklyScheduleProps) {
   const [schedules, setSchedules] = useState<ScheduleWithDetails[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [currentWeek, setCurrentWeek] = useState(getWeekStart(weekStart))
+  const [currentWeek, setCurrentWeek] = useState(startOfWeek(new Date()))
+  const { user } = useUser()
+
+  const fetchSchedules = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const supabase = createClient() as SupabaseClient<Database>
+      let query = supabase
+        .from('schedules')
+        .select(`
+          *,
+          shifts!inner(
+            *,
+            shift_types(*)
+          ),
+          employees!inner(
+            *,
+            profiles(*)
+          )
+        `)
+        .eq('week_start_date', formatDate(currentWeek))
+
+      if (!isManager && user?.id) {
+        query = query.eq('employee_id', user.id)
+      }
+
+      const { data, error } = await query
+
+      if (error) throw error
+
+      const typedData = (data || []) as unknown as ScheduleWithDetails[]
+      setSchedules(typedData)
+    } catch (error: any) {
+      console.error('Error fetching schedules:', error)
+      setError(error?.message || 'Failed to load schedules')
+    } finally {
+      setLoading(false)
+    }
+  }, [currentWeek, isManager, user?.id])
 
   useEffect(() => {
-    const fetchSchedules = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-
-        const supabase = createClient() as SupabaseClient<Database>
-        
-        let query = supabase
-          .from('schedules')
-          .select(`
-            *,
-            shifts!inner(
-              *,
-              shift_types(*)
-            ),
-            employees:profiles!inner(*)
-          `)
-          .eq('week_start_date', formatDate(currentWeek))
-
-        if (!isManager && employeeId) {
-          query = query.eq('employee_id', employeeId)
-        }
-
-        const { data, error: err } = await query
-
-        if (err) {
-          throw err
-        }
-
-        setSchedules(data || [])
-      } catch (err) {
-        console.error('Error fetching schedules:', err)
-        setError('Failed to load schedules')
-      } finally {
-        setLoading(false)
-      }
-    }
-
     fetchSchedules()
-  }, [currentWeek, employeeId, isManager])
+  }, [fetchSchedules])
 
   const formatTime = (time: string) => {
     return new Date(`2000-01-01T${time}`).toLocaleTimeString('en-US', {
@@ -77,13 +79,8 @@ export default function WeeklySchedule({ weekStart = new Date(), employeeId, isM
     })
   }
 
-  if (loading) {
-    return <div>Loading...</div>
-  }
-
-  if (error) {
-    return <div className="text-red-500">{error}</div>
-  }
+  if (loading) return <div>Loading...</div>
+  if (error) return <div>Error: {error}</div>
 
   return (
     <div className="space-y-4">
@@ -92,20 +89,20 @@ export default function WeeklySchedule({ weekStart = new Date(), employeeId, isM
           onClick={() => {
             const newDate = new Date(currentWeek)
             newDate.setDate(newDate.getDate() - 7)
-            setCurrentWeek(getWeekStart(newDate))
+            setCurrentWeek(startOfWeek(newDate))
           }}
           className="text-sm text-gray-600 hover:text-gray-900"
         >
           Previous Week
         </button>
-        <div className="text-lg font-semibold">
+        <span className="text-lg font-semibold">
           Week of {formatDate(currentWeek)}
-        </div>
+        </span>
         <button
           onClick={() => {
             const newDate = new Date(currentWeek)
             newDate.setDate(newDate.getDate() + 7)
-            setCurrentWeek(getWeekStart(newDate))
+            setCurrentWeek(startOfWeek(newDate))
           }}
           className="text-sm text-gray-600 hover:text-gray-900"
         >
@@ -113,13 +110,18 @@ export default function WeeklySchedule({ weekStart = new Date(), employeeId, isM
         </button>
       </div>
 
-      <div className="border rounded-lg overflow-hidden">
+      <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Day
               </th>
+              {isManager && (
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Employee
+                </th>
+              )}
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Shift Type
               </th>
@@ -129,71 +131,31 @@ export default function WeeklySchedule({ weekStart = new Date(), employeeId, isM
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Duration
               </th>
-              {isManager && (
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Employee
-                </th>
-              )}
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
-              </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {DAYS_OF_WEEK.map((day) => {
-              const daySchedules = schedules.filter(
-                (schedule) => schedule.day_of_week === day
-              )
-
-              return daySchedules.length > 0 ? (
-                daySchedules.map((schedule) => (
-                  <tr key={schedule.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {day}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {schedule.shifts.shift_types.name}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {formatTime(schedule.shifts.start_time)} -{' '}
-                      {formatTime(schedule.shifts.end_time)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {schedule.shifts.duration_category}
-                    </td>
-                    {isManager && (
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {schedule.employees.full_name}
-                      </td>
-                    )}
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                          ${
-                            schedule.schedule_status === 'Draft'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-green-100 text-green-800'
-                          }`}
-                      >
-                        {schedule.schedule_status}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr key={day}>
+            {schedules.map((schedule) => (
+              <tr key={schedule.id}>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  {schedule.day_of_week}
+                </td>
+                {isManager && (
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {day}
+                    {schedule.employees.profiles.full_name}
                   </td>
-                  <td
-                    colSpan={isManager ? 5 : 4}
-                    className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
-                  >
-                    No shift scheduled
-                  </td>
-                </tr>
-              )
-            })}
+                )}
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  {schedule.shifts[0].shift_types.name}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  {formatTime(schedule.shifts[0].start_time)} -{' '}
+                  {formatTime(schedule.shifts[0].end_time)}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  {schedule.shifts[0].duration_category}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

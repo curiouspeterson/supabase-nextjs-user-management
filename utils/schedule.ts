@@ -263,4 +263,38 @@ export async function generateDraftSchedule(weekStart: Date): Promise<void> {
       }
     }
   }
+}
+
+export function startOfWeek(date: Date): Date {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+  d.setDate(diff)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+export function getWeekDates(startDate: Date): Date[] {
+  const dates: Date[] = []
+  const currentDate = new Date(startDate)
+
+  for (let i = 0; i < 7; i++) {
+    dates.push(new Date(currentDate))
+    currentDate.setDate(currentDate.getDate() + 1)
+  }
+
+  return dates
+}
+
+export function getDayOfWeek(date: Date): DayOfWeek {
+  const days: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  return days[date.getDay()]
+}
+
+export function formatTime(time: string): string {
+  const [hours, minutes] = time.split(':')
+  const hour = parseInt(hours, 10)
+  const ampm = hour >= 12 ? 'PM' : 'AM'
+  const formattedHour = hour % 12 || 12
+  return `${formattedHour}:${minutes} ${ampm}`
 } 

@@ -134,7 +134,7 @@ export default function DispatchSchedule({ date, shifts, requirements }: Dispatc
                     >
                       <span className="text-xs font-medium mb-1">{period.period}</span>
                       <Badge 
-                        variant={period.status === 'Met' ? 'success' : 'destructive'}
+                        variant={period.status === 'Met' ? 'default' : 'destructive'}
                         className="h-5 text-[10px]"
                       >
                         {period.status}
