@@ -1,8 +1,7 @@
--- Drop existing trigger and function
+-- Drop existing trigger if it exists
 drop trigger if exists on_auth_user_created on auth.users;
-drop function if exists public.handle_new_user();
 
--- Recreate the function with better error handling
+-- Recreate the trigger with better error handling
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -53,8 +52,7 @@ begin
       coalesce(new.raw_user_meta_data->>'employee_role', 'Dispatcher'),
       coalesce(new.raw_user_meta_data->>'user_role', 'Employee'),
       coalesce((new.raw_user_meta_data->>'weekly_hours_scheduled')::integer, 40),
-      coalesce((new.raw_user_meta_data->>'default_shift_type_id')::uuid, 
-        (select id from shift_types where name = 'Day Shift'))
+      (new.raw_user_meta_data->>'default_shift_type_id')::uuid
     );
   exception when others then
     get stacked diagnostics 
@@ -78,12 +76,6 @@ exception
     raise;
 end;
 $$;
-
--- Grant necessary permissions
-grant usage on schema public to postgres, anon, authenticated, service_role;
-grant all on all tables in schema public to postgres, anon, authenticated, service_role;
-grant all on all sequences in schema public to postgres, anon, authenticated, service_role;
-grant all on all functions in schema public to postgres, anon, authenticated, service_role;
 
 -- Create the trigger
 create trigger on_auth_user_created

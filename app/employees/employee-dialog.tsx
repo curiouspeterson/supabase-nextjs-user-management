@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, ControllerRenderProps, FieldValues } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { Button } from '@/components/ui/button'
@@ -46,6 +46,7 @@ const formSchema = z.object({
 
 type Employee = Database['public']['Tables']['employees']['Row'] & {
   profiles: Pick<Database['public']['Tables']['profiles']['Row'], 'full_name' | 'avatar_url' | 'updated_at'>
+  email?: string
   shift_types?: Pick<Database['public']['Tables']['shift_types']['Row'], 'name' | 'description'>
 }
 
@@ -55,6 +56,8 @@ interface EmployeeDialogProps {
   onClose: () => void
   onSuccess?: () => void
 }
+
+type FormField = ControllerRenderProps<FieldValues, string>
 
 export function EmployeeDialog({
   mode,
@@ -92,33 +95,43 @@ export function EmployeeDialog({
       }
       
       setShiftTypes(data)
+
+      // Set default shift type if none selected
+      if (!form.getValues('default_shift_type_id')) {
+        const dayShift = data.find(shift => shift.name === 'Day Shift')
+        if (dayShift) {
+          form.setValue('default_shift_type_id', dayShift.id)
+        }
+      }
     }
     
     loadShiftTypes()
-  }, [supabase])
+  }, [supabase, form])
 
   // Reset form when employee changes
   useEffect(() => {
     if (employee) {
       form.reset({
         full_name: employee.profiles?.full_name || '',
-        email: employee.profiles?.email || '',
-        employee_role: employee.employee_role || 'Dispatcher',
-        user_role: employee.user_role || 'Employee',
+        email: employee.email || '',
+        employee_role: (employee.employee_role || 'Dispatcher') as 'Dispatcher' | 'Shift Supervisor' | 'Management',
+        user_role: (employee.user_role || 'Employee') as 'Employee' | 'Manager' | 'Admin',
         weekly_hours_scheduled: employee.weekly_hours_scheduled || 0,
-        default_shift_type_id: employee.default_shift_type_id || '',
+        default_shift_type_id: employee.default_shift_type_id || ''
       })
     } else {
+      // For new employees, try to set Day Shift as default
+      const dayShift = shiftTypes.find(shift => shift.name === 'Day Shift')
       form.reset({
         full_name: '',
         email: '',
         employee_role: 'Dispatcher',
         user_role: 'Employee',
         weekly_hours_scheduled: 0,
-        default_shift_type_id: '',
+        default_shift_type_id: dayShift?.id || ''
       })
     }
-  }, [employee, form])
+  }, [employee, form, shiftTypes])
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     try {
@@ -136,10 +149,9 @@ export function EmployeeDialog({
         // Update existing employee
         console.log('Starting update for employee:', employee.id)
         
-        // Update profile
+        // Update profile (remove email from profile update)
         console.log('Updating profile with:', { 
           full_name: values.full_name,
-          email: values.email,
           updated_at: new Date().toISOString()
         })
         
@@ -147,7 +159,6 @@ export function EmployeeDialog({
           .from('profiles')
           .update({ 
             full_name: values.full_name,
-            email: values.email,
             updated_at: new Date().toISOString()
           })
           .eq('id', employee.id)
@@ -240,11 +251,11 @@ export function EmployeeDialog({
             <FormField
               control={form.control}
               name="full_name"
-              render={({ field }) => (
+              render={({ field }: { field: FormField }) => (
                 <FormItem>
                   <FormLabel>Full Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="John Doe" {...field} />
+                    <Input {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -253,11 +264,11 @@ export function EmployeeDialog({
             <FormField
               control={form.control}
               name="email"
-              render={({ field }) => (
+              render={({ field }: { field: FormField }) => (
                 <FormItem>
-                  <FormLabel>Email (Optional)</FormLabel>
+                  <FormLabel>Email</FormLabel>
                   <FormControl>
-                    <Input type="email" placeholder="john.doe@example.com" {...field} />
+                    <Input {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
