@@ -1,10 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import * as React from 'react'
+import { useEffect } from 'react'
+import { format } from 'date-fns'
+import { createClient } from '@/utils/supabase/client'
+import { Database } from '@/lib/database.types'
+
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { PlusCircle, Calendar, Clock, Loader2 } from 'lucide-react'
-import { TimeOffRequestDialog } from '@/components/time-off/time-off-request-dialog'
 import {
   Card,
   CardContent,
@@ -13,237 +15,207 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useToast } from '@/components/ui/use-toast'
+import { useUser } from '@/lib/hooks'
+import { TimeOffRequestDialog } from '@/components/time-off/time-off-request-dialog'
+import { TimeOffRequestWithReviewer, TimeOffStatus } from '@/lib/types/time-off'
+import { updateTimeOffRequest } from '@/lib/api/time-off'
+import { Loader2 } from 'lucide-react'
 
-interface TimeOffRequest {
-  id: string
-  employeeId: string
-  employeeName: string
-  startDate: string
-  endDate: string
-  type: 'Vacation' | 'Sick' | 'Personal' | 'Training'
-  status: 'Pending' | 'Approved' | 'Declined'
-  notes?: string
-  reviewedBy?: string
-  reviewedAt?: string
-  submittedAt: string
-}
+type DbTimeOffRequest = Database['public']['Tables']['time_off_requests']['Row']
 
-// Sample data
-const timeOffRequests: TimeOffRequest[] = [
-  {
-    id: '1',
-    employeeId: '101',
-    employeeName: 'John Doe',
-    startDate: '2024-03-15',
-    endDate: '2024-03-20',
-    type: 'Vacation',
-    status: 'Approved',
-    notes: 'Annual family vacation',
-    reviewedBy: 'Sarah Manager',
-    reviewedAt: '2024-02-01T10:00:00Z',
-    submittedAt: '2024-01-15T10:00:00Z',
-  },
-  {
-    id: '2',
-    employeeId: '102',
-    employeeName: 'Jane Smith',
-    startDate: '2024-03-10',
-    endDate: '2024-03-11',
-    type: 'Personal',
-    status: 'Pending',
-    notes: 'Doctor appointment',
-    submittedAt: '2024-01-20T15:30:00Z',
-  },
-  {
-    id: '3',
-    employeeId: '103',
-    employeeName: 'Mike Johnson',
-    startDate: '2024-03-25',
-    endDate: '2024-03-26',
-    type: 'Training',
-    status: 'Declined',
-    notes: 'CPR recertification',
-    reviewedBy: 'Sarah Manager',
-    reviewedAt: '2024-02-15T14:30:00Z',
-    submittedAt: '2024-01-20T15:30:00Z',
-  },
-]
-
-const statusColors = {
-  Pending: 'bg-yellow-500',
-  Approved: 'bg-green-500',
-  Declined: 'bg-red-500',
-}
-
-const typeColors = {
-  Vacation: 'bg-blue-500',
-  Sick: 'bg-purple-500',
-  Personal: 'bg-orange-500',
-  Training: 'bg-cyan-500',
+interface TimeOffRequestResponse extends Omit<DbTimeOffRequest, 'employee_id' | 'reviewed_by'> {
+  employee: {
+    id: string
+    email: string
+    full_name: string | null
+  }
+  reviewer: {
+    id: string
+    email: string
+    full_name: string | null
+  } | null
 }
 
 export default function TimeOffPage() {
-  const [requests, setRequests] = useState<TimeOffRequest[]>(timeOffRequests)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [isLoading, setIsLoading] = React.useState(true)
+  const [requests, setRequests] = React.useState<TimeOffRequestWithReviewer[]>([])
+  const [dialogOpen, setDialogOpen] = React.useState(false)
+  const [selectedTab, setSelectedTab] = React.useState<TimeOffStatus>('Pending')
+  const { user } = useUser()
+  const { toast } = useToast()
+  const supabase = createClient()
 
-  const handleCreateRequest = async (data: any) => {
-    setLoading(true)
+  useEffect(() => {
+    fetchRequests()
+  }, [])
+
+  async function fetchRequests() {
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      
-      const newRequest: TimeOffRequest = {
-        id: Math.random().toString(),
-        employeeId: '101', // Would come from auth
-        employeeName: 'John Doe', // Would come from auth
-        startDate: data.startDate,
-        endDate: data.endDate,
-        type: data.type,
-        status: 'Pending',
-        notes: data.notes,
-        submittedAt: new Date().toISOString(),
+      setIsLoading(true)
+      const { data, error } = await supabase
+        .from('time_off_requests')
+        .select(`
+          *,
+          employee:employee_id(
+            id,
+            email,
+            full_name
+          ),
+          reviewer:reviewed_by(
+            id,
+            email,
+            full_name
+          )
+        `)
+        .order('submitted_at', { ascending: false })
+
+      if (error) {
+        throw error
       }
-      
-      setRequests([newRequest, ...requests])
-      setDialogOpen(false)
+
+      // Transform the data to match our expected types
+      const transformedData: TimeOffRequestWithReviewer[] = (data as TimeOffRequestResponse[]).map(request => ({
+        ...request,
+        employee: {
+          id: request.employee.id,
+          email: request.employee.email,
+          full_name: request.employee.full_name ?? ''
+        },
+        reviewer: request.reviewer ? {
+          id: request.reviewer.id,
+          email: request.reviewer.email,
+          full_name: request.reviewer.full_name ?? ''
+        } : null
+      }))
+
+      setRequests(transformedData)
     } catch (error) {
-      console.error('Failed to create request:', error)
+      console.error(error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load time off requests. Please try again.',
+        variant: 'destructive',
+      })
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
-  const handleUpdateStatus = async (id: string, status: TimeOffRequest['status']) => {
+  async function handleUpdateStatus(id: string, status: TimeOffStatus) {
+    if (!user) return
+
     try {
-      setLoading(true)
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      setRequests(
-        requests.map((request) =>
-          request.id === id
-            ? {
-                ...request,
-                status,
-                reviewedBy: 'Sarah Manager', // Would come from auth
-                reviewedAt: new Date().toISOString(),
-              }
-            : request
-        )
-      )
+      const { error } = await updateTimeOffRequest(id, {
+        status,
+        reviewed_by: user.id,
+        reviewed_at: new Date().toISOString(),
+      })
+
+      if (error) {
+        throw error
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Time off request has been updated.',
+      })
+
+      fetchRequests()
     } catch (error) {
-      console.error('Failed to update status:', error)
-    } finally {
-      setLoading(false)
+      console.error(error)
+      toast({
+        title: 'Error',
+        description: 'Failed to update time off request. Please try again.',
+        variant: 'destructive',
+      })
     }
   }
 
-  const getStatusColor = (status: TimeOffRequest['status']) => {
-    switch (status) {
-      case 'Approved':
-        return 'bg-green-500/10 text-green-500'
-      case 'Declined':
-        return 'bg-red-500/10 text-red-500'
-      default:
-        return 'bg-yellow-500/10 text-yellow-500'
-    }
-  }
-
-  const filterRequests = (status: TimeOffRequest['status'] | 'all') => {
-    if (status === 'all') return requests
-    return requests.filter((request) => request.status === status)
-  }
+  const filteredRequests = requests.filter(
+    (request) => request.status === selectedTab
+  )
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="container py-10">
+      <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Time Off Requests</h1>
-          <p className="text-sm text-muted-foreground">
-            Request and manage time off for dispatch staff
+          <h1 className="text-3xl font-bold">Time Off</h1>
+          <p className="text-muted-foreground">
+            View and manage time off requests
           </p>
         </div>
-        <Button
-          onClick={() => setDialogOpen(true)}
-          disabled={loading}
-        >
-          {loading ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <PlusCircle className="mr-2 h-4 w-4" />
-          )}
-          New Request
-        </Button>
+        <Button onClick={() => setDialogOpen(true)}>Request Time Off</Button>
       </div>
 
-      <Tabs defaultValue="all" className="w-full">
+      <Tabs value={selectedTab} onValueChange={(value: TimeOffStatus) => setSelectedTab(value)}>
         <TabsList>
-          <TabsTrigger value="all">All Requests</TabsTrigger>
           <TabsTrigger value="Pending">Pending</TabsTrigger>
           <TabsTrigger value="Approved">Approved</TabsTrigger>
           <TabsTrigger value="Declined">Declined</TabsTrigger>
         </TabsList>
-
-        {(['all', 'Pending', 'Approved', 'Declined'] as const).map((status) => (
-          <TabsContent key={status} value={status} className="mt-6">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filterRequests(status).map((request) => (
+        <TabsContent value={selectedTab}>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          ) : filteredRequests.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8">
+              <p className="text-muted-foreground">No requests found</p>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {filteredRequests.map((request) => (
                 <Card key={request.id}>
                   <CardHeader>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <CardTitle>{request.employeeName}</CardTitle>
-                        <CardDescription>{request.type} Leave</CardDescription>
-                      </div>
-                      <Badge
-                        variant="secondary"
-                        className={getStatusColor(request.status)}
-                      >
-                        {request.status}
-                      </Badge>
-                    </div>
+                    <CardTitle>
+                      {request.employee?.full_name || 'Unknown Employee'}
+                    </CardTitle>
+                    <CardDescription>
+                      {format(new Date(request.start_date), 'PPP')} -{' '}
+                      {format(new Date(request.end_date), 'PPP')}
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center text-sm">
-                      <Calendar className="mr-2 h-4 w-4" />
-                      <span>
-                        {new Date(request.startDate).toLocaleDateString()} -{' '}
-                        {new Date(request.endDate).toLocaleDateString()}
-                      </span>
-                    </div>
-                    {request.notes && (
-                      <p className="text-sm text-muted-foreground">{request.notes}</p>
-                    )}
-                    {request.reviewedBy && (
-                      <div className="text-xs text-muted-foreground">
-                        <div className="flex items-center">
-                          <Clock className="mr-1 h-3 w-3" />
-                          Reviewed by {request.reviewedBy} on{' '}
-                          {new Date(request.reviewedAt!).toLocaleDateString()}
-                        </div>
+                  <CardContent>
+                    <div className="grid gap-2">
+                      <div>
+                        <span className="font-medium">Type:</span> {request.type}
                       </div>
-                    )}
+                      {request.notes && (
+                        <div>
+                          <span className="font-medium">Notes:</span>{' '}
+                          {request.notes}
+                        </div>
+                      )}
+                      {request.reviewed_by && (
+                        <div>
+                          <span className="font-medium">Reviewed by:</span>{' '}
+                          {request.reviewer?.full_name || 'Unknown'}
+                        </div>
+                      )}
+                      {request.reviewed_at && (
+                        <div>
+                          <span className="font-medium">Reviewed on:</span>{' '}
+                          {format(new Date(request.reviewed_at), 'PPP')}
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
-                  {request.status === 'Pending' && (
-                    <CardFooter className="flex gap-2 justify-end">
+                  {selectedTab === 'Pending' && (
+                    <CardFooter className="flex justify-end gap-2">
                       <Button
                         variant="outline"
-                        size="sm"
-                        onClick={() => handleUpdateStatus(request.id, 'Declined')}
-                        disabled={loading}
+                        onClick={() =>
+                          handleUpdateStatus(request.id, 'Declined')
+                        }
                       >
                         Decline
                       </Button>
                       <Button
-                        size="sm"
-                        onClick={() => handleUpdateStatus(request.id, 'Approved')}
-                        disabled={loading}
+                        onClick={() =>
+                          handleUpdateStatus(request.id, 'Approved')
+                        }
                       >
                         Approve
                       </Button>
@@ -252,14 +224,14 @@ export default function TimeOffPage() {
                 </Card>
               ))}
             </div>
-          </TabsContent>
-        ))}
+          )}
+        </TabsContent>
       </Tabs>
 
       <TimeOffRequestDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        onSubmit={handleCreateRequest}
+        onSuccess={fetchRequests}
       />
     </div>
   )
