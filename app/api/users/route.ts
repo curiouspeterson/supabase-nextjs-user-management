@@ -13,28 +13,65 @@ export async function GET(request: Request) {
       )
     }
 
+    console.log('Fetching user data for IDs:', userIds)
     const supabase = createAdminClient()
+    
+    // Use the admin API to fetch users
     const { data: { users }, error } = await supabase.auth.admin.listUsers()
 
     if (error) {
+      console.error('Error fetching users:', error)
       return NextResponse.json(
-        { error: error.message },
+        { error: 'Failed to fetch user data' },
         { status: 500 }
       )
     }
 
-    // Filter users by the requested IDs
-    const filteredUsers = users.filter(user => userIds.includes(user.id))
-    const userData = filteredUsers.map(user => ({
-      id: user.id,
-      email: user.email
-    }))
+    console.log('All users from auth:', users.length)
+    
+    // Filter users by the requested IDs and map to the required format
+    const filteredUsers = users
+      .filter(user => {
+        const included = userIds.includes(user.id)
+        const hasEmail = Boolean(user.email)
+        console.log(`User ${user.id}: included=${included}, hasEmail=${hasEmail}, email=${user.email}`)
+        return included && hasEmail
+      })
+      .map(user => ({
+        id: user.id,
+        email: user.email as string
+      }))
+
+    console.log('Filtered users:', filteredUsers)
+
+    // Group users by ID and select the email with a number if available
+    const userMap = new Map<string, { id: string; email: string }>()
+    
+    filteredUsers.forEach((user: { id: string; email: string }) => {
+      if (!user.id || !user.email) return
+
+      const existingUser = userMap.get(user.id)
+      if (!existingUser) {
+        userMap.set(user.id, { id: user.id, email: user.email })
+      } else {
+        // If we have multiple emails for the same user, prefer the one with a number
+        const currentHasNumber = /\.\d+@/.test(existingUser.email)
+        const newHasNumber = /\.\d+@/.test(user.email)
+        
+        if (newHasNumber && !currentHasNumber) {
+          userMap.set(user.id, { id: user.id, email: user.email })
+        }
+      }
+    })
+
+    const userData = Array.from(userMap.values())
+    console.log('Final user data:', userData)
 
     return NextResponse.json(userData)
   } catch (error) {
     console.error('Error fetching users:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Failed to fetch user data' },
       { status: 500 }
     )
   }

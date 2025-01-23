@@ -72,12 +72,12 @@ export function EmployeeDialog({
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      full_name: '',
-      email: '',
-      employee_role: 'Dispatcher',
-      user_role: 'Employee',
-      weekly_hours_scheduled: 0,
-      default_shift_type_id: '',
+      full_name: employee?.profiles?.full_name || '',
+      email: employee?.email || '',
+      employee_role: (employee?.employee_role || 'Dispatcher') as 'Dispatcher' | 'Shift Supervisor' | 'Management',
+      user_role: (employee?.user_role || 'Employee') as 'Employee' | 'Manager' | 'Admin',
+      weekly_hours_scheduled: employee?.weekly_hours_scheduled || 40,
+      default_shift_type_id: employee?.default_shift_type_id || '',
     },
   })
 
@@ -110,13 +110,23 @@ export function EmployeeDialog({
 
   // Reset form when employee changes
   useEffect(() => {
+    console.log('Employee data in dialog:', {
+      id: employee?.id,
+      name: employee?.profiles?.full_name,
+      email: employee?.email,
+      employee_role: employee?.employee_role,
+      user_role: employee?.user_role,
+      weekly_hours_scheduled: employee?.weekly_hours_scheduled,
+      default_shift_type_id: employee?.default_shift_type_id
+    })
+    
     if (employee) {
       form.reset({
         full_name: employee.profiles?.full_name || '',
         email: employee.email || '',
         employee_role: (employee.employee_role || 'Dispatcher') as 'Dispatcher' | 'Shift Supervisor' | 'Management',
         user_role: (employee.user_role || 'Employee') as 'Employee' | 'Manager' | 'Admin',
-        weekly_hours_scheduled: employee.weekly_hours_scheduled || 0,
+        weekly_hours_scheduled: employee.weekly_hours_scheduled || 40,
         default_shift_type_id: employee.default_shift_type_id || ''
       })
     } else {
@@ -127,7 +137,7 @@ export function EmployeeDialog({
         email: '',
         employee_role: 'Dispatcher',
         user_role: 'Employee',
-        weekly_hours_scheduled: 0,
+        weekly_hours_scheduled: 40,
         default_shift_type_id: dayShift?.id || ''
       })
     }
