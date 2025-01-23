@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 import { format } from 'date-fns'
 import { createClient } from '@/utils/supabase/client'
 import { Database } from '@/lib/database.types'
+import { SupabaseClient } from '@supabase/supabase-js'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -25,17 +26,26 @@ import { Loader2 } from 'lucide-react'
 
 type DbTimeOffRequest = Database['public']['Tables']['time_off_requests']['Row']
 
-interface TimeOffRequestResponse extends Omit<DbTimeOffRequest, 'employee_id' | 'reviewed_by'> {
+interface TimeOffRequestResponse extends DbTimeOffRequest {
   employee: {
     id: string
     email: string
-    full_name: string | null
+    profiles: {
+      full_name: string | null
+    }[]
   }
   reviewer: {
     id: string
     email: string
-    full_name: string | null
+    profiles: {
+      full_name: string | null
+    }[]
   } | null
+}
+
+interface UserData {
+  id: string;
+  email: string;
 }
 
 export default function TimeOffPage() {
@@ -45,7 +55,7 @@ export default function TimeOffPage() {
   const [selectedTab, setSelectedTab] = React.useState<TimeOffStatus>('Pending')
   const { user } = useUser()
   const { toast } = useToast()
-  const supabase = createClient()
+  const supabase = createClient() as SupabaseClient<Database>
 
   useEffect(() => {
     fetchRequests()
@@ -54,39 +64,63 @@ export default function TimeOffPage() {
   async function fetchRequests() {
     try {
       setIsLoading(true)
-      const { data, error } = await supabase
+      
+      // First get the time off requests
+      const { data: requests, error: requestsError } = await supabase
         .from('time_off_requests')
-        .select(`
-          *,
-          employee:employee_id(
-            id,
-            email,
-            full_name
-          ),
-          reviewer:reviewed_by(
-            id,
-            email,
-            full_name
-          )
-        `)
+        .select('*')
         .order('submitted_at', { ascending: false })
 
-      if (error) {
-        throw error
-      }
+      if (requestsError) throw requestsError
+
+      // Get all unique user IDs from the requests
+      const userIds = new Set([
+        ...requests.map(r => r.employee_id),
+        ...requests.filter(r => r.reviewed_by).map(r => r.reviewed_by)
+      ])
+
+      // Get user profiles for all users
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', Array.from(userIds))
+
+      if (profilesError) throw profilesError
+
+      // Get user emails from auth.users using rpc
+      const { data: users, error: usersError } = await supabase
+        .rpc('get_users_by_ids', {
+          user_ids: Array.from(userIds)
+        })
+
+      if (usersError) throw usersError
+
+      // Create lookup maps for profiles and users
+      const profileMap = new Map(profiles.map(p => [p.id, p]))
+      const userMap = new Map((users as UserData[]).map(u => [u.id, u]))
 
       // Transform the data to match our expected types
-      const transformedData: TimeOffRequestWithReviewer[] = (data as TimeOffRequestResponse[]).map(request => ({
-        ...request,
+      const transformedData: TimeOffRequestWithReviewer[] = requests.map(request => ({
+        id: request.id,
+        type: request.type,
+        status: request.status,
+        start_date: request.start_date,
+        end_date: request.end_date,
+        notes: request.notes,
+        reviewed_by: request.reviewed_by,
+        reviewed_at: request.reviewed_at,
+        submitted_at: request.submitted_at,
+        created_at: request.created_at,
+        updated_at: request.updated_at,
         employee: {
-          id: request.employee.id,
-          email: request.employee.email,
-          full_name: request.employee.full_name ?? ''
+          id: request.employee_id,
+          email: userMap.get(request.employee_id)?.email ?? '',
+          full_name: profileMap.get(request.employee_id)?.full_name ?? ''
         },
-        reviewer: request.reviewer ? {
-          id: request.reviewer.id,
-          email: request.reviewer.email,
-          full_name: request.reviewer.full_name ?? ''
+        reviewer: request.reviewed_by ? {
+          id: request.reviewed_by,
+          email: userMap.get(request.reviewed_by)?.email ?? '',
+          full_name: profileMap.get(request.reviewed_by)?.full_name ?? ''
         } : null
       }))
 
