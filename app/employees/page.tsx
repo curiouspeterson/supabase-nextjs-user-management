@@ -72,7 +72,25 @@ export default function EmployeesPage() {
         .returns<Employee[]>()
 
       if (employeesError) throw employeesError
-      setEmployees(employeesData || [])
+
+      // Get user emails from API
+      const userIds = employeesData?.map(employee => employee.id) || []
+      const usersResponse = await fetch(`/api/users?ids=${userIds.join(',')}`)
+      if (!usersResponse.ok) {
+        throw new Error('Failed to fetch user data')
+      }
+      const usersData = await usersResponse.json()
+
+      // Create a map of user IDs to emails
+      const userEmailMap = new Map(usersData.map((user: { id: string, email: string }) => [user.id, user.email]))
+
+      // Add emails to employee data
+      const employeesWithEmail = employeesData?.map(employee => ({
+        ...employee,
+        email: userEmailMap.get(employee.id) || ''
+      })) || []
+
+      setEmployees(employeesWithEmail)
     } catch (err) {
       console.error('Error:', err)
       setError('An error occurred while loading the page')

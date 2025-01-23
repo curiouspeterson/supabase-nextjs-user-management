@@ -119,6 +119,7 @@ SET default_tablespace = '';
 SET default_table_access_method = "heap";
 
 
+-- Create all tables first
 CREATE TABLE IF NOT EXISTS "public"."employees" (
     "id" "uuid" NOT NULL,
     "employee_role" "text" NOT NULL,
@@ -129,10 +130,6 @@ CREATE TABLE IF NOT EXISTS "public"."employees" (
     CONSTRAINT "employees_user_role_check" CHECK (("user_role" = ANY (ARRAY['Employee'::"text", 'Manager'::"text", 'Admin'::"text"])))
 );
 
-
-ALTER TABLE "public"."employees" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "id" "uuid" NOT NULL,
     "updated_at" timestamp with time zone,
@@ -141,10 +138,6 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "avatar_url" "text",
     "website" "text"
 );
-
-
-ALTER TABLE "public"."profiles" OWNER TO "postgres";
-
 
 CREATE TABLE IF NOT EXISTS "public"."schedules" (
     "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
@@ -157,20 +150,12 @@ CREATE TABLE IF NOT EXISTS "public"."schedules" (
     CONSTRAINT "schedules_schedule_status_check" CHECK (("schedule_status" = ANY (ARRAY['Draft'::"text", 'Published'::"text"])))
 );
 
-
-ALTER TABLE "public"."schedules" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."shift_types" (
     "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
     "name" "text" NOT NULL,
     "description" "text",
     "created_at" timestamp with time zone DEFAULT "now"()
 );
-
-
-ALTER TABLE "public"."shift_types" OWNER TO "postgres";
-
 
 CREATE TABLE IF NOT EXISTS "public"."shifts" (
     "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
@@ -182,10 +167,6 @@ CREATE TABLE IF NOT EXISTS "public"."shifts" (
     CONSTRAINT "shifts_duration_category_check" CHECK (("duration_category" = ANY (ARRAY['4 hours'::"text", '10 hours'::"text", '12 hours'::"text"])))
 );
 
-
-ALTER TABLE "public"."shifts" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."staffing_requirements" (
     "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
     "period_name" "text" NOT NULL,
@@ -193,10 +174,6 @@ CREATE TABLE IF NOT EXISTS "public"."staffing_requirements" (
     "end_time" time without time zone NOT NULL,
     "minimum_employees" integer NOT NULL
 );
-
-
-ALTER TABLE "public"."staffing_requirements" OWNER TO "postgres";
-
 
 CREATE TABLE IF NOT EXISTS "public"."time_off_requests" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
@@ -215,222 +192,149 @@ CREATE TABLE IF NOT EXISTS "public"."time_off_requests" (
     CONSTRAINT "time_off_requests_type_check" CHECK (("type" = ANY (ARRAY['Vacation'::"text", 'Sick'::"text", 'Personal'::"text", 'Training'::"text"])))
 );
 
-
-ALTER TABLE "public"."time_off_requests" OWNER TO "postgres";
-
-
+-- Add all constraints
 ALTER TABLE ONLY "public"."employees"
     ADD CONSTRAINT "employees_pkey" PRIMARY KEY ("id");
-
-
 
 ALTER TABLE ONLY "public"."profiles"
     ADD CONSTRAINT "profiles_pkey" PRIMARY KEY ("id");
 
-
-
 ALTER TABLE ONLY "public"."profiles"
     ADD CONSTRAINT "profiles_username_key" UNIQUE ("username");
-
-
 
 ALTER TABLE ONLY "public"."schedules"
     ADD CONSTRAINT "schedules_pkey" PRIMARY KEY ("id");
 
-
-
 ALTER TABLE ONLY "public"."shift_types"
     ADD CONSTRAINT "shift_types_pkey" PRIMARY KEY ("id");
-
-
 
 ALTER TABLE ONLY "public"."shifts"
     ADD CONSTRAINT "shifts_pkey" PRIMARY KEY ("id");
 
-
-
 ALTER TABLE ONLY "public"."staffing_requirements"
     ADD CONSTRAINT "staffing_requirements_pkey" PRIMARY KEY ("id");
-
-
 
 ALTER TABLE ONLY "public"."time_off_requests"
     ADD CONSTRAINT "time_off_requests_pkey" PRIMARY KEY ("id");
 
-
-
-CREATE OR REPLACE TRIGGER "update_time_off_trigger" BEFORE UPDATE ON "public"."time_off_requests" FOR EACH ROW EXECUTE FUNCTION "public"."update_time_off_update"();
-
-
-
+-- Add all foreign key constraints
 ALTER TABLE ONLY "public"."employees"
     ADD CONSTRAINT "employees_default_shift_type_id_fkey" FOREIGN KEY ("default_shift_type_id") REFERENCES "public"."shift_types"("id");
-
-
 
 ALTER TABLE ONLY "public"."employees"
     ADD CONSTRAINT "employees_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
 
-
-
 ALTER TABLE ONLY "public"."schedules"
     ADD CONSTRAINT "fk_employee_profile" FOREIGN KEY ("employee_id") REFERENCES "public"."profiles"("id");
-
-
 
 ALTER TABLE ONLY "public"."employees"
     ADD CONSTRAINT "fk_profile" FOREIGN KEY ("id") REFERENCES "public"."profiles"("id");
 
-
-
 ALTER TABLE ONLY "public"."profiles"
     ADD CONSTRAINT "profiles_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
-
-
 
 ALTER TABLE ONLY "public"."schedules"
     ADD CONSTRAINT "schedules_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES "public"."employees"("id");
 
-
-
 ALTER TABLE ONLY "public"."schedules"
     ADD CONSTRAINT "schedules_shift_id_fkey" FOREIGN KEY ("shift_id") REFERENCES "public"."shifts"("id");
-
-
 
 ALTER TABLE ONLY "public"."shifts"
     ADD CONSTRAINT "shifts_shift_type_id_fkey" FOREIGN KEY ("shift_type_id") REFERENCES "public"."shift_types"("id");
 
-
-
 ALTER TABLE ONLY "public"."time_off_requests"
     ADD CONSTRAINT "time_off_requests_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES "auth"."users"("id");
-
-
 
 ALTER TABLE ONLY "public"."time_off_requests"
     ADD CONSTRAINT "time_off_requests_reviewed_by_fkey" FOREIGN KEY ("reviewed_by") REFERENCES "auth"."users"("id");
 
+-- Enable RLS on all tables
+ALTER TABLE "public"."employees" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."profiles" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."schedules" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."shift_types" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."shifts" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."staffing_requirements" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."time_off_requests" ENABLE ROW LEVEL SECURITY;
 
+-- Create policies that don't depend on employees table
+CREATE POLICY "Users can insert own profile" ON "public"."profiles" FOR INSERT WITH CHECK (("auth"."uid"() = "id"));
+CREATE POLICY "Users can update own profile" ON "public"."profiles" FOR UPDATE USING (("auth"."uid"() = "id")) WITH CHECK (("auth"."uid"() = "id"));
+CREATE POLICY "Users can update their own profile" ON "public"."profiles" FOR UPDATE USING (("auth"."uid"() = "id"));
+CREATE POLICY "Users can view own profile" ON "public"."profiles" FOR SELECT USING (("auth"."uid"() = "id"));
+CREATE POLICY "Users can view their own profile" ON "public"."profiles" FOR SELECT USING (("auth"."uid"() = "id"));
+CREATE POLICY "Users can create their own time off requests" ON "public"."time_off_requests" FOR INSERT WITH CHECK (("auth"."uid"() = "employee_id"));
+CREATE POLICY "Users can view their own time off requests" ON "public"."time_off_requests" FOR SELECT USING (("auth"."uid"() = "employee_id"));
+
+-- Create policies that depend on employees table
+CREATE POLICY "Managers and admins can manage all records" ON "public"."employees" USING ("auth"."check_user_role"("auth"."uid"()));
+CREATE POLICY "Users can update their own record" ON "public"."employees" FOR UPDATE USING (("auth"."uid"() = "id"));
+CREATE POLICY "Authenticated users can view employees" ON "public"."employees" FOR SELECT USING (("auth"."role"() = 'authenticated'::"text"));
+
+CREATE POLICY "Managers can update employee records" ON "public"."employees" FOR UPDATE USING (
+  EXISTS (
+    SELECT 1 FROM public.employees
+    WHERE id = auth.uid()
+    AND user_role IN ('Manager', 'Admin')
+  )
+);
+
+CREATE POLICY "Managers can manage all schedules" ON "public"."schedules" USING ("auth"."check_user_role"("auth"."uid"()));
+CREATE POLICY "Users can view their own schedules" ON "public"."schedules" FOR SELECT USING (("auth"."uid"() = "employee_id"));
+
+CREATE POLICY "Managers can manage shift types" ON "public"."shift_types" USING (
+  EXISTS (
+    SELECT 1 FROM public.employees
+    WHERE id = auth.uid()
+    AND user_role IN ('Manager', 'Admin')
+  )
+);
 
 CREATE POLICY "Anyone can view shift types" ON "public"."shift_types" FOR SELECT USING (true);
 
-
+CREATE POLICY "Managers can manage shifts" ON "public"."shifts" USING (
+  EXISTS (
+    SELECT 1 FROM public.employees
+    WHERE id = auth.uid()
+    AND user_role IN ('Manager', 'Admin')
+  )
+);
 
 CREATE POLICY "Anyone can view shifts" ON "public"."shifts" FOR SELECT USING (true);
 
-
+CREATE POLICY "Managers can manage staffing requirements" ON "public"."staffing_requirements" USING (
+  EXISTS (
+    SELECT 1 FROM public.employees
+    WHERE id = auth.uid()
+    AND user_role IN ('Manager', 'Admin')
+  )
+);
 
 CREATE POLICY "Anyone can view staffing requirements" ON "public"."staffing_requirements" FOR SELECT USING (true);
 
-
-
-CREATE POLICY "Authenticated users can view employees" ON "public"."employees" FOR SELECT USING (("auth"."role"() = 'authenticated'::"text"));
-
-
-
-CREATE POLICY "Managers and admins can manage all records" ON "public"."employees" USING ("auth"."check_user_role"("auth"."uid"()));
-
-
-
-CREATE POLICY "Managers can manage all schedules" ON "public"."schedules" USING ("auth"."check_user_role"("auth"."uid"()));
-
-
-
-CREATE POLICY "Managers can manage shift types" ON "public"."shift_types" USING ((EXISTS ( SELECT 1
-   FROM "public"."employees"
-  WHERE (("employees"."id" = "auth"."uid"()) AND ("employees"."user_role" = ANY (ARRAY['Manager'::"text", 'Admin'::"text"]))))));
-
-
-
-CREATE POLICY "Managers can manage shifts" ON "public"."shifts" USING ((EXISTS ( SELECT 1
-   FROM "public"."employees"
-  WHERE (("employees"."id" = "auth"."uid"()) AND ("employees"."user_role" = ANY (ARRAY['Manager'::"text", 'Admin'::"text"]))))));
-
-
-
-CREATE POLICY "Managers can manage staffing requirements" ON "public"."staffing_requirements" USING ((EXISTS ( SELECT 1
-   FROM "public"."employees"
-  WHERE (("employees"."id" = "auth"."uid"()) AND ("employees"."user_role" = ANY (ARRAY['Manager'::"text", 'Admin'::"text"]))))));
-
-
-
-CREATE POLICY "Managers can update time off request status" ON "public"."time_off_requests" FOR UPDATE USING ((EXISTS ( SELECT 1
-   FROM "public"."employees"
-  WHERE (("employees"."id" = "auth"."uid"()) AND ("employees"."user_role" = ANY (ARRAY['Manager'::"text", 'Admin'::"text"]))))));
-
-
-
-CREATE POLICY "Managers can view all profiles" ON "public"."profiles" FOR SELECT USING ((EXISTS ( SELECT 1
-   FROM "public"."employees"
-  WHERE (("employees"."id" = "auth"."uid"()) AND ("employees"."user_role" = ANY (ARRAY['Manager'::"text", 'Admin'::"text"]))))));
-
-
-
-CREATE POLICY "Managers can view all time off requests" ON "public"."time_off_requests" FOR SELECT USING ((EXISTS ( SELECT 1
-   FROM "public"."employees"
-  WHERE (("employees"."id" = "auth"."uid"()) AND ("employees"."user_role" = ANY (ARRAY['Manager'::"text", 'Admin'::"text"]))))));
-
-
-
-CREATE POLICY "Users can create their own time off requests" ON "public"."time_off_requests" FOR INSERT WITH CHECK (("auth"."uid"() = "employee_id"));
-
-
-
-CREATE POLICY "Users can insert own profile" ON "public"."profiles" FOR INSERT WITH CHECK (("auth"."uid"() = "id"));
-
-
-
-CREATE POLICY "Users can update own profile" ON "public"."profiles" FOR UPDATE USING (("auth"."uid"() = "id")) WITH CHECK (("auth"."uid"() = "id"));
-
-
-
-CREATE POLICY "Users can update their own profile" ON "public"."profiles" FOR UPDATE USING (("auth"."uid"() = "id"));
-
-
-
-CREATE POLICY "Users can update their own record" ON "public"."employees" FOR UPDATE USING (("auth"."uid"() = "id"));
-
-
-
-CREATE POLICY "Users can view own profile" ON "public"."profiles" FOR SELECT USING (("auth"."uid"() = "id"));
-
-
-
-CREATE POLICY "Users can view their own profile" ON "public"."profiles" FOR SELECT USING (("auth"."uid"() = "id"));
-
-
-
-CREATE POLICY "Users can view their own schedules" ON "public"."schedules" FOR SELECT USING (("auth"."uid"() = "employee_id"));
-
-
-
-CREATE POLICY "Users can view their own time off requests" ON "public"."time_off_requests" FOR SELECT USING (("auth"."uid"() = "employee_id"));
-
-
-
-ALTER TABLE "public"."employees" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."profiles" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."schedules" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."shift_types" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."shifts" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."staffing_requirements" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."time_off_requests" ENABLE ROW LEVEL SECURITY;
-
-
-
+CREATE POLICY "Managers can update time off request status" ON "public"."time_off_requests" FOR UPDATE USING (
+  EXISTS (
+    SELECT 1 FROM public.employees
+    WHERE id = auth.uid()
+    AND user_role IN ('Manager', 'Admin')
+  )
+);
+
+CREATE POLICY "Managers can view all time off requests" ON "public"."time_off_requests" FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.employees
+    WHERE id = auth.uid()
+    AND user_role IN ('Manager', 'Admin')
+  )
+);
+
+CREATE POLICY "Managers can view all profiles" ON "public"."profiles" FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.employees
+    WHERE id = auth.uid()
+    AND user_role IN ('Manager', 'Admin')
+  )
+);
 
 ALTER PUBLICATION "supabase_realtime" OWNER TO "postgres";
 

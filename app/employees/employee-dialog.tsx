@@ -149,51 +149,20 @@ export function EmployeeDialog({
         // Update existing employee
         console.log('Starting update for employee:', employee.id)
         
-        // Update profile (remove email from profile update)
-        console.log('Updating profile with:', { 
-          full_name: values.full_name,
-          updated_at: new Date().toISOString()
-        })
-        
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .update({ 
-            full_name: values.full_name,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', employee.id)
-          .select()
-
-        if (profileError) {
-          console.error('Error updating profile:', profileError)
-          throw new Error(`Failed to update profile: ${profileError.message}`)
-        }
-        console.log('Profile updated successfully:', profileData)
-
-        // Update employee
-        console.log('Updating employee with:', {
-          employee_role: values.employee_role,
-          user_role: values.user_role,
-          weekly_hours_scheduled: values.weekly_hours_scheduled,
-          default_shift_type_id: values.default_shift_type_id,
+        const { data, error } = await supabase.rpc('update_employee_and_profile', {
+          p_employee_id: employee.id,
+          p_full_name: values.full_name,
+          p_employee_role: values.employee_role,
+          p_user_role: values.user_role,
+          p_weekly_hours_scheduled: values.weekly_hours_scheduled,
+          p_default_shift_type_id: values.default_shift_type_id
         })
 
-        const { data: employeeData, error: employeeError } = await supabase
-          .from('employees')
-          .update({
-            employee_role: values.employee_role,
-            user_role: values.user_role,
-            weekly_hours_scheduled: values.weekly_hours_scheduled,
-            default_shift_type_id: values.default_shift_type_id,
-          })
-          .eq('id', employee.id)
-          .select()
-
-        if (employeeError) {
-          console.error('Error updating employee:', employeeError)
-          throw new Error(`Failed to update employee: ${employeeError.message}`)
+        if (error) {
+          console.error('Error updating employee:', error)
+          throw new Error(`Failed to update employee: ${error.message}`)
         }
-        console.log('Employee updated successfully:', employeeData)
+        console.log('Employee updated successfully:', data)
       } else {
         // Create new employee
         console.log('Creating new employee')

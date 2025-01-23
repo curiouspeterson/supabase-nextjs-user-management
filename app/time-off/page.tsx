@@ -26,6 +26,11 @@ import { Loader2 } from 'lucide-react'
 
 type DbTimeOffRequest = Database['public']['Tables']['time_off_requests']['Row']
 
+interface UserData {
+  id: string;
+  email: string;
+}
+
 interface TimeOffRequestResponse extends DbTimeOffRequest {
   employee: {
     id: string
@@ -41,11 +46,6 @@ interface TimeOffRequestResponse extends DbTimeOffRequest {
       full_name: string | null
     }[]
   } | null
-}
-
-interface UserData {
-  id: string;
-  email: string;
 }
 
 export default function TimeOffPage() {
@@ -87,17 +87,17 @@ export default function TimeOffPage() {
 
       if (profilesError) throw profilesError
 
-      // Get user emails from auth.users using rpc
-      const { data: users, error: usersError } = await supabase
-        .rpc('get_users_by_ids', {
-          user_ids: Array.from(userIds)
-        })
-
-      if (usersError) throw usersError
+      // Get user emails from API
+      const userIdsArray = Array.from(userIds)
+      const usersResponse = await fetch(`/api/users?ids=${userIdsArray.join(',')}`)
+      if (!usersResponse.ok) {
+        throw new Error('Failed to fetch user data')
+      }
+      const users: UserData[] = await usersResponse.json()
 
       // Create lookup maps for profiles and users
       const profileMap = new Map(profiles.map(p => [p.id, p]))
-      const userMap = new Map((users as UserData[]).map(u => [u.id, u]))
+      const userMap = new Map(users.map(u => [u.id, u]))
 
       // Transform the data to match our expected types
       const transformedData: TimeOffRequestWithReviewer[] = requests.map(request => ({
@@ -183,7 +183,10 @@ export default function TimeOffPage() {
         <Button onClick={() => setDialogOpen(true)}>Request Time Off</Button>
       </div>
 
-      <Tabs value={selectedTab} onValueChange={(value: TimeOffStatus) => setSelectedTab(value)}>
+      <Tabs 
+        value={selectedTab} 
+        onValueChange={(value) => setSelectedTab(value as TimeOffStatus)}
+      >
         <TabsList>
           <TabsTrigger value="Pending">Pending</TabsTrigger>
           <TabsTrigger value="Approved">Approved</TabsTrigger>
