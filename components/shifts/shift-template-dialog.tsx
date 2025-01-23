@@ -15,28 +15,45 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { createClient } from '@/utils/supabase/client'
 
 const shiftSchema = z.object({
-  shift_name: z.string().min(1, 'Shift name is required'),
+  shift_type_id: z.string().min(1, 'Shift type is required'),
   start_time: z.string().min(1, 'Start time is required'),
   end_time: z.string().min(1, 'End time is required'),
+  duration_category: z.string().min(1, 'Duration is required'),
 })
 
 type ShiftFormData = z.infer<typeof shiftSchema>
+
+interface ShiftType {
+  id: string
+  name: string
+  description: string | null
+}
 
 interface ShiftTemplateDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   shift?: {
     id: string
-    shift_name: string
+    shift_type_id: string
     start_time: string
     end_time: string
     duration_hours: number
+    duration_category: string
   }
   onSuccess?: () => void
 }
+
+const DURATION_CATEGORIES = ['4 hours', '10 hours', '12 hours'] as const
 
 export function ShiftTemplateDialog({
   open,
@@ -45,30 +62,53 @@ export function ShiftTemplateDialog({
   onSuccess,
 }: ShiftTemplateDialogProps) {
   const [loading, setLoading] = useState(false)
+  const [shiftTypes, setShiftTypes] = useState<ShiftType[]>([])
   const supabase = createClient()
 
   const form = useForm<ShiftFormData>({
     resolver: zodResolver(shiftSchema),
     defaultValues: {
-      shift_name: '',
+      shift_type_id: '',
       start_time: '',
       end_time: '',
+      duration_category: '',
     },
   })
+
+  // Load shift types
+  useEffect(() => {
+    async function loadShiftTypes() {
+      const { data, error } = await supabase
+        .from('shift_types')
+        .select('*')
+        .order('name')
+      
+      if (error) {
+        console.error('Error loading shift types:', error)
+        return
+      }
+      
+      setShiftTypes(data)
+    }
+    
+    loadShiftTypes()
+  }, [supabase])
 
   // Reset form when shift changes
   useEffect(() => {
     if (shift) {
       form.reset({
-        shift_name: shift.shift_name,
+        shift_type_id: shift.shift_type_id,
         start_time: shift.start_time,
         end_time: shift.end_time,
+        duration_category: shift.duration_category,
       })
     } else {
       form.reset({
-        shift_name: '',
+        shift_type_id: '',
         start_time: '',
         end_time: '',
+        duration_category: '',
       })
     }
   }, [shift, form])
@@ -127,15 +167,48 @@ export function ShiftTemplateDialog({
         </DialogHeader>
         <form onSubmit={form.handleSubmit(handleSubmit)} className="grid gap-4 py-4">
           <div className="grid gap-2">
-            <Label htmlFor="shift_name">Shift Name</Label>
-            <Input
-              id="shift_name"
-              placeholder="e.g., Day Shift"
-              {...form.register('shift_name')}
-            />
-            {form.formState.errors.shift_name && (
+            <Label htmlFor="shift_type_id">Shift Type</Label>
+            <Select
+              defaultValue={form.getValues('shift_type_id')}
+              onValueChange={(value) => form.setValue('shift_type_id', value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a shift type" />
+              </SelectTrigger>
+              <SelectContent>
+                {shiftTypes.map((type) => (
+                  <SelectItem key={type.id} value={type.id}>
+                    {type.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {form.formState.errors.shift_type_id && (
               <p className="text-sm text-red-500">
-                {form.formState.errors.shift_name.message}
+                {form.formState.errors.shift_type_id.message}
+              </p>
+            )}
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="duration_category">Duration</Label>
+            <Select
+              defaultValue={form.getValues('duration_category')}
+              onValueChange={(value) => form.setValue('duration_category', value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select duration" />
+              </SelectTrigger>
+              <SelectContent>
+                {DURATION_CATEGORIES.map((duration) => (
+                  <SelectItem key={duration} value={duration}>
+                    {duration}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {form.formState.errors.duration_category && (
+              <p className="text-sm text-red-500">
+                {form.formState.errors.duration_category.message}
               </p>
             )}
           </div>

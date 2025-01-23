@@ -15,34 +15,47 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { ShiftTemplateDialog } from '@/components/shifts/shift-template-dialog'
 
-interface ShiftTemplate {
+interface Shift {
   id: string
-  shift_name: string
   start_time: string
   end_time: string
   duration_hours: number
+  duration_category: string
+  shift_type_id: string
+}
+
+interface ShiftType {
+  id: string
+  name: string
+  description: string | null
+  shifts: Shift[]
 }
 
 export default function ShiftsPage() {
-  const [shifts, setShifts] = useState<ShiftTemplate[]>([])
+  const [shiftTypes, setShiftTypes] = useState<ShiftType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [selectedShift, setSelectedShift] = useState<ShiftTemplate | undefined>()
+  const [selectedShift, setSelectedShift] = useState<Shift | undefined>()
   const supabase = createClient()
 
-  const fetchShifts = useCallback(async () => {
+  const fetchShiftTypes = useCallback(async () => {
     try {
       const { data, error } = await supabase
-        .from('shifts')
-        .select('*')
-        .order('start_time')
+        .from('shift_types')
+        .select(`
+          *,
+          shifts (
+            *
+          )
+        `)
+        .order('name')
 
       if (error) {
         throw error
       }
 
-      setShifts(data)
+      setShiftTypes(data)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'An error occurred while fetching shifts')
     } finally {
@@ -51,8 +64,8 @@ export default function ShiftsPage() {
   }, [supabase])
 
   useEffect(() => {
-    fetchShifts()
-  }, [fetchShifts])
+    fetchShiftTypes()
+  }, [fetchShiftTypes])
 
   const handleDelete = async (id: string) => {
     try {
@@ -63,7 +76,7 @@ export default function ShiftsPage() {
         throw error
       }
 
-      await fetchShifts()
+      await fetchShiftTypes()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'An error occurred while deleting the shift')
     } finally {
@@ -116,52 +129,63 @@ export default function ShiftsPage() {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {shifts.map((shift) => (
-          <Card key={shift.id}>
-            <CardHeader>
-              <CardTitle>{shift.shift_name}</CardTitle>
-              <CardDescription>
-                {formatTime(shift.start_time)} - {formatTime(shift.end_time)}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary">
-                  {shift.duration_hours} hours
-                </Badge>
-              </div>
-            </CardContent>
-            <CardFooter className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setSelectedShift(shift)
-                  setDialogOpen(true)
-                }}
-                disabled={loading}
-              >
-                Edit
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => handleDelete(shift.id)}
-                disabled={loading}
-              >
-                Delete
-              </Button>
-            </CardFooter>
-          </Card>
-        ))}
-      </div>
+      {shiftTypes.map((shiftType) => (
+        <div key={shiftType.id} className="space-y-4">
+          <h2 className="text-xl font-semibold">{shiftType.name}</h2>
+          {shiftType.description && (
+            <p className="text-sm text-muted-foreground">{shiftType.description}</p>
+          )}
+          
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {shiftType.shifts.map((shift) => (
+              <Card key={shift.id}>
+                <CardHeader>
+                  <CardTitle>
+                    {shift.duration_category}
+                  </CardTitle>
+                  <CardDescription>
+                    {formatTime(shift.start_time)} - {formatTime(shift.end_time)}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">
+                      {shift.duration_hours} hours
+                    </Badge>
+                  </div>
+                </CardContent>
+                <CardFooter className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedShift(shift)
+                      setDialogOpen(true)
+                    }}
+                    disabled={loading}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => handleDelete(shift.id)}
+                    disabled={loading}
+                  >
+                    Delete
+                  </Button>
+                </CardFooter>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ))}
 
       <ShiftTemplateDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         shift={selectedShift}
-        onSuccess={fetchShifts}
+        onSuccess={fetchShiftTypes}
       />
     </div>
   )
