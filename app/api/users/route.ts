@@ -19,6 +19,7 @@ export async function GET(request: Request) {
     const { data: { users }, error } = await supabase.auth.admin.listUsers()
 
     if (error) {
+      console.error('Error fetching users:', error.message)
       return NextResponse.json(
         { error: 'Failed to fetch user data' },
         { status: 500 }
@@ -58,9 +59,10 @@ export async function GET(request: Request) {
     })
 
     const userData = Array.from(userMap.values())
-
     return NextResponse.json(userData)
+
   } catch (error) {
+    console.error('Unexpected error in users route:', error instanceof Error ? error.message : 'Unknown error')
     return NextResponse.json(
       { error: 'Failed to fetch user data' },
       { status: 500 }

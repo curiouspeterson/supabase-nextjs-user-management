@@ -1,43 +1,42 @@
-import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
 
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {
   try {
-    // Create a service role client for all operations
-    const supabase = createClient(
+    const cookieStore = cookies()
+    
+    const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value
+          },
+          set(name: string, value: string, options: any) {
+            cookieStore.set({ name, value, ...options })
+          },
+          remove(name: string, options: any) {
+            cookieStore.set({ name, value: '', ...options })
+          },
+        },
       }
     )
+    
+    // Get the authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
 
-    // Get the JWT token from the request header
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader?.startsWith('Bearer ')) {
+    if (authError || !user) {
+      console.error('Auth error:', authError)
       return NextResponse.json(
-        { error: 'Unauthorized - Invalid auth header' },
+        { error: 'Unauthorized', details: authError?.message },
         { status: 401 }
       )
     }
 
-    // Get user from the token
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token)
-
-    if (userError || !user) {
-      console.error('Auth error:', userError)
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token', details: userError?.message },
-        { status: 401 }
-      )
-    }
-
-    // Check if user has admin role using service role client
+    // Check if user has admin role
     const { data: employeeData, error: employeeError } = await supabase
       .from('employees')
       .select('user_role')
@@ -59,9 +58,11 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
       )
     }
 
-    // Call the transaction function to delete the employee
-    const { data, error: deleteError } = await supabase
-      .rpc('delete_employee_transaction', params.id)
+    // Delete the employee directly
+    const { error: deleteError } = await supabase
+      .from('employees')
+      .delete()
+      .eq('id', params.id)
 
     if (deleteError) {
       console.error('Error deleting employee:', deleteError)
