@@ -1,24 +1,43 @@
-import { createClient } from '@/utils/supabase/server'
+import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {
   try {
-    const supabase = createClient()
+    // Create a service role client for all operations
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    )
 
-    // Check if user is authenticated and has admin role
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
+    // Get the JWT token from the request header
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json(
-        { error: 'Unauthorized - User not authenticated' },
+        { error: 'Unauthorized - Invalid auth header' },
         { status: 401 }
       )
     }
 
-    // Check if user has admin role
+    // Get user from the token
+    const token = authHeader.replace('Bearer ', '')
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token)
+
+    if (userError || !user) {
+      console.error('Auth error:', userError)
+      return NextResponse.json(
+        { error: 'Unauthorized - Invalid token', details: userError?.message },
+        { status: 401 }
+      )
+    }
+
+    // Check if user has admin role using service role client
     const { data: employeeData, error: employeeError } = await supabase
       .from('employees')
       .select('user_role')
@@ -26,8 +45,9 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
       .single()
 
     if (employeeError || !employeeData) {
+      console.error('Employee lookup error:', employeeError)
       return NextResponse.json(
-        { error: 'Unauthorized - Employee not found' },
+        { error: 'Unauthorized - Employee not found', details: employeeError?.message },
         { status: 401 }
       )
     }
@@ -41,11 +61,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
 
     // Call the transaction function to delete the employee
     const { data, error: deleteError } = await supabase
-      .rpc('delete_employee_transaction', {
-        p_employee_id: params.id
-      }, {
-        head: false // Ensure we get the full response
-      })
+      .rpc('delete_employee_transaction', params.id)
 
     if (deleteError) {
       console.error('Error deleting employee:', deleteError)
