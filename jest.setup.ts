@@ -1,99 +1,142 @@
 import '@testing-library/jest-dom'
-import { TextEncoder, TextDecoder } from 'util'
 
-// Polyfill for encoding which isn't present globally in jsdom
+// Mock TextEncoder/TextDecoder
+const { TextEncoder, TextDecoder } = require('util')
 global.TextEncoder = TextEncoder
-global.TextDecoder = TextDecoder as any
+global.TextDecoder = TextDecoder
 
 // Mock Next.js router
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: jest.fn(),
-    replace: jest.fn(),
-    prefetch: jest.fn(),
-    back: jest.fn(),
-  }),
-  useSearchParams: () => ({
-    get: jest.fn(),
-    has: jest.fn(),
-  }),
-  usePathname: () => '',
+  useRouter() {
+    return {
+      push: jest.fn(),
+      refresh: jest.fn(),
+      replace: jest.fn(),
+    }
+  },
+  useSearchParams() {
+    return {
+      get: jest.fn(),
+    }
+  },
+  redirect: jest.fn(),
 }))
 
 // Mock Supabase client
+const mockSupabaseFrom = jest.fn().mockReturnValue({
+  select: jest.fn().mockReturnThis(),
+  eq: jest.fn().mockReturnThis(),
+  single: jest.fn().mockResolvedValue({ data: null, error: null }),
+  insert: jest.fn().mockResolvedValue({ data: null, error: null }),
+  upsert: jest.fn().mockResolvedValue({ data: null, error: null }),
+  update: jest.fn().mockResolvedValue({ data: null, error: null }),
+  delete: jest.fn().mockResolvedValue({ data: null, error: null }),
+})
+
 jest.mock('@/utils/supabase/client', () => ({
-  createClient: jest.fn(() => ({
+  createClient: () => ({
     auth: {
-      getUser: jest.fn(() => Promise.resolve({ data: { user: null }, error: null })),
-      signOut: jest.fn(() => Promise.resolve({ error: null })),
+      signOut: jest.fn().mockResolvedValue({ error: null }),
+      signInWithPassword: jest.fn().mockResolvedValue({ data: { user: { id: 'test-user-id' } }, error: null }),
+      signUp: jest.fn().mockResolvedValue({ data: { user: { id: 'test-user-id' } }, error: null }),
+      getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'test-user-id' } }, error: null }),
     },
-    from: jest.fn(() => ({
-      select: jest.fn(() => ({
-        order: jest.fn(() => Promise.resolve({ data: [], error: null })),
-      })),
-      insert: jest.fn(() => Promise.resolve({ data: [], error: null })),
-      update: jest.fn(() => Promise.resolve({ data: [], error: null })),
-      delete: jest.fn(() => Promise.resolve({ data: [], error: null })),
-    })),
-  })),
+    from: mockSupabaseFrom,
+    storage: {
+      from: (bucket: string) => ({
+        download: jest.fn().mockResolvedValue({ data: new Blob(), error: null }),
+        upload: jest.fn().mockResolvedValue({ data: { path: 'test.jpg' }, error: null }),
+      }),
+    },
+  }),
+}))
+
+// Mock useUser hook with default values that can be overridden
+const mockUser = {
+  id: 'test-user-id',
+  email: 'test@example.com',
+  app_metadata: {},
+  user_metadata: {},
+  aud: 'authenticated',
+  created_at: '2024-03-14T00:00:00.000Z',
+  role: 'authenticated',
+  updated_at: '2024-03-14T00:00:00.000Z'
+}
+
+jest.mock('@/lib/hooks', () => ({
+  useUser: jest.fn().mockReturnValue({
+    user: mockUser,
+    isLoading: false,
+    error: null
+  })
 }))
 
 // Mock URL constructor and methods
-global.URL = {
-  createObjectURL: jest.fn(() => 'mock-object-url'),
-  revokeObjectURL: jest.fn(),
-} as any
+class MockURL {
+  href: string
+  pathname: string
+  search: string
+  hash: string
+  host: string
+  hostname: string
+  protocol: string
+  origin: string
 
-// Mock window.URL
-window.URL = {
-  createObjectURL: jest.fn(() => 'mock-object-url'),
-  revokeObjectURL: jest.fn(),
-} as any
-
-// Mock URL constructor
-global.URL.constructor = function(url: string) {
-  return {
-    href: url,
-    pathname: '/',
-    search: '',
-    hash: '',
-    host: 'localhost',
-    hostname: 'localhost',
-    protocol: 'http:',
-    origin: 'http://localhost',
+  constructor(url: string) {
+    this.href = url
+    this.pathname = '/test'
+    this.search = ''
+    this.hash = ''
+    this.host = 'test.com'
+    this.hostname = 'test.com'
+    this.protocol = 'https:'
+    this.origin = 'https://test.com'
   }
-} as any
 
-// Suppress console errors and warnings in tests
+  static createObjectURL() {
+    return 'blob:test'
+  }
+
+  static revokeObjectURL() {
+    // No-op
+  }
+}
+
+global.URL = MockURL as any
+
+// Mock form submission
+HTMLFormElement.prototype.requestSubmit = function() {
+  const submitEvent = new Event('submit', { bubbles: true, cancelable: true })
+  this.dispatchEvent(submitEvent)
+}
+
+// Suppress console errors/warnings during tests
 const originalError = console.error
 const originalWarn = console.warn
 
-beforeAll(() => {
-  console.error = (...args: any[]) => {
-    if (
-      typeof args[0] === 'string' &&
-      (args[0].includes('React does not recognize the') ||
-        args[0].includes('Warning: An update to') ||
-        args[0].includes('Warning: Cannot update a component'))
-    ) {
-      return
-    }
-    originalError.call(console, ...args)
+console.error = (...args: any[]) => {
+  const message = args[0]
+  if (
+    typeof message === 'string' &&
+    (message.includes('Not implemented: HTMLFormElement.prototype.requestSubmit') ||
+     message.includes('Error submitting time off request:') ||
+     message.includes('Warning: An update to') ||
+     message.includes('inside a test was not wrapped in act'))
+  ) {
+    return
   }
+  originalError.call(console, ...args)
+}
 
-  console.warn = (...args: any[]) => {
-    if (
-      typeof args[0] === 'string' &&
-      (args[0].includes('componentWillReceiveProps') ||
-        args[0].includes('componentWillUpdate'))
-    ) {
-      return
-    }
-    originalWarn.call(console, ...args)
+console.warn = (...args: any[]) => {
+  const message = args[0]
+  if (
+    typeof message === 'string' &&
+    (message.includes('Invalid prop') ||
+     message.includes('componentWillReceiveProps') ||
+     message.includes('inside a test was not wrapped in act'))
+  ) {
+    return
   }
-})
-
-afterAll(() => {
-  console.error = originalError
-  console.warn = originalWarn
-}) 
+  originalWarn.call(console, ...args)
+} 

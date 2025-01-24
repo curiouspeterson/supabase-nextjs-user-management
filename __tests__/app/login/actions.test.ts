@@ -28,12 +28,7 @@ describe('Login Actions', () => {
 
   describe('login', () => {
     it('signs in user successfully', async () => {
-      // Create mock form data
-      const formData = new FormData()
-      formData.append('email', 'test@example.com')
-      formData.append('password', 'password123')
-
-      await login(formData)
+      await login('test@example.com', 'password123')
 
       // Verify Supabase client calls
       const mockSupabase = await createClient()
@@ -57,40 +52,24 @@ describe('Login Actions', () => {
         }
       }))
 
-      // Create mock form data
-      const formData = new FormData()
-      formData.append('email', 'test@example.com')
-      formData.append('password', 'wrongpassword')
+      await expect(login('test@example.com', 'wrongpassword')).rejects.toThrow()
 
-      await login(formData)
-
-      // Verify redirect to error page
-      expect(redirect).toHaveBeenCalledWith('/error')
+      // Verify redirect was not called
+      expect(redirect).not.toHaveBeenCalled()
     })
 
     it('validates required fields', async () => {
-      // Create mock form data without required fields
-      const formData = new FormData()
-
-      await login(formData)
+      await expect(login('', '')).rejects.toThrow()
 
       // Verify Supabase client was not called
       const mockSupabase = await createClient()
       expect(mockSupabase.auth.signInWithPassword).not.toHaveBeenCalled()
-
-      // Verify redirect to error page
-      expect(redirect).toHaveBeenCalledWith('/error')
     })
   })
 
   describe('signup', () => {
     it('creates new user successfully', async () => {
-      // Create mock form data
-      const formData = new FormData()
-      formData.append('email', 'newuser@example.com')
-      formData.append('password', 'password123')
-
-      await signup(formData)
+      await signup('newuser@example.com', 'password123')
 
       // Verify Supabase client calls
       const mockSupabase = await createClient()
@@ -114,45 +93,26 @@ describe('Login Actions', () => {
         }
       }))
 
-      // Create mock form data
-      const formData = new FormData()
-      formData.append('email', 'existing@example.com')
-      formData.append('password', 'password123')
+      await expect(signup('existing@example.com', 'password123')).rejects.toThrow()
 
-      await signup(formData)
-
-      // Verify redirect to error page
-      expect(redirect).toHaveBeenCalledWith('/error')
+      // Verify redirect was not called
+      expect(redirect).not.toHaveBeenCalled()
     })
 
     it('validates required fields', async () => {
-      // Create mock form data without required fields
-      const formData = new FormData()
-
-      await signup(formData)
+      await expect(signup('', '')).rejects.toThrow()
 
       // Verify Supabase client was not called
       const mockSupabase = await createClient()
       expect(mockSupabase.auth.signUp).not.toHaveBeenCalled()
-
-      // Verify redirect to error page
-      expect(redirect).toHaveBeenCalledWith('/error')
     })
 
     it('validates password strength', async () => {
-      // Create mock form data with weak password
-      const formData = new FormData()
-      formData.append('email', 'test@example.com')
-      formData.append('password', '123')
-
-      await signup(formData)
+      await expect(signup('test@example.com', '123')).rejects.toThrow()
 
       // Verify Supabase client was not called
       const mockSupabase = await createClient()
       expect(mockSupabase.auth.signUp).not.toHaveBeenCalled()
-
-      // Verify redirect to error page
-      expect(redirect).toHaveBeenCalledWith('/error')
     })
   })
 }) 

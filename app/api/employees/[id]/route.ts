@@ -6,62 +6,66 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   try {
     const supabase = createClient()
 
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError) throw userError
+    // Check if user is authenticated and has admin role
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
     if (!user) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Unauthorized' }),
+      return NextResponse.json(
+        { error: 'Unauthorized - User not authenticated' },
         { status: 401 }
       )
     }
 
-    // Check if user is a manager or admin
-    const { data: currentEmployee, error: roleError } = await supabase
+    // Check if user has admin role
+    const { data: employeeData, error: employeeError } = await supabase
       .from('employees')
       .select('user_role')
       .eq('id', user.id)
       .single()
 
-    if (roleError) throw roleError
-    if (!currentEmployee || !['Manager', 'Admin'].includes(currentEmployee.user_role)) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Forbidden' }),
+    if (employeeError || !employeeData) {
+      return NextResponse.json(
+        { error: 'Unauthorized - Employee not found' },
+        { status: 401 }
+      )
+    }
+
+    if (!['Admin', 'Manager'].includes(employeeData.user_role)) {
+      return NextResponse.json(
+        { error: 'Forbidden - Insufficient permissions' },
         { status: 403 }
       )
     }
 
-    // Delete employee record first (due to foreign key constraints)
-    const { error: employeeError } = await supabase
-      .from('employees')
-      .delete()
-      .eq('id', params.id)
+    // Call the transaction function to delete the employee
+    const { error: deleteError } = await supabase.rpc('delete_employee_transaction', {
+      p_employee_id: params.id
+    })
 
-    if (employeeError) throw employeeError
-
-    // Delete profile record
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', params.id)
-
-    if (profileError) throw profileError
-
-    // Delete auth user using admin API
-    const { error: authError } = await supabase.auth.admin.deleteUser(
-      params.id
-    )
-
-    if (authError) throw authError
+    if (deleteError) {
+      console.error('Error deleting employee:', deleteError)
+      return NextResponse.json(
+        { 
+          error: 'Failed to delete employee',
+          details: deleteError.message
+        },
+        { status: 500 }
+      )
+    }
 
     // Revalidate the employees page
     revalidatePath('/employees')
-
     return new NextResponse(null, { status: 204 })
+
   } catch (error) {
-    console.error('Error:', error)
-    return new NextResponse(
-      JSON.stringify({ error: 'Internal Server Error' }),
+    console.error('Unexpected error:', error)
+    return NextResponse.json(
+      { 
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     )
   }

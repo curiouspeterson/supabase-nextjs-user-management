@@ -13,36 +13,29 @@ export async function GET(request: Request) {
       )
     }
 
-    console.log('Fetching user data for IDs:', userIds)
     const supabase = createAdminClient()
     
     // Use the admin API to fetch users
     const { data: { users }, error } = await supabase.auth.admin.listUsers()
 
     if (error) {
-      console.error('Error fetching users:', error)
       return NextResponse.json(
         { error: 'Failed to fetch user data' },
         { status: 500 }
       )
     }
-
-    console.log('All users from auth:', users.length)
     
     // Filter users by the requested IDs and map to the required format
     const filteredUsers = users
       .filter(user => {
         const included = userIds.includes(user.id)
         const hasEmail = Boolean(user.email)
-        console.log(`User ${user.id}: included=${included}, hasEmail=${hasEmail}, email=${user.email}`)
         return included && hasEmail
       })
       .map(user => ({
         id: user.id,
         email: user.email as string
       }))
-
-    console.log('Filtered users:', filteredUsers)
 
     // Group users by ID and select the email with a number if available
     const userMap = new Map<string, { id: string; email: string }>()
@@ -65,11 +58,9 @@ export async function GET(request: Request) {
     })
 
     const userData = Array.from(userMap.values())
-    console.log('Final user data:', userData)
 
     return NextResponse.json(userData)
   } catch (error) {
-    console.error('Error fetching users:', error)
     return NextResponse.json(
       { error: 'Failed to fetch user data' },
       { status: 500 }

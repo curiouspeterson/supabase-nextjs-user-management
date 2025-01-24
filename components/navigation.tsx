@@ -3,8 +3,9 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { cn } from '@/lib/utils'
+import { useRouter } from 'next/navigation'
 
 interface NavigationProps {
   className?: string
@@ -13,27 +14,63 @@ interface NavigationProps {
 export function Navigation({ className }: NavigationProps) {
   const pathname = usePathname()
   const [userRole, setUserRole] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const router = useRouter()
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
+  const setupAuthListener = useCallback(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      router.refresh()
+    })
+
+    return subscription
+  }, [supabase, router])
+
   useEffect(() => {
-    async function getUserRole() {
+    const subscription = setupAuthListener()
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [setupAuthListener])
+
+  const getUserRole = useCallback(async () => {
+    try {
+      setIsLoading(true)
       const { data: { user } } = await supabase.auth.getUser()
+      
+      // Check both user metadata and employees table for role
       if (user) {
         const { data: employee } = await supabase
           .from('employees')
           .select('user_role')
           .eq('id', user.id)
           .single()
-        setUserRole(employee?.user_role || null)
+        
+        // Use employee table role if available, fallback to metadata
+        const role = employee?.user_role || user.user_metadata?.role
+        setUserRole(role)
       }
+    } catch (error) {
+      console.error('Error fetching user role:', error)
+    } finally {
+      setIsLoading(false)
     }
-    getUserRole()
-  }, [])
+  }, [supabase])
 
-  const isManager = userRole === 'Manager' || userRole === 'Admin'
+  useEffect(() => {
+    getUserRole()
+  }, [getUserRole])
+
+  const isManager = !isLoading && (
+    userRole === 'Manager' || 
+    userRole === 'Admin' || 
+    userRole === 'Supervisor'
+  )
 
   const mainLinks = [
     {

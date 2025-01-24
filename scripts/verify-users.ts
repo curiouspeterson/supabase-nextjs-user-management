@@ -1,9 +1,14 @@
-const { createClient } = require('@supabase/supabase-js')
+import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = 'https://bedzcvnvktvhggfazsmj.supabase.co'
-const supabaseServiceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlZHpjdm52a3R2aGdnZmF6c21qIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczNzU2MzM5MSwiZXhwIjoyMDUzMTM5MzkxfQ.xWpqijBfSp9JRbmsJXE_tAGtRCIWJsyHBeTNq8MxTMc'
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-const supabase = createClient(supabaseUrl, supabaseServiceRoleKey)
+if (!supabaseUrl || !supabaseKey) {
+  console.error('Missing required environment variables')
+  process.exit(1)
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey)
 
 interface Profile {
   id: string;
@@ -23,42 +28,16 @@ interface Employee {
 }
 
 async function verifyUsers() {
-  // Check profiles
-  const { data: profiles, error: profileError } = await supabase
-    .from('profiles')
-    .select('*');
-  
-  if (profileError) {
-    console.error('Error fetching profiles:', profileError);
-  } else {
-    console.log(`Found ${profiles.length} profiles`);
-    console.log('Sample profile:', profiles[0]);
-  }
+  try {
+    const { data: users, error } = await supabase.auth.admin.listUsers()
+    if (error) throw error
 
-  // Check employees
-  const { data: employees, error: employeeError } = await supabase
-    .from('employees')
-    .select('*');
-  
-  if (employeeError) {
-    console.error('Error fetching employees:', employeeError);
-  } else {
-    console.log(`\nFound ${employees.length} employees`);
-    console.log('Sample employee:', employees[0]);
-    
-    // Count by role
-    const employeeRoleCounts = (employees as Employee[]).reduce((acc: Record<string, number>, emp: Employee) => {
-      acc[emp.employee_role] = (acc[emp.employee_role] || 0) + 1;
-      return acc;
-    }, {});
-    
-    const userRoleCounts = (employees as Employee[]).reduce((acc: Record<string, number>, emp: Employee) => {
-      acc[emp.user_role] = (acc[emp.user_role] || 0) + 1;
-      return acc;
-    }, {});
-    
-    console.log('\nEmployee role distribution:', employeeRoleCounts);
-    console.log('User role distribution:', userRoleCounts);
+    console.log(`Found ${users.users.length} users:`)
+    users.users.forEach(user => {
+      console.log(`- ${user.email} (${user.user_metadata?.role || 'No role'})`)
+    })
+  } catch (error) {
+    console.error('Error verifying users:', error)
   }
 }
 

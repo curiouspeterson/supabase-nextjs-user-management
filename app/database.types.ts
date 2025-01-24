@@ -6,7 +6,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export type Database = {
+export interface Database {
   public: {
     Tables: {
       employees: {
@@ -199,34 +199,46 @@ export type Database = {
       }
       time_off_requests: {
         Row: {
-          employee_id: string
-          end_date: string
           id: string
-          manager_notes: string | null
-          reason: string | null
-          request_date: string | null
+          employee_id: string
           start_date: string
-          status: string
+          end_date: string
+          type: 'Vacation' | 'Sick' | 'Personal' | 'Training'
+          status: 'Pending' | 'Approved' | 'Declined'
+          notes: string | null
+          reviewed_by: string | null
+          reviewed_at: string | null
+          submitted_at: string
+          created_at: string
+          updated_at: string
         }
         Insert: {
-          employee_id: string
-          end_date: string
           id?: string
-          manager_notes?: string | null
-          reason?: string | null
-          request_date?: string | null
+          employee_id: string
           start_date: string
-          status?: string
+          end_date: string
+          type: 'Vacation' | 'Sick' | 'Personal' | 'Training'
+          status?: 'Pending' | 'Approved' | 'Declined'
+          notes?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          submitted_at?: string
+          created_at?: string
+          updated_at?: string
         }
         Update: {
-          employee_id?: string
-          end_date?: string
           id?: string
-          manager_notes?: string | null
-          reason?: string | null
-          request_date?: string | null
+          employee_id?: string
           start_date?: string
-          status?: string
+          end_date?: string
+          type?: 'Vacation' | 'Sick' | 'Personal' | 'Training'
+          status?: 'Pending' | 'Approved' | 'Declined'
+          notes?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          submitted_at?: string
+          created_at?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -235,7 +247,7 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "employees"
             referencedColumns: ["id"]
-          },
+          }
         ]
       }
     }

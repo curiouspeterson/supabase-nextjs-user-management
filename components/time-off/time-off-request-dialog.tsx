@@ -42,13 +42,13 @@ type TimeOffFormValues = z.infer<typeof timeOffSchema>
 interface TimeOffRequestDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess?: () => void
+  onRequestSubmitted?: () => void
 }
 
 export function TimeOffRequestDialog({
   open,
   onOpenChange,
-  onSuccess,
+  onRequestSubmitted
 }: TimeOffRequestDialogProps) {
   const [isLoading, setIsLoading] = React.useState(false)
   const { toast } = useToast()
@@ -91,7 +91,7 @@ export function TimeOffRequestDialog({
 
       form.reset()
       onOpenChange(false)
-      onSuccess?.()
+      onRequestSubmitted?.()
     } catch (error) {
       console.error(error)
       toast({
@@ -108,6 +108,15 @@ export function TimeOffRequestDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent 
         className="sm:max-w-[425px]"
+        onOpenAutoFocus={(e) => {
+          // Prevent default focus behavior
+          e.preventDefault()
+          // Focus the close button
+          const closeButton = document.querySelector('[aria-label="Close"]') as HTMLButtonElement
+          if (closeButton) {
+            closeButton.focus()
+          }
+        }}
         onInteractOutside={(e) => {
           // Prevent closing when clicking outside
           e.preventDefault()

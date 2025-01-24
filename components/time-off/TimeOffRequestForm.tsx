@@ -2,120 +2,152 @@
 
 import { useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { Database } from '@/app/database.types'
-import { SupabaseClient } from '@supabase/supabase-js'
+import { Button } from '@/components/ui/button'
+import { useToast } from '@/components/ui/use-toast'
+import { useUser } from '@/lib/hooks'
+import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
-type Props = {
-  employeeId: string
-  onRequestSubmitted?: () => void
-}
-
-export default function TimeOffRequestForm({ employeeId, onRequestSubmitted }: Props) {
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-  const [reason, setReason] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+export function TimeOffRequestForm() {
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const { user, loading } = useUser()
+  const { toast } = useToast()
+  const supabase = createClient()
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    
+    if (!user) {
+      setError('You must be logged in to submit a request')
+      return
+    }
+
     try {
-      setSubmitting(true)
+      setIsSubmitting(true)
       setError(null)
-      setSuccess(false)
 
-      const supabase = createClient() as SupabaseClient<Database>
+      const formData = new FormData(e.currentTarget)
+      const startDate = formData.get('start_date') as string
+      const endDate = formData.get('end_date') as string
+      const type = formData.get('type') as 'Vacation' | 'Sick' | 'Personal' | 'Training'
+      const notes = formData.get('notes') as string
 
-      const { error: err } = await supabase
+      // Validate dates
+      if (new Date(endDate) < new Date(startDate)) {
+        setError('End date cannot be before start date')
+        return
+      }
+
+      const { error: insertError } = await supabase
         .from('time_off_requests')
         .insert({
-          employee_id: employeeId,
+          employee_id: user.id,
           start_date: startDate,
           end_date: endDate,
-          reason,
-          status: 'Pending'
+          type,
+          notes,
+          status: 'Pending',
+          submitted_at: new Date().toISOString(),
         })
 
-      if (err) throw err
+      if (insertError) throw insertError
 
-      setSuccess(true)
-      setStartDate('')
-      setEndDate('')
-      setReason('')
-      
-      if (onRequestSubmitted) {
-        onRequestSubmitted()
-      }
+      toast({
+        title: 'Success',
+        description: 'Time off request submitted successfully',
+      })
+
+      e.currentTarget.reset()
     } catch (err) {
       console.error('Error submitting time off request:', err)
       setError('Failed to submit time off request')
+      toast({
+        title: 'Error',
+        description: 'Failed to submit time off request',
+        variant: 'destructive',
+      })
     } finally {
-      setSubmitting(false)
+      setIsSubmitting(false)
     }
+  }
+
+  if (loading) {
+    return <div>Loading...</div>
+  }
+
+  if (!user) {
+    return <div>Please sign in to submit a time off request</div>
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label htmlFor="start-date" className="block text-sm font-medium text-gray-700">
-          Start Date
-        </label>
-        <input
-          type="date"
-          id="start-date"
-          value={startDate}
-          onChange={(e) => setStartDate(e.target.value)}
-          required
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-        />
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="start_date">Start Date</Label>
+          <Input
+            id="start_date"
+            name="start_date"
+            type="date"
+            required
+            min={new Date().toISOString().split('T')[0]}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="end_date">End Date</Label>
+          <Input
+            id="end_date"
+            name="end_date"
+            type="date"
+            required
+            min={new Date().toISOString().split('T')[0]}
+          />
+        </div>
       </div>
 
-      <div>
-        <label htmlFor="end-date" className="block text-sm font-medium text-gray-700">
-          End Date
-        </label>
-        <input
-          type="date"
-          id="end-date"
-          value={endDate}
-          onChange={(e) => setEndDate(e.target.value)}
-          required
-          min={startDate}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-        />
+      <div className="space-y-2">
+        <Label htmlFor="type">Type</Label>
+        <Select name="type" required>
+          <SelectTrigger>
+            <SelectValue placeholder="Select type of time off" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="Vacation">Vacation</SelectItem>
+            <SelectItem value="Sick">Sick Leave</SelectItem>
+            <SelectItem value="Personal">Personal</SelectItem>
+            <SelectItem value="Training">Training</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
-      <div>
-        <label htmlFor="reason" className="block text-sm font-medium text-gray-700">
-          Reason
-        </label>
-        <textarea
-          id="reason"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          required
-          rows={3}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+      <div className="space-y-2">
+        <Label htmlFor="notes">Notes</Label>
+        <Textarea
+          id="notes"
+          name="notes"
+          placeholder="Add any additional notes..."
+          className="h-24"
         />
       </div>
 
       {error && (
-        <div className="text-red-500 text-sm">{error}</div>
+        <div className="text-red-600 text-sm">{error}</div>
       )}
 
-      {success && (
-        <div className="text-green-500 text-sm">Time off request submitted successfully!</div>
-      )}
-
-      <button
+      <Button
         type="submit"
-        disabled={submitting}
-        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+        disabled={isSubmitting}
+        className="w-full"
       >
-        {submitting ? 'Submitting...' : 'Submit Request'}
-      </button>
+        {isSubmitting ? 'Submitting...' : 'Submit Request'}
+      </Button>
     </form>
   )
 } 

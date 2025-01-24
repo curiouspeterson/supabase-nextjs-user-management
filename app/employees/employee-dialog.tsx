@@ -90,7 +90,7 @@ export function EmployeeDialog({
         .order('name')
       
       if (error) {
-        console.error('Error loading shift types:', error)
+        alert('Error loading shift types. Please try again.')
         return
       }
       
@@ -110,16 +110,6 @@ export function EmployeeDialog({
 
   // Reset form when employee changes
   useEffect(() => {
-    console.log('Employee data in dialog:', {
-      id: employee?.id,
-      name: employee?.profiles?.full_name,
-      email: employee?.email,
-      employee_role: employee?.employee_role,
-      user_role: employee?.user_role,
-      weekly_hours_scheduled: employee?.weekly_hours_scheduled,
-      default_shift_type_id: employee?.default_shift_type_id
-    })
-    
     if (employee) {
       form.reset({
         full_name: employee.profiles?.full_name || '',
@@ -146,20 +136,10 @@ export function EmployeeDialog({
   async function onSubmit(values: z.infer<typeof formSchema>) {
     try {
       setLoading(true)
-      console.log('Submitting form with values:', values)
-
-      if (process.env.NEXT_PUBLIC_DEBUG === 'true') {
-        console.debug('Form submission started:', {
-          timestamp: new Date().toISOString(),
-          values
-        })
-      }
 
       if (employee) {
         // Update existing employee
-        console.log('Starting update for employee:', employee.id)
-        
-        const { data, error } = await supabase.rpc('update_employee_and_profile', {
+        const { error } = await supabase.rpc('update_employee_and_profile', {
           p_employee_id: employee.id,
           p_full_name: values.full_name,
           p_employee_role: values.employee_role,
@@ -169,13 +149,10 @@ export function EmployeeDialog({
         })
 
         if (error) {
-          console.error('Error updating employee:', error)
           throw new Error(`Failed to update employee: ${error.message}`)
         }
-        console.log('Employee updated successfully:', data)
       } else {
         // Create new employee
-        console.log('Creating new employee')
         const response = await fetch('/api/employees', {
           method: 'POST',
           headers: {
@@ -186,29 +163,14 @@ export function EmployeeDialog({
 
         if (!response.ok) {
           const data = await response.json()
-          console.error('Error creating employee:', data)
           throw new Error(data.error || 'Failed to create employee')
         }
-      }
-
-      if (process.env.NEXT_PUBLIC_DEBUG === 'true') {
-        console.debug('Form submission completed successfully:', {
-          timestamp: new Date().toISOString()
-        })
       }
 
       onSuccess?.()
       onClose()
     } catch (error) {
-      console.error('Error submitting form:', {
-        timestamp: new Date().toISOString(),
-        error: error instanceof Error ? {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        } : error
-      })
-      alert('Error submitting form. Please check the console for details.')
+      alert('Error submitting form. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -265,14 +227,12 @@ export function EmployeeDialog({
                   >
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select a role" />
+                        <SelectValue placeholder="Select an employee role" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
                       <SelectItem value="Dispatcher">Dispatcher</SelectItem>
-                      <SelectItem value="Shift Supervisor">
-                        Shift Supervisor
-                      </SelectItem>
+                      <SelectItem value="Shift Supervisor">Shift Supervisor</SelectItem>
                       <SelectItem value="Management">Management</SelectItem>
                     </SelectContent>
                   </Select>
@@ -292,7 +252,7 @@ export function EmployeeDialog({
                   >
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select a role" />
+                        <SelectValue placeholder="Select a user role" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>

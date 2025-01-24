@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import { createClient } from '@/utils/supabase/client'
 import { Database } from '@/lib/database.types'
@@ -23,264 +23,198 @@ import { TimeOffRequestDialog } from '@/components/time-off/time-off-request-dia
 import { TimeOffRequestWithReviewer, TimeOffStatus } from '@/lib/types/time-off'
 import { updateTimeOffRequest } from '@/lib/api/time-off'
 import { Loader2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 
-type DbTimeOffRequest = Database['public']['Tables']['time_off_requests']['Row']
+type RequestStatus = 'Pending' | 'Approved' | 'Declined'
 
-interface UserData {
-  id: string;
-  email: string;
-}
-
-interface TimeOffRequestResponse extends DbTimeOffRequest {
+interface TimeOffRequest {
+  id: string
+  employee_id: string
+  start_date: string
+  end_date: string
+  reason: string
+  status: RequestStatus
   employee: {
     id: string
-    email: string
-    profiles: {
-      full_name: string | null
-    }[]
+    user_role: string
   }
-  reviewer: {
-    id: string
-    email: string
-    profiles: {
-      full_name: string | null
-    }[]
-  } | null
+}
+
+function getStatusVariant(status: RequestStatus) {
+  switch (status) {
+    case 'Approved':
+      return 'default'
+    case 'Declined':
+      return 'destructive'
+    default:
+      return 'secondary'
+  }
 }
 
 export default function TimeOffPage() {
-  const [isLoading, setIsLoading] = React.useState(true)
-  const [requests, setRequests] = React.useState<TimeOffRequestWithReviewer[]>([])
-  const [dialogOpen, setDialogOpen] = React.useState(false)
-  const [selectedTab, setSelectedTab] = React.useState<TimeOffStatus>('Pending')
-  const { user } = useUser()
+  const { user, loading: userLoading } = useUser()
+  const [requests, setRequests] = useState<TimeOffRequest[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedStatus, setSelectedStatus] = useState<RequestStatus>('Pending')
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
   const { toast } = useToast()
-  const supabase = createClient() as SupabaseClient<Database>
 
   useEffect(() => {
-    fetchRequests()
-  }, [])
+    if (userLoading) return
 
-  async function fetchRequests() {
-    try {
-      setIsLoading(true)
-      
-      // First get the time off requests
-      const { data: requests, error: requestsError } = await supabase
-        .from('time_off_requests')
-        .select('*')
-        .order('submitted_at', { ascending: false })
-
-      if (requestsError) throw requestsError
-
-      // Get all unique user IDs from the requests
-      const userIds = new Set([
-        ...requests.map(r => r.employee_id),
-        ...requests.filter(r => r.reviewed_by).map(r => r.reviewed_by)
-      ])
-
-      // Get user profiles for all users
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .in('id', Array.from(userIds))
-
-      if (profilesError) throw profilesError
-
-      // Get user emails from API
-      const userIdsArray = Array.from(userIds)
-      const usersResponse = await fetch(`/api/users?ids=${userIdsArray.join(',')}`)
-      if (!usersResponse.ok) {
-        throw new Error('Failed to fetch user data')
-      }
-      const users: UserData[] = await usersResponse.json()
-
-      // Create lookup maps for profiles and users
-      const profileMap = new Map(profiles.map(p => [p.id, p]))
-      const userMap = new Map(users.map(u => [u.id, u]))
-
-      // Transform the data to match our expected types
-      const transformedData: TimeOffRequestWithReviewer[] = requests.map(request => ({
-        id: request.id,
-        type: request.type,
-        status: request.status,
-        start_date: request.start_date,
-        end_date: request.end_date,
-        notes: request.notes,
-        reviewed_by: request.reviewed_by,
-        reviewed_at: request.reviewed_at,
-        submitted_at: request.submitted_at,
-        created_at: request.created_at,
-        updated_at: request.updated_at,
-        employee: {
-          id: request.employee_id,
-          email: userMap.get(request.employee_id)?.email ?? '',
-          full_name: profileMap.get(request.employee_id)?.full_name ?? ''
-        },
-        reviewer: request.reviewed_by ? {
-          id: request.reviewed_by,
-          email: userMap.get(request.reviewed_by)?.email ?? '',
-          full_name: profileMap.get(request.reviewed_by)?.full_name ?? ''
-        } : null
-      }))
-
-      setRequests(transformedData)
-    } catch (error) {
-      console.error(error)
-      toast({
-        title: 'Error',
-        description: 'Failed to load time off requests. Please try again.',
-        variant: 'destructive',
-      })
-    } finally {
+    if (!user) {
+      setError('Please sign in to view time off requests')
       setIsLoading(false)
+      return
     }
-  }
 
-  async function handleUpdateStatus(id: string, status: TimeOffStatus) {
-    if (!user) return
+    async function fetchRequests() {
+      try {
+        const supabase = createClient()
+        
+        if (!user) {
+          throw new Error('User not found')
+        }
 
-    try {
-      const { error } = await updateTimeOffRequest(id, {
-        status,
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
-      })
+        console.log('Debug: Starting request fetch for user:', user.id)
+        
+        // Check available tables
+        const { data: tables, error: tablesError } = await supabase
+          .from('information_schema.tables')
+          .select('table_name')
+          .eq('table_schema', 'public')
+        
+        console.log('Debug: Available tables:', tables)
+        if (tablesError) {
+          console.error('Tables query error:', tablesError)
+        }
+        
+        // First try just the base table
+        const { data: baseData, error: baseError } = await supabase
+          .from('time_off_requests')
+          .select('*')
+        
+        if (baseError) {
+          console.error('Base query error:', baseError)
+          throw baseError
+        }
 
-      if (error) {
-        throw error
+        console.log('Debug: Base table data:', baseData)
+        
+        // Try querying employees table directly
+        const { data: employeesData, error: employeesError } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+        
+        console.log('Debug: Employee data:', employeesData)
+        if (employeesError) {
+          console.error('Employees query error:', employeesError)
+        }
+        
+        // Use the stored function
+        const { data, error: fetchError } = await supabase
+          .rpc('get_time_off_requests')
+
+        if (fetchError) {
+          console.error('Function query error:', fetchError)
+          console.error('Full error details:', JSON.stringify(fetchError, null, 2))
+          throw fetchError
+        }
+
+        console.log('Debug: Function response:', { data, error: fetchError })
+        setRequests(data as TimeOffRequest[])
+      } catch (err) {
+        console.error('Detailed error:', err)
+        setError('Failed to fetch time off requests')
+      } finally {
+        setIsLoading(false)
       }
-
-      toast({
-        title: 'Success',
-        description: 'Time off request has been updated.',
-      })
-
-      fetchRequests()
-    } catch (error) {
-      console.error(error)
-      toast({
-        title: 'Error',
-        description: 'Failed to update time off request. Please try again.',
-        variant: 'destructive',
-      })
     }
-  }
 
-  const filteredRequests = requests.filter(
-    (request) => request.status === selectedTab
-  )
+    fetchRequests()
+  }, [user, userLoading])
 
-  if (!user && !isLoading) {
+  if (userLoading || isLoading) {
     return (
       <div className="container py-10">
-        <div className="flex flex-col items-center justify-center py-8">
-          <p className="text-muted-foreground">Sign in to view time off requests</p>
+        <div data-testid="loading-spinner" className="flex justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
       </div>
     )
   }
+
+  if (error) {
+    return (
+      <div className="container py-10">
+        <div role="alert" className="text-destructive">
+          {error}
+        </div>
+      </div>
+    )
+  }
+
+  const filteredRequests = requests.filter(request => request.status === selectedStatus)
 
   return (
     <div className="container py-10">
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Time Off</h1>
-          <p className="text-muted-foreground">
-            View and manage time off requests
-          </p>
+          <p className="text-muted-foreground">View and manage time off requests</p>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>Request Time Off</Button>
+        <Button onClick={() => setIsDialogOpen(true)}>
+          Request Time Off
+        </Button>
       </div>
 
-      <Tabs 
-        value={selectedTab} 
-        onValueChange={(value) => setSelectedTab(value as TimeOffStatus)}
-      >
+      <Tabs defaultValue="Pending" onValueChange={(value) => setSelectedStatus(value as RequestStatus)}>
         <TabsList aria-label="Filter time off requests">
           <TabsTrigger value="Pending">Pending</TabsTrigger>
           <TabsTrigger value="Approved">Approved</TabsTrigger>
           <TabsTrigger value="Declined">Declined</TabsTrigger>
         </TabsList>
-        <TabsContent value={selectedTab}>
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin" data-testid="loading-spinner" />
-            </div>
-          ) : filteredRequests.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8">
-              <p className="text-muted-foreground">No requests found</p>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {filteredRequests.map((request) => (
-                <Card key={request.id} role="article" aria-labelledby={`request-${request.id}`}>
+        <TabsContent value={selectedStatus}>
+          <div className="space-y-4">
+            {filteredRequests.length === 0 ? (
+              <p className="text-muted-foreground">No {selectedStatus.toLowerCase()} requests found.</p>
+            ) : (
+              filteredRequests.map((request) => (
+                <Card key={request.id} role="article">
                   <CardHeader>
-                    <CardTitle id={`request-${request.id}`}>
-                      {request.employee?.full_name || 'Unknown Employee'}
+                    <CardTitle>
+                      Employee ID: {request.employee?.id}
                     </CardTitle>
-                    <CardDescription>
-                      {format(new Date(request.start_date), 'PPP')} -{' '}
-                      {format(new Date(request.end_date), 'PPP')}
-                    </CardDescription>
+                    <p className="text-sm text-muted-foreground">
+                      {new Date(request.start_date).toLocaleDateString()} -{' '}
+                      {new Date(request.end_date).toLocaleDateString()}
+                    </p>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid gap-2">
-                      <div>
-                        <span className="font-medium">Type:</span> {request.type}
-                      </div>
-                      {request.notes && (
-                        <div>
-                          <span className="font-medium">Notes:</span>{' '}
-                          {request.notes}
-                        </div>
-                      )}
-                      {request.reviewed_by && (
-                        <div>
-                          <span className="font-medium">Reviewed by:</span>{' '}
-                          {request.reviewer?.full_name || 'Unknown'}
-                        </div>
-                      )}
-                      {request.reviewed_at && (
-                        <div>
-                          <span className="font-medium">Reviewed on:</span>{' '}
-                          {format(new Date(request.reviewed_at), 'PPP')}
-                        </div>
-                      )}
+                    <p>{request.reason}</p>
+                    <div className="mt-4">
+                      <Badge variant={getStatusVariant(request.status)}>
+                        {request.status}
+                      </Badge>
                     </div>
                   </CardContent>
-                  {selectedTab === 'Pending' && (
-                    <CardFooter className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() =>
-                          handleUpdateStatus(request.id, 'Declined')
-                        }
-                      >
-                        Decline
-                      </Button>
-                      <Button
-                        onClick={() =>
-                          handleUpdateStatus(request.id, 'Approved')
-                        }
-                      >
-                        Approve
-                      </Button>
-                    </CardFooter>
-                  )}
                 </Card>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </TabsContent>
       </Tabs>
 
       <TimeOffRequestDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onSuccess={() => {
-          setDialogOpen(false)
-          fetchRequests()
+        open={isDialogOpen}
+        onOpenChange={setIsDialogOpen}
+        onRequestSubmitted={() => {
+          setIsDialogOpen(false)
+          // Refresh requests
+          window.location.reload()
         }}
       />
     </div>

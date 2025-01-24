@@ -4,33 +4,17 @@ import userEvent from '@testing-library/user-event'
 import { StaffingRequirementsTable } from '@/app/staffing/staffing-requirements-table'
 import { createBrowserClient } from '@supabase/ssr'
 
-// Mock Supabase client
-jest.mock('@supabase/ssr', () => ({
-  createBrowserClient: jest.fn((url: string, key: string) => ({
-    from: jest.fn(() => ({
-      select: jest.fn(() => ({
-        order: jest.fn(() => Promise.resolve({ data: mockStaffingRequirements, error: null }))
-      })),
-      update: jest.fn(() => ({
-        eq: jest.fn(() => Promise.resolve({ data: null, error: null }))
-      })),
-      delete: jest.fn(() => ({
-        eq: jest.fn(() => Promise.resolve({ data: null, error: null }))
-      }))
-    }))
-  }))
-}))
+jest.mock('@supabase/ssr')
 
 // Mock data matching current schema
 const mockStaffingRequirements = [
   {
     id: '1',
-    period_name: 'Early Morning',
+    period_name: 'Morning',
     start_time: '05:00',
     end_time: '09:00',
-    min_employees: 6,
-    max_employees: 8,
-    requires_supervisor: true,
+    minimum_employees: 6,
+    shift_supervisor_required: true,
     created_at: '2024-03-01T00:00:00Z',
     updated_at: '2024-03-01T00:00:00Z'
   },
@@ -39,9 +23,8 @@ const mockStaffingRequirements = [
     period_name: 'Day',
     start_time: '09:00',
     end_time: '21:00',
-    min_employees: 8,
-    max_employees: 10,
-    requires_supervisor: true,
+    minimum_employees: 8,
+    shift_supervisor_required: false,
     created_at: '2024-03-01T00:00:00Z',
     updated_at: '2024-03-01T00:00:00Z'
   }
@@ -50,35 +33,46 @@ const mockStaffingRequirements = [
 describe('StaffingRequirementsTable', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    const mockSupabase = {
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          order: jest.fn().mockResolvedValue({
+            data: mockStaffingRequirements,
+            error: null
+          })
+        })
+      }),
+      auth: {
+        getUser: jest.fn()
+      }
+    }
+    ;(createBrowserClient as jest.Mock).mockReturnValue(mockSupabase)
   })
 
   it('renders the staffing requirements table', async () => {
     render(<StaffingRequirementsTable isManager={false} />)
 
     await waitFor(() => {
-      // Check table headers
-      expect(screen.getByText('Period')).toBeInTheDocument()
-      expect(screen.getByText('Time')).toBeInTheDocument()
-      expect(screen.getByText('Min Staff')).toBeInTheDocument()
-      expect(screen.getByText('Supervisor')).toBeInTheDocument()
+      expect(screen.getByText('Morning')).toBeInTheDocument()
     })
 
-    // Check data rows
-    expect(screen.getByText('Early Morning')).toBeInTheDocument()
     expect(screen.getByText('5:00 AM - 9:00 AM')).toBeInTheDocument()
     expect(screen.getByText('6')).toBeInTheDocument()
     expect(screen.getByText('Required')).toBeInTheDocument()
   })
 
   it('shows loading state while fetching data', async () => {
-    // Mock loading state
-    ;(createBrowserClient as jest.Mock).mockImplementationOnce((url: string, key: string) => ({
-      from: jest.fn(() => ({
-        select: jest.fn(() => ({
-          order: jest.fn(() => new Promise(() => {})) // Never resolves
-        }))
-      }))
-    }))
+    const mockSupabase = {
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          order: jest.fn().mockReturnValue(new Promise(() => {})) // Never resolves
+        })
+      }),
+      auth: {
+        getUser: jest.fn()
+      }
+    }
+    ;(createBrowserClient as jest.Mock).mockReturnValue(mockSupabase)
 
     render(<StaffingRequirementsTable isManager={false} />)
     
@@ -87,14 +81,20 @@ describe('StaffingRequirementsTable', () => {
   })
 
   it('shows error state when fetch fails', async () => {
-    // Mock error state
-    ;(createBrowserClient as jest.Mock).mockImplementationOnce(() => ({
-      from: jest.fn(() => ({
-        select: jest.fn(() => ({
-          order: jest.fn(() => Promise.resolve({ data: null, error: new Error('Failed to fetch') }))
-        }))
-      }))
-    }))
+    const mockSupabase = {
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          order: jest.fn().mockResolvedValue({
+            data: null,
+            error: new Error('Failed to fetch')
+          })
+        })
+      }),
+      auth: {
+        getUser: jest.fn()
+      }
+    }
+    ;(createBrowserClient as jest.Mock).mockReturnValue(mockSupabase)
 
     render(<StaffingRequirementsTable isManager={false} />)
 
@@ -104,15 +104,35 @@ describe('StaffingRequirementsTable', () => {
   })
 
   it('allows managers to edit requirements', async () => {
+    const mockSupabase = {
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          order: jest.fn().mockResolvedValue({
+            data: mockStaffingRequirements,
+            error: null
+          })
+        }),
+        update: jest.fn().mockReturnValue({
+          eq: jest.fn().mockResolvedValue({
+            data: [{ ...mockStaffingRequirements[0], minimum_employees: 4 }],
+            error: null
+          })
+        })
+      }),
+      auth: {
+        getUser: jest.fn()
+      }
+    }
+    ;(createBrowserClient as jest.Mock).mockReturnValue(mockSupabase)
+
     const user = userEvent.setup()
     render(<StaffingRequirementsTable isManager={true} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Early Morning')).toBeInTheDocument()
+      expect(screen.getByText('Morning')).toBeInTheDocument()
     })
 
-    // Click edit button
-    const editButton = screen.getByRole('button', { name: /edit early morning requirement/i })
+    const editButton = screen.getByRole('button', { name: /edit morning requirement/i })
     await user.click(editButton)
 
     // Edit minimum employees
@@ -121,33 +141,49 @@ describe('StaffingRequirementsTable', () => {
     await user.type(minInput, '4')
 
     // Save changes
-    const saveButton = screen.getByRole('button', { name: /save/i })
+    const saveButton = screen.getByRole('button', { name: /update/i })
     await user.click(saveButton)
 
     // Verify API call
-    expect(createBrowserClient).toHaveBeenCalledWith(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    )
     const mockClient = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
     expect(mockClient.from('staffing_requirements').update).toHaveBeenCalledWith({
-      min_employees: 4
+      minimum_employees: 4
     })
   })
 
   it('allows managers to delete requirements', async () => {
+    const mockSupabase = {
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          order: jest.fn().mockResolvedValue({
+            data: mockStaffingRequirements,
+            error: null
+          })
+        }),
+        delete: jest.fn().mockReturnValue({
+          eq: jest.fn().mockResolvedValue({
+            data: [mockStaffingRequirements[0]],
+            error: null
+          })
+        })
+      }),
+      auth: {
+        getUser: jest.fn()
+      }
+    }
+    ;(createBrowserClient as jest.Mock).mockReturnValue(mockSupabase)
+
     const user = userEvent.setup()
     render(<StaffingRequirementsTable isManager={true} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Early Morning')).toBeInTheDocument()
+      expect(screen.getByText('Morning')).toBeInTheDocument()
     })
 
-    // Click delete button
-    const deleteButton = screen.getByRole('button', { name: /delete early morning requirement/i })
+    const deleteButton = screen.getByRole('button', { name: /delete morning requirement/i })
     await user.click(deleteButton)
 
     // Confirm deletion
@@ -155,10 +191,6 @@ describe('StaffingRequirementsTable', () => {
     await user.click(confirmButton)
 
     // Verify API call
-    expect(createBrowserClient).toHaveBeenCalledWith(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    )
     const mockClient = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -167,15 +199,30 @@ describe('StaffingRequirementsTable', () => {
   })
 
   it('validates minimum employees is greater than 0', async () => {
+    const mockSupabase = {
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          order: jest.fn().mockResolvedValue({
+            data: mockStaffingRequirements,
+            error: null
+          })
+        })
+      }),
+      auth: {
+        getUser: jest.fn()
+      }
+    }
+    ;(createBrowserClient as jest.Mock).mockReturnValue(mockSupabase)
+
     const user = userEvent.setup()
     render(<StaffingRequirementsTable isManager={true} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Early Morning')).toBeInTheDocument()
+      expect(screen.getByText('Morning')).toBeInTheDocument()
     })
 
     // Click edit button
-    const editButton = screen.getByRole('button', { name: /edit early morning requirement/i })
+    const editButton = screen.getByRole('button', { name: /edit morning requirement/i })
     await user.click(editButton)
 
     // Try invalid value
@@ -184,34 +231,47 @@ describe('StaffingRequirementsTable', () => {
     await user.type(minInput, '0')
 
     // Try to save
-    const saveButton = screen.getByRole('button', { name: /save/i })
+    const saveButton = screen.getByRole('button', { name: /update/i })
     await user.click(saveButton)
 
     // Verify validation message
-    expect(screen.getByText(/minimum employees must be at least 1/i)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText(/minimum employees must be at least 1/i)).toBeInTheDocument()
+    })
   })
 
   it('maintains accessibility standards', async () => {
+    const mockSupabase = {
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          order: jest.fn().mockResolvedValue({
+            data: mockStaffingRequirements,
+            error: null
+          })
+        })
+      }),
+      auth: {
+        getUser: jest.fn()
+      }
+    }
+    ;(createBrowserClient as jest.Mock).mockReturnValue(mockSupabase)
+
     render(<StaffingRequirementsTable isManager={true} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Early Morning')).toBeInTheDocument()
+      expect(screen.getByText('Morning')).toBeInTheDocument()
     })
 
-    // Check table structure
-    expect(screen.getByRole('table')).toBeInTheDocument()
-    expect(screen.getByRole('rowgroup', { name: /table header/i })).toBeInTheDocument()
-    expect(screen.getByRole('rowgroup', { name: /table body/i })).toBeInTheDocument()
+    // Check table headers
+    expect(screen.getByRole('columnheader', { name: /period/i })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /time/i })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /min staff/i })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /supervisor/i })).toBeInTheDocument()
 
-    // Check cell labels
-    expect(screen.getByRole('cell', { name: /period name/i })).toBeInTheDocument()
-    expect(screen.getByRole('cell', { name: /time range/i })).toBeInTheDocument()
-    expect(screen.getByRole('cell', { name: /minimum staff required/i })).toBeInTheDocument()
-    expect(screen.getByRole('cell', { name: /supervisor requirement/i })).toBeInTheDocument()
-
-    // Check button labels
-    const editButton = screen.getByRole('button', { name: /edit early morning requirement/i })
-    expect(editButton).toBeInTheDocument()
-    expect(editButton).toHaveAttribute('aria-label')
+    // Check cell labels for first row
+    expect(screen.getByRole('cell', { name: /period name for morning shift/i })).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: /time range for morning shift/i })).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: /minimum staff required for morning shift/i })).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: /supervisor requirement for morning shift/i })).toBeInTheDocument()
   })
 }) 

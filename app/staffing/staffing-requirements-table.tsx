@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
-import { Button } from '../../../components/ui/button'
+import { Button } from '@/components/ui/button'
 import {
   Table,
   TableBody,
@@ -10,9 +10,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../../../components/ui/table'
+} from '@/components/ui/table'
 import { StaffingRequirementDialog } from './staffing-requirement-dialog'
-import { useToast } from '../../../components/ui/use-toast'
+import { useToast } from '@/components/ui/use-toast'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,7 +22,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "../../../components/ui/alert-dialog"
+} from "@/components/ui/alert-dialog"
 
 interface ShiftType {
   id: string
@@ -33,13 +33,11 @@ interface ShiftType {
 
 interface StaffingRequirement {
   id: string
-  day_of_week: string
   period_name: string
   start_time: string
   end_time: string
-  min_employees: number
-  max_employees: number
-  requires_supervisor: boolean
+  minimum_employees: number
+  shift_supervisor_required: boolean
   created_at: string
   updated_at: string
 }
@@ -62,7 +60,7 @@ export function StaffingRequirementsTable({ isManager }: StaffingRequirementsTab
   )
   const { toast } = useToast()
 
-  async function fetchRequirements() {
+  const fetchRequirements = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
@@ -72,6 +70,7 @@ export function StaffingRequirementsTable({ isManager }: StaffingRequirementsTab
         .order('start_time')
 
       if (error) throw error
+      console.log('Fetched staffing requirements:', data)
       setRequirements(data || [])
     } catch (error) {
       console.error('Error fetching staffing requirements:', error)
@@ -84,12 +83,12 @@ export function StaffingRequirementsTable({ isManager }: StaffingRequirementsTab
     } finally {
       setLoading(false)
     }
-  }
+  }, [supabase, toast])
 
   // Fetch requirements on component mount
   useEffect(() => {
     fetchRequirements()
-  }, [])
+  }, [fetchRequirements])
 
   function handleEdit(requirement: StaffingRequirement) {
     setSelectedRequirement(requirement)
@@ -110,12 +109,37 @@ export function StaffingRequirementsTable({ isManager }: StaffingRequirementsTab
     if (!requirementToDelete) return
 
     try {
-      const { error } = await supabase
+      // First verify we can read the record
+      const { data: verifyData, error: verifyError } = await supabase
+        .from('staffing_requirements')
+        .select('*')
+        .eq('id', requirementToDelete.id)
+        .single()
+
+      if (verifyError) {
+        console.error('Verify error:', verifyError)
+        throw verifyError
+      }
+
+      console.log('Current record:', verifyData)
+
+      // Attempt the delete
+      const { data: deleteData, error: deleteError } = await supabase
         .from('staffing_requirements')
         .delete()
         .eq('id', requirementToDelete.id)
+        .select()
 
-      if (error) throw error
+      if (deleteError) {
+        console.error('Delete error:', deleteError)
+        throw deleteError
+      }
+
+      if (!deleteData || deleteData.length === 0) {
+        throw new Error('No records were deleted')
+      }
+
+      console.log('Delete response:', deleteData)
 
       toast({
         title: 'Success',
@@ -126,7 +150,8 @@ export function StaffingRequirementsTable({ isManager }: StaffingRequirementsTab
       console.error('Error deleting staffing requirement:', error)
       toast({
         title: 'Error',
-        description: 'Failed to delete staffing requirement',
+        description: 'Failed to delete staffing requirement. ' + 
+          (error instanceof Error ? error.message : 'Please try again.'),
         variant: 'destructive',
       })
     } finally {
@@ -155,11 +180,9 @@ export function StaffingRequirementsTable({ isManager }: StaffingRequirementsTab
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Day</TableHead>
               <TableHead>Period</TableHead>
               <TableHead>Time</TableHead>
               <TableHead>Min Staff</TableHead>
-              <TableHead>Max Staff</TableHead>
               <TableHead>Supervisor</TableHead>
               {isManager && <TableHead>Actions</TableHead>}
             </TableRow>
@@ -167,36 +190,38 @@ export function StaffingRequirementsTable({ isManager }: StaffingRequirementsTab
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={isManager ? 7 : 6} className="text-center">
+                <TableCell colSpan={isManager ? 5 : 4} className="text-center">
                   <div data-testid="loading-spinner" className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 mx-auto" />
                   Loading...
                 </TableCell>
               </TableRow>
             ) : error ? (
               <TableRow>
-                <TableCell colSpan={isManager ? 7 : 6} className="text-center text-red-600">
+                <TableCell colSpan={isManager ? 5 : 4} className="text-center text-red-600">
                   Error loading staffing requirements
                 </TableCell>
               </TableRow>
             ) : requirements.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isManager ? 7 : 6} className="text-center">
+                <TableCell colSpan={isManager ? 5 : 4} className="text-center">
                   No staffing requirements found
                 </TableCell>
               </TableRow>
             ) : (
               requirements.map((requirement) => (
                 <TableRow key={requirement.id}>
-                  <TableCell aria-label="Day of week">{requirement.day_of_week}</TableCell>
-                  <TableCell aria-label="Period name">{requirement.period_name}</TableCell>
-                  <TableCell aria-label="Time range">
+                  <TableCell aria-label={`Period name for ${requirement.period_name} shift`}>{requirement.period_name}</TableCell>
+                  <TableCell aria-label={`Time range for ${requirement.period_name} shift`}>
                     {formatTime(requirement.start_time)} - {formatTime(requirement.end_time)}
                   </TableCell>
-                  <TableCell aria-label="Minimum staff required">{requirement.min_employees}</TableCell>
-                  <TableCell aria-label="Maximum staff allowed">{requirement.max_employees}</TableCell>
-                  <TableCell aria-label="Supervisor requirement">{requirement.requires_supervisor ? 'Required' : 'Optional'}</TableCell>
+                  <TableCell aria-label={`Minimum staff required for ${requirement.period_name} shift`}>
+                    {requirement.minimum_employees}
+                  </TableCell>
+                  <TableCell aria-label={`Supervisor requirement for ${requirement.period_name} shift`}>
+                    {requirement.shift_supervisor_required ? 'Required' : 'Optional'}
+                  </TableCell>
                   {isManager && (
-                    <TableCell aria-label="Actions">
+                    <TableCell aria-label={`Actions for ${requirement.period_name} shift`}>
                       <div className="flex space-x-2">
                         <Button
                           variant="ghost"

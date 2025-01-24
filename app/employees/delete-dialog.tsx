@@ -36,7 +36,6 @@ export function DeleteDialog({
   async function onDelete() {
     try {
       setLoading(true)
-      console.log('Deleting employee:', employee.id)
 
       const response = await fetch(`/api/employees/${employee.id}`, {
         method: 'DELETE',
@@ -47,12 +46,10 @@ export function DeleteDialog({
         throw new Error(data.error || 'Failed to delete employee')
       }
 
-      console.log('Employee deleted successfully')
       onSuccess?.()
       onClose()
     } catch (error) {
-      console.error('Error:', error)
-      alert('Error deleting employee. Please check the console for details.')
+      alert('Error deleting employee. Please try again.')
     } finally {
       setLoading(false)
     }

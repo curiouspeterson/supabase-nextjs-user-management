@@ -9,14 +9,10 @@ const mockRevokeObjectURL = jest.fn()
 
 // Setup URL mock before tests
 beforeAll(() => {
-  // Save original URL
-  const originalURL = global.URL
-
   // Mock URL constructor and methods
-  global.URL = {
-    ...originalURL,
-    createObjectURL: mockCreateObjectURL,
-    revokeObjectURL: mockRevokeObjectURL,
+  global.URL = class {
+    static createObjectURL = mockCreateObjectURL
+    static revokeObjectURL = mockRevokeObjectURL
   } as unknown as typeof global.URL
 
   // Mock createObjectURL to return a fake URL

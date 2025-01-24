@@ -6,29 +6,45 @@ import { User } from '@supabase/supabase-js'
 
 // Add Response polyfill for Node environment
 if (typeof Response === 'undefined') {
-  global.Response = class Response {
-    constructor(body: any, init?: ResponseInit) {
-      this.status = init?.status || 200
-      this.ok = this.status >= 200 && this.status < 300
-    }
+  global.Response = class MockResponse {
     status: number
     ok: boolean
+    headers: Headers
+    body: any
+    statusText: string
+    type: ResponseType
+    url: string
+    redirected: boolean
+
+    constructor(body?: BodyInit | null, init?: ResponseInit) {
+      this.status = init?.status || 200
+      this.ok = this.status >= 200 && this.status < 300
+      this.headers = new Headers(init?.headers)
+      this.body = body
+      this.statusText = init?.statusText || ''
+      this.type = 'default'
+      this.url = ''
+      this.redirected = false
+    }
 
     static error() {
-      return new Response(null, { status: 500 })
+      return new MockResponse(null, { status: 500 })
     }
 
     static json(data: any, init?: ResponseInit) {
-      return new Response(JSON.stringify(data), init)
+      return new MockResponse(JSON.stringify(data), {
+        ...init,
+        headers: { 'content-type': 'application/json' }
+      })
     }
 
     static redirect(url: string | URL, status?: number) {
-      return new Response(null, {
+      return new MockResponse(null, {
         status: status || 302,
         headers: { Location: url.toString() }
       })
     }
-  }
+  } as any
 }
 
 jest.mock('@/utils/supabase/client')
@@ -130,14 +146,28 @@ describe('AccountForm', () => {
   })
 
   it('handles sign out', async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: true })
+    const mockSignOut = jest.fn().mockResolvedValue({ error: null })
+    ;(createClient as jest.Mock).mockReturnValue({
+      from: jest.fn(() => ({
+        select: jest.fn(() => ({
+          eq: jest.fn(() => ({
+            single: jest.fn(() => Promise.resolve({ data: mockProfile, error: null }))
+          }))
+        })),
+        upsert: jest.fn(() => Promise.resolve({ error: null }))
+      })),
+      auth: {
+        signOut: mockSignOut
+      }
+    })
+
     render(<AccountForm user={mockUser} />)
     
-    const signOutButton = screen.getByText(/sign out/i)
+    const signOutButton = screen.getByRole('button', { name: /sign out/i })
     fireEvent.click(signOutButton)
     
     await waitFor(() => {
-      expect(mockSupabaseAuth.signOut).toHaveBeenCalled()
+      expect(mockSignOut).toHaveBeenCalledWith({ scope: 'global' })
     })
   })
 

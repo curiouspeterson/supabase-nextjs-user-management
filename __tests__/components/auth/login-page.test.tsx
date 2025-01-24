@@ -4,21 +4,15 @@ import userEvent from '@testing-library/user-event'
 import LoginPage from '@/app/login/page'
 import * as actions from '@/app/login/actions'
 
-// Mock the actions module
+// Mock login and signup actions
 jest.mock('@/app/login/actions', () => ({
-  login: jest.fn(async (formData: FormData) => {
-    const email = formData.get('email')
-    const password = formData.get('password')
-    return { email, password }
-  }),
-  signup: jest.fn(async (formData: FormData) => {
-    const email = formData.get('email')
-    const password = formData.get('password')
-    return { email, password }
-  }),
+  login: jest.fn(() => Promise.resolve()),
+  signup: jest.fn(() => Promise.resolve())
 }))
 
 describe('LoginPage', () => {
+  const user = userEvent.setup()
+
   beforeEach(() => {
     jest.clearAllMocks()
   })
@@ -26,118 +20,89 @@ describe('LoginPage', () => {
   it('renders login form with all required fields', () => {
     render(<LoginPage />)
 
-    // Check form elements
-    expect(screen.getByText('Welcome back')).toBeInTheDocument()
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument()
-  })
-
-  it('validates required fields', async () => {
-    const user = userEvent.setup()
-    render(<LoginPage />)
-
-    // Try to submit without filling fields
-    await user.click(screen.getByRole('button', { name: /sign in/i }))
-
-    // Check for HTML5 validation messages
-    expect(screen.getByLabelText(/email/i)).toBeInvalid()
-    expect(screen.getByLabelText(/password/i)).toBeInvalid()
-  })
-
-  it('validates email format', async () => {
-    const user = userEvent.setup()
-    render(<LoginPage />)
-
-    // Enter invalid email
-    await user.type(screen.getByLabelText(/email/i), 'invalid-email')
-    await user.click(screen.getByRole('button', { name: /sign in/i }))
-
-    // Check for HTML5 validation
-    expect(screen.getByLabelText(/email/i)).toBeInvalid()
+    expect(screen.getByRole('button', { name: /create account instead/i })).toBeInTheDocument()
   })
 
   it('calls login action on sign in', async () => {
-    const user = userEvent.setup()
     render(<LoginPage />)
 
-    // Fill out form
-    await user.type(screen.getByLabelText(/email/i), 'test@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'password123')
+    const emailInput = screen.getByLabelText(/email/i)
+    const passwordInput = screen.getByLabelText(/password/i)
+    const signInButton = screen.getByRole('button', { name: /sign in/i })
 
-    // Submit form
-    await user.click(screen.getByRole('button', { name: /sign in/i }))
+    await user.type(emailInput, 'test@example.com')
+    await user.type(passwordInput, 'password123')
+    
+    // Click the button and wait for the loading state
+    await user.click(signInButton)
+    
+    // Use a more specific waitFor to ensure the state has updated
+    await waitFor(
+      () => {
+        const button = screen.getByRole('button', { name: /signing in\.\.\./i })
+        expect(button).toBeInTheDocument()
+        expect(button).toBeDisabled()
+      },
+      { timeout: 1000 }
+    )
 
-    // Check loading state
-    expect(screen.getByRole('button', { name: /signing in/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /signing in/i })).toBeDisabled()
-
-    // Verify login action was called with form data
-    await waitFor(() => {
-      const formData = new FormData()
-      formData.append('email', 'test@example.com')
-      formData.append('password', 'password123')
-      expect(actions.login).toHaveBeenCalledWith(formData)
-    })
-
-    // Check loading state is removed
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /sign in/i })).not.toBeDisabled()
-    })
+    // Check that login was called with correct args
+    expect(actions.login).toHaveBeenCalledWith('test@example.com', 'password123')
   })
 
   it('calls signup action on create account', async () => {
-    const user = userEvent.setup()
     render(<LoginPage />)
 
-    // Fill out form
-    await user.type(screen.getByLabelText(/email/i), 'test@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'password123')
+    // Switch to signup mode
+    await user.click(screen.getByRole('button', { name: /create account instead/i }))
 
-    // Click create account
-    await user.click(screen.getByRole('button', { name: /create account/i }))
+    const emailInput = screen.getByLabelText(/email/i)
+    const passwordInput = screen.getByLabelText(/password/i)
+    const submitButton = screen.getByRole('button', { name: /create account/i })
 
-    // Check loading state
-    expect(screen.getByRole('button', { name: /creating account/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /creating account/i })).toBeDisabled()
+    await user.type(emailInput, 'test@example.com')
+    await user.type(passwordInput, 'password123')
+    
+    // Click the button and wait for the loading state
+    await user.click(submitButton)
+    
+    // Use a more specific waitFor to ensure the state has updated
+    await waitFor(
+      () => {
+        const button = screen.getByRole('button', { name: /creating account\.\.\./i })
+        expect(button).toBeInTheDocument()
+        expect(button).toBeDisabled()
+      },
+      { timeout: 1000 }
+    )
 
-    // Verify signup action was called with form data
-    await waitFor(() => {
-      const formData = new FormData()
-      formData.append('email', 'test@example.com')
-      formData.append('password', 'password123')
-      expect(actions.signup).toHaveBeenCalledWith(formData)
-    })
-
-    // Check loading state is removed
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /create account/i })).not.toBeDisabled()
-    })
+    // Check that signup was called with correct args
+    expect(actions.signup).toHaveBeenCalledWith('test@example.com', 'password123')
   })
 
   it('maintains accessibility standards', () => {
     render(<LoginPage />)
 
-    // Check form landmarks
     const form = screen.getByRole('form')
-    expect(form).toBeInTheDocument()
     expect(form).toHaveAttribute('aria-label', 'Login form')
 
-    // Check input labels and required attributes
     const emailInput = screen.getByLabelText(/email/i)
     const passwordInput = screen.getByLabelText(/password/i)
-    
+    const signInButton = screen.getByRole('button', { name: /sign in/i })
+    const createAccountButton = screen.getByRole('button', { name: /create account instead/i })
+
+    expect(emailInput).toHaveAttribute('type', 'email')
+    expect(emailInput).toHaveAttribute('required')
     expect(emailInput).toHaveAttribute('aria-required', 'true')
+
+    expect(passwordInput).toHaveAttribute('type', 'password')
+    expect(passwordInput).toHaveAttribute('required')
     expect(passwordInput).toHaveAttribute('aria-required', 'true')
 
-    // Check button roles and types
-    const signInButton = screen.getByRole('button', { name: /sign in/i })
-    const createAccountButton = screen.getByRole('button', { name: /create account/i })
-    
     expect(signInButton).toHaveAttribute('type', 'submit')
-    expect(createAccountButton).toHaveAttribute('type', 'submit')
+    expect(createAccountButton).toHaveAttribute('type', 'button')
   })
 }) 

@@ -26,7 +26,7 @@ const customJestConfig = {
     '^.+\\.(js|jsx|ts|tsx|mjs)$': ['babel-jest', { presets: ['next/babel'] }],
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(lucide-react|@radix-ui|@hookform|class-variance-authority|clsx|tailwind-merge)/)',
+    'node_modules/(?!(lucide-react|@radix-ui|@hookform|class-variance-authority|clsx|tailwind-merge|jose|@supabase)/)',
   ],
   moduleDirectories: ['node_modules', '<rootDir>/'],
   collectCoverage: true,

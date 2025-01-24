@@ -9,7 +9,7 @@ export default function Avatar({
   size = 150,
   onUpload,
 }: {
-  uid: string
+  uid: string | null
   url: string | null
   size: number
   onUpload: (url: string) => void
@@ -19,17 +19,15 @@ export default function Avatar({
   const [uploading, setUploading] = useState(false)
 
   useEffect(() => {
+    let objectUrl: string | null = null
+
     async function downloadImage(path: string) {
       try {
         const { data, error } = await supabase.storage.from('avatars').download(path)
         if (error) throw error
         
-        const objectUrl = URL.createObjectURL(data)
+        objectUrl = URL.createObjectURL(data)
         setAvatarUrl(objectUrl)
-        
-        return () => {
-          if (objectUrl) URL.revokeObjectURL(objectUrl)
-        }
       } catch (error) {
         console.error('Error downloading image:', error)
       }
@@ -37,6 +35,10 @@ export default function Avatar({
 
     if (url) {
       downloadImage(url)
+    }
+
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [url, supabase.storage])
 
@@ -46,6 +48,10 @@ export default function Avatar({
 
       if (!event.target.files || event.target.files.length === 0) {
         throw new Error('You must select an image to upload.')
+      }
+
+      if (!uid) {
+        throw new Error('No user ID provided.')
       }
 
       const file = event.target.files[0]
@@ -99,7 +105,7 @@ export default function Avatar({
           type="file"
           accept="image/*"
           onChange={uploadAvatar}
-          disabled={uploading}
+          disabled={uploading || !uid}
           className="hidden"
           aria-label="Upload avatar"
         />

@@ -442,6 +442,15 @@ INSERT INTO "public"."shifts" ("id", "shift_type_id", "start_time", "end_time", 
 -- Data for Name: staffing_requirements; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+-- Initial staffing requirements
+INSERT INTO public.staffing_requirements (period_name, start_time, end_time, minimum_employees, shift_supervisor_required)
+VALUES
+  ('Early Morning', '06:00:00', '10:00:00', 3, true),
+  ('Morning', '10:00:00', '14:00:00', 4, true),
+  ('Afternoon', '14:00:00', '18:00:00', 4, true),
+  ('Evening', '18:00:00', '22:00:00', 3, true),
+  ('Night', '22:00:00', '02:00:00', 2, true),
+  ('Late Night', '02:00:00', '06:00:00', 2, true);
 
 
 --
