@@ -30,6 +30,14 @@ ON public.staffing_requirements
 FOR SELECT
 USING (auth.role() = 'authenticated'::text);
 
+-- Drop existing function and type
+DROP FUNCTION IF EXISTS public.delete_employee_transaction(uuid);
+DROP FUNCTION IF EXISTS public.delete_employee_transaction(p_employee_id uuid);
+
+-- Clear schema cache
+SELECT pg_stat_clear_snapshot();
+SELECT pg_notify('pgrst', 'reload schema');
+
 -- Create employee deletion function
 CREATE OR REPLACE FUNCTION public.delete_employee_transaction(p_employee_id uuid)
 RETURNS void
@@ -39,12 +47,13 @@ SET search_path = public
 AS $$
 DECLARE
   v_employee_exists boolean;
+  v_error_message text;
 BEGIN
   -- Check if employee exists first
   SELECT EXISTS (
     SELECT 1 
-    FROM public.employees e
-    WHERE e.id = p_employee_id
+    FROM public.employees emp
+    WHERE emp.id = p_employee_id
   ) INTO v_employee_exists;
 
   IF NOT v_employee_exists THEN
@@ -54,36 +63,65 @@ BEGIN
   -- Start explicit transaction
   BEGIN
     -- Lock the employee record first to prevent concurrent modifications
-    PERFORM id 
-    FROM public.employees e
-    WHERE e.id = p_employee_id
+    PERFORM emp.id 
+    FROM public.employees emp
+    WHERE emp.id = p_employee_id
     FOR UPDATE;
 
     -- Delete employee schedules first
-    DELETE FROM public.schedules s
-    WHERE s.employee_id = p_employee_id;
+    DELETE FROM public.schedules sch
+    WHERE sch.employee_id = p_employee_id;
     
     -- Delete time off requests
-    DELETE FROM public.time_off_requests t
-    WHERE t.employee_id = p_employee_id;
+    DELETE FROM public.time_off_requests tor
+    WHERE tor.employee_id = p_employee_id;
     
     -- Delete employee record
-    DELETE FROM public.employees e
-    WHERE e.id = p_employee_id;
+    DELETE FROM public.employees emp
+    WHERE emp.id = p_employee_id;
     
     -- Delete profile
-    DELETE FROM public.profiles p
-    WHERE p.id = p_employee_id;
-    
-    -- Note: auth.delete_user is handled by Supabase's GoTrue service
-    -- In production, the user will be deleted via the Supabase client
+    DELETE FROM public.profiles prf
+    WHERE prf.id = p_employee_id;
 
   EXCEPTION
     WHEN OTHERS THEN
-      RAISE EXCEPTION 'Failed to delete employee: %', SQLERRM;
+      GET STACKED DIAGNOSTICS v_error_message = MESSAGE_TEXT;
+      RAISE EXCEPTION 'Failed to delete employee: %', v_error_message;
   END;
 END;
 $$;
+
+-- Drop any existing grants
+REVOKE ALL ON FUNCTION public.delete_employee_transaction(p_employee_id uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.delete_employee_transaction(p_employee_id uuid) FROM authenticated;
+
+-- Grant execute permission on the function
+GRANT EXECUTE ON FUNCTION public.delete_employee_transaction(p_employee_id uuid) TO authenticated;
+
+-- Ensure function is visible to PostgREST
+COMMENT ON FUNCTION public.delete_employee_transaction(p_employee_id uuid) IS 'Delete an employee and all related records';
+
+-- Force multiple schema cache reloads with delays
+DO $$
+BEGIN
+  -- Initial cache clear
+  PERFORM pg_stat_clear_snapshot();
+  
+  -- Multiple notifications with different messages
+  PERFORM pg_notify('pgrst', 'reload schema');
+  PERFORM pg_notify('pgrst', 'reload config');
+  PERFORM pg_notify('pgrst', 'reload cache');
+  
+  -- Wait a bit and send more notifications
+  PERFORM pg_sleep(0.1);
+  PERFORM pg_notify('pgrst', 'reload schema');
+  PERFORM pg_notify('pgrst', 'reload cache');
+  
+  -- Final reload for good measure
+  PERFORM pg_sleep(0.1);
+  PERFORM pg_notify('pgrst', 'reload schema');
+END $$;
 
 -- Create policy for profile deletions
 CREATE POLICY "Enable admin profile deletion"
@@ -95,17 +133,4 @@ USING (
     WHERE id = auth.uid()
     AND user_role IN ('Manager', 'Admin')
   )
-);
-
--- Grant execute permission on the function
-GRANT EXECUTE ON FUNCTION public.delete_employee_transaction(uuid) TO authenticated;
-
--- Ensure function is visible to PostgREST
-COMMENT ON FUNCTION public.delete_employee_transaction(uuid) IS 'Delete an employee and all related records';
-
--- Force PostgREST to reload schema cache
-NOTIFY pgrst, 'reload schema';
-
--- Additional cache invalidation
-SELECT pg_notify('pgrst', 'reload config');
-SELECT pg_notify('pgrst', 'reload cache'); 
+); 

@@ -40,9 +40,12 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     }
 
     // Call the transaction function to delete the employee
-    const { error: deleteError } = await supabase.rpc('delete_employee_transaction', {
-      p_employee_id: params.id
-    })
+    const { data, error: deleteError } = await supabase
+      .rpc('delete_employee_transaction', {
+        p_employee_id: params.id
+      }, {
+        head: false // Ensure we get the full response
+      })
 
     if (deleteError) {
       console.error('Error deleting employee:', deleteError)
