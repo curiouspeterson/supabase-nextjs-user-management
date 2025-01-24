@@ -171,6 +171,16 @@ export default function TimeOffPage() {
     (request) => request.status === selectedTab
   )
 
+  if (!user && !isLoading) {
+    return (
+      <div className="container py-10">
+        <div className="flex flex-col items-center justify-center py-8">
+          <p className="text-muted-foreground">Sign in to view time off requests</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="container py-10">
       <div className="mb-8 flex items-center justify-between">
@@ -187,7 +197,7 @@ export default function TimeOffPage() {
         value={selectedTab} 
         onValueChange={(value) => setSelectedTab(value as TimeOffStatus)}
       >
-        <TabsList>
+        <TabsList aria-label="Filter time off requests">
           <TabsTrigger value="Pending">Pending</TabsTrigger>
           <TabsTrigger value="Approved">Approved</TabsTrigger>
           <TabsTrigger value="Declined">Declined</TabsTrigger>
@@ -195,7 +205,7 @@ export default function TimeOffPage() {
         <TabsContent value={selectedTab}>
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin" />
+              <Loader2 className="h-8 w-8 animate-spin" data-testid="loading-spinner" />
             </div>
           ) : filteredRequests.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8">
@@ -204,9 +214,9 @@ export default function TimeOffPage() {
           ) : (
             <div className="grid gap-4">
               {filteredRequests.map((request) => (
-                <Card key={request.id}>
+                <Card key={request.id} role="article" aria-labelledby={`request-${request.id}`}>
                   <CardHeader>
-                    <CardTitle>
+                    <CardTitle id={`request-${request.id}`}>
                       {request.employee?.full_name || 'Unknown Employee'}
                     </CardTitle>
                     <CardDescription>
@@ -268,7 +278,10 @@ export default function TimeOffPage() {
       <TimeOffRequestDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        onSuccess={fetchRequests}
+        onSuccess={() => {
+          setDialogOpen(false)
+          fetchRequests()
+        }}
       />
     </div>
   )

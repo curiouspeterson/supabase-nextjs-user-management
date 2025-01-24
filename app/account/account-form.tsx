@@ -1,82 +1,94 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { createClient } from '@/utils/supabase/client'
-import { type User } from '@supabase/supabase-js'
-import Avatar from './avatar'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2 } from 'lucide-react'
+import { User } from '@supabase/supabase-js'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
+import Avatar from './avatar'
 
 export default function AccountForm({ user }: { user: User | null }) {
-  const supabase = createClient()
+  const supabase = createClientComponentClient()
   const router = useRouter()
   const [loading, setLoading] = useState(true)
-  const [signingOut, setSigningOut] = useState(false)
-  const [fullname, setFullname] = useState<string | null>(null)
-  const [username, setUsername] = useState<string | null>(null)
-  const [website, setWebsite] = useState<string | null>(null)
-  const [avatar_url, setAvatarUrl] = useState<string | null>(null)
+  const [fullName, setFullName] = useState('')
+  const [username, setUsername] = useState('')
+  const [website, setWebsite] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const getProfile = useCallback(async () => {
     try {
       setLoading(true)
+      setError(null)
 
-      const { data, error, status } = await supabase
+      if (!user) {
+        setLoading(false)
+        throw new Error('No user found')
+      }
+
+      const { data: profile, error: supabaseError } = await supabase
         .from('profiles')
-        .select(`full_name, username, website, avatar_url`)
-        .eq('id', user?.id)
+        .select('full_name, username, website, avatar_url')
+        .eq('id', user.id)
         .single()
 
-      if (error && status !== 406) {
-        throw error
+      if (supabaseError) {
+        throw supabaseError
       }
 
-      if (data) {
-        setFullname(data.full_name)
-        setUsername(data.username)
-        setWebsite(data.website)
-        setAvatarUrl(data.avatar_url)
+      if (!profile) {
+        throw new Error('No profile found')
       }
-    } catch (error) {
-      alert('Error loading user data!')
-    } finally {
+
+      setFullName(profile.full_name || '')
+      setUsername(profile.username || '')
+      setWebsite(profile.website || '')
+      setAvatarUrl(profile.avatar_url)
+      setLoading(false)
+    } catch (error: any) {
+      setError(error.message || 'Error loading user data')
       setLoading(false)
     }
   }, [user, supabase])
 
   useEffect(() => {
     getProfile()
-  }, [user, getProfile])
+  }, [getProfile])
 
   async function updateProfile({
     username,
     website,
-    avatar_url,
+    avatarUrl,
   }: {
-    username: string | null
-    fullname: string | null
-    website: string | null
-    avatar_url: string | null
+    username: string
+    website: string
+    avatarUrl: string | null
   }) {
     try {
       setLoading(true)
+      setError(null)
 
-      const { error } = await supabase.from('profiles').upsert({
-        id: user?.id as string,
-        full_name: fullname,
+      if (!user) {
+        throw new Error('No user found')
+      }
+
+      const updates = {
+        id: user.id,
         username,
         website,
-        avatar_url,
+        avatar_url: avatarUrl,
         updated_at: new Date().toISOString(),
-      })
-      if (error) throw error
-      alert('Profile updated!')
-    } catch (error) {
-      alert('Error updating the data!')
+      }
+
+      const { error: supabaseError } = await supabase.from('profiles').upsert(updates)
+
+      if (supabaseError) {
+        throw supabaseError
+      }
+
+      router.refresh()
+    } catch (error: any) {
+      setError(error.message || 'Error updating profile')
     } finally {
       setLoading(false)
     }
@@ -84,115 +96,145 @@ export default function AccountForm({ user }: { user: User | null }) {
 
   async function handleSignOut() {
     try {
-      setSigningOut(true)
+      setLoading(true)
+      setError(null)
       
-      // First sign out on client side
-      const { error } = await supabase.auth.signOut({ scope: 'global' })
-      if (error) throw error
+      const { error: signOutError } = await supabase.auth.signOut()
+      
+      if (signOutError) {
+        throw signOutError
+      }
 
-      // Then call server-side signout
-      await fetch('/auth/signout', { method: 'POST' })
-      
-      // Finally redirect
       router.push('/login')
-      router.refresh()
-    } catch (error) {
-      alert('Error signing out!')
-      setSigningOut(false)
+    } catch (error: any) {
+      setError(error.message || 'Error signing out')
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-2xl">
-        <CardHeader>
-          <CardTitle>Account Settings</CardTitle>
-          <CardDescription>Update your profile information and avatar</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex justify-center">
-            <Avatar
-              uid={user?.id ?? null}
-              url={avatar_url}
-              size={150}
-              onUpload={(url) => {
-                setAvatarUrl(url)
-                updateProfile({ fullname, username, website, avatar_url: url })
-              }}
-            />
-          </div>
-
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm w-full max-w-2xl">
+        <div className="flex flex-col space-y-1.5 p-6">
+          <h3 className="text-2xl font-semibold leading-none tracking-tight" id="account-settings-title">
+            Account Settings
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Update your profile information and avatar
+          </p>
+        </div>
+        <div className="p-6 pt-0" role="form" aria-labelledby="account-settings-title">
+          {error && (
+            <div className="bg-destructive/15 text-destructive text-sm p-3 rounded-md mb-4" role="alert">
+              {error}
+            </div>
+          )}
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="text" value={user?.email} disabled />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="fullName">Full Name</Label>
-              <Input
-                id="fullName"
-                type="text"
-                value={fullname || ''}
-                onChange={(e) => setFullname(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                type="text"
-                value={username || ''}
-                onChange={(e) => setUsername(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="website">Website</Label>
-              <Input
-                id="website"
-                type="url"
-                value={website || ''}
-                onChange={(e) => setWebsite(e.target.value)}
-              />
-            </div>
-          </div>
-        </CardContent>
-
-        <CardFooter className="flex flex-col space-y-4">
-          <Button
-            className="w-full"
-            onClick={() => updateProfile({ fullname, username, website, avatar_url })}
-            disabled={loading}
-          >
             {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Updating...
-              </>
+              <div className="flex justify-center py-4">
+                <svg
+                  className="lucide lucide-loader-circle h-6 w-6 animate-spin"
+                  data-testid="initial-loading-spinner"
+                  fill="none"
+                  height="24"
+                  role="progressbar"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                  width="24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              </div>
             ) : (
-              'Update Profile'
-            )}
-          </Button>
-
-          <Button 
-            variant="outline" 
-            className="w-full" 
-            onClick={handleSignOut}
-            disabled={signingOut}
-          >
-            {signingOut ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Signing out...
+                <div className="flex justify-center py-4">
+                  <Avatar
+                    uid={user?.id ?? null}
+                    url={avatarUrl}
+                    size={150}
+                    onUpload={(url) => {
+                      setAvatarUrl(url)
+                      updateProfile({ username, website, avatarUrl: url })
+                    }}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="email" className="text-sm font-medium">
+                    Email
+                  </label>
+                  <input
+                    id="email"
+                    type="text"
+                    value={user?.email}
+                    disabled
+                    className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="fullName" className="text-sm font-medium">
+                    Full Name
+                  </label>
+                  <input
+                    id="fullName"
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    disabled={!user}
+                    className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="username" className="text-sm font-medium">
+                    Username
+                  </label>
+                  <input
+                    id="username"
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    disabled={!user}
+                    className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="website" className="text-sm font-medium">
+                    Website
+                  </label>
+                  <input
+                    id="website"
+                    type="url"
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
+                    disabled={!user}
+                    className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                  />
+                </div>
+                <div className="flex justify-end gap-4">
+                  <button
+                    className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+                    onClick={() => updateProfile({ username, website, avatarUrl })}
+                    disabled={loading || !user}
+                  >
+                    {loading ? 'Updating...' : 'Update Profile'}
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                    onClick={handleSignOut}
+                    disabled={loading || !user}
+                  >
+                    Sign Out
+                  </button>
+                </div>
               </>
-            ) : (
-              'Sign out'
             )}
-          </Button>
-        </CardFooter>
-      </Card>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

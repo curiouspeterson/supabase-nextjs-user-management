@@ -106,7 +106,13 @@ export function TimeOffRequestDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent 
+        className="sm:max-w-[425px]"
+        onInteractOutside={(e) => {
+          // Prevent closing when clicking outside
+          e.preventDefault()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Request Time Off</DialogTitle>
           <DialogDescription>

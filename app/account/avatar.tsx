@@ -1,23 +1,20 @@
 'use client'
 import React, { useEffect, useState } from 'react'
-import { createClient } from '@/utils/supabase/client'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import Image from 'next/image'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Loader2, Upload } from 'lucide-react'
 
 export default function Avatar({
   uid,
   url,
-  size,
+  size = 150,
   onUpload,
 }: {
-  uid: string | null
+  uid: string
   url: string | null
   size: number
   onUpload: (url: string) => void
 }) {
-  const supabase = createClient()
+  const supabase = createClientComponentClient()
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
 
@@ -25,21 +22,25 @@ export default function Avatar({
     async function downloadImage(path: string) {
       try {
         const { data, error } = await supabase.storage.from('avatars').download(path)
-        if (error) {
-          throw error
+        if (error) throw error
+        
+        const objectUrl = URL.createObjectURL(data)
+        setAvatarUrl(objectUrl)
+        
+        return () => {
+          if (objectUrl) URL.revokeObjectURL(objectUrl)
         }
-
-        const url = URL.createObjectURL(data)
-        setAvatarUrl(url)
       } catch (error) {
-        console.log('Error downloading image: ', error)
+        console.error('Error downloading image:', error)
       }
     }
 
-    if (url) downloadImage(url)
-  }, [url, supabase])
+    if (url) {
+      downloadImage(url)
+    }
+  }, [url, supabase.storage])
 
-  const uploadAvatar: React.ChangeEventHandler<HTMLInputElement> = async (event) => {
+  const uploadAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
       setUploading(true)
 
@@ -70,50 +71,37 @@ export default function Avatar({
   return (
     <div className="flex flex-col items-center gap-4">
       {avatarUrl ? (
-        <div className="relative h-32 w-32 overflow-hidden rounded-full border-2 border-border">
-          <Image
-            src={avatarUrl}
-            alt="Avatar"
-            className="object-cover"
-            fill
-            sizes="(max-width: 128px) 100vw, 128px"
-          />
-        </div>
+        <Image
+          src={avatarUrl}
+          alt="User avatar"
+          className="rounded-full"
+          width={size}
+          height={size}
+        />
       ) : (
-        <div 
-          className="flex h-32 w-32 items-center justify-center rounded-full border-2 border-border bg-muted"
-          style={{ fontSize: size / 3 }}
-        >
-          ?
-        </div>
+        <Image
+          src="/default-avatar.png"
+          alt="Default avatar"
+          className="rounded-full"
+          width={size}
+          height={size}
+        />
       )}
-      <div className="flex flex-col items-center gap-2">
-        <Label
-          htmlFor="single"
-          className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+      <div>
+        <label
+          className="cursor-pointer text-sm text-gray-600 hover:text-gray-900"
+          htmlFor="avatar-upload"
         >
-          {uploading ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Uploading...
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Upload className="h-4 w-4" />
-              Upload Avatar
-            </div>
-          )}
-        </Label>
+          {uploading ? 'Uploading...' : 'Upload avatar'}
+        </label>
         <input
-          style={{
-            visibility: 'hidden',
-            position: 'absolute',
-          }}
+          id="avatar-upload"
           type="file"
-          id="single"
           accept="image/*"
           onChange={uploadAvatar}
           disabled={uploading}
+          className="hidden"
+          aria-label="Upload avatar"
         />
       </div>
     </div>

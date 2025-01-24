@@ -106,19 +106,13 @@ export default function TimeOffRequestForm({ employeeId, onRequestSubmitted }: P
       )}
 
       {success && (
-        <div className="text-green-500 text-sm">
-          Time off request submitted successfully!
-        </div>
+        <div className="text-green-500 text-sm">Time off request submitted successfully!</div>
       )}
 
       <button
         type="submit"
         disabled={submitting}
-        className={`w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-          submitting
-            ? 'bg-blue-400 cursor-not-allowed'
-            : 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500'
-        }`}
+        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
       >
         {submitting ? 'Submitting...' : 'Submit Request'}
       </button>

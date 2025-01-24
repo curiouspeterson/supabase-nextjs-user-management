@@ -38,6 +38,32 @@ jest.mock('@/utils/supabase/client', () => ({
   })),
 }))
 
+// Mock URL constructor and methods
+global.URL = {
+  createObjectURL: jest.fn(() => 'mock-object-url'),
+  revokeObjectURL: jest.fn(),
+} as any
+
+// Mock window.URL
+window.URL = {
+  createObjectURL: jest.fn(() => 'mock-object-url'),
+  revokeObjectURL: jest.fn(),
+} as any
+
+// Mock URL constructor
+global.URL.constructor = function(url: string) {
+  return {
+    href: url,
+    pathname: '/',
+    search: '',
+    hash: '',
+    host: 'localhost',
+    hostname: 'localhost',
+    protocol: 'http:',
+    origin: 'http://localhost',
+  }
+} as any
+
 // Suppress console errors and warnings in tests
 const originalError = console.error
 const originalWarn = console.warn

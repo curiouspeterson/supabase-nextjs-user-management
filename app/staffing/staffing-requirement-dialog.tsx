@@ -1,16 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { createBrowserClient } from '@supabase/ssr'
-import { useForm } from 'react-hook-form'
+import * as React from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useForm } from 'react-hook-form'
 import * as z from 'zod'
+
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from '@/components/ui/dialog'
 import {
   Form,
@@ -21,40 +23,39 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/components/ui/use-toast'
+import { Loader2 } from 'lucide-react'
 
-const formSchema = z.object({
+const staffingSchema = z.object({
+  day_of_week: z.string().min(1, 'Day of week is required'),
   period_name: z.string().min(1, 'Period name is required'),
-  start_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format (HH:MM)'),
-  end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format (HH:MM)'),
-  minimum_employees: z.number().min(1, 'Minimum employees must be at least 1'),
-  shift_supervisor_required: z.boolean().default(false),
+  start_time: z.string().min(1, 'Start time is required'),
+  end_time: z.string().min(1, 'End time is required'),
+  min_employees: z.number().min(1, 'Minimum employees must be at least 1'),
+  max_employees: z.number().min(1, 'Maximum employees must be at least 1'),
+  requires_supervisor: z.boolean(),
 })
 
-type FormValues = z.infer<typeof formSchema>
+type StaffingFormValues = z.infer<typeof staffingSchema>
+
+interface StaffingRequirement {
+  id: string
+  day_of_week: string
+  period_name: string
+  start_time: string
+  end_time: string
+  min_employees: number
+  max_employees: number
+  requires_supervisor: boolean
+  created_at: string
+  updated_at: string
+}
 
 interface StaffingRequirementDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  requirement?: {
-    id: string
-    period_name: string
-    start_time: string
-    end_time: string
-    minimum_employees: number
-    shift_supervisor_required: boolean
-  } | null
-  onSuccess: () => void
-}
-
-function stripSeconds(time: string): string {
-  return time.substring(0, 5) // Take only HH:MM part
-}
-
-function addSeconds(time: string): string {
-  return `${time}:00` // Add :00 seconds
+  requirement?: StaffingRequirement | null
+  onSuccess?: () => void
 }
 
 export function StaffingRequirementDialog({
@@ -63,81 +64,55 @@ export function StaffingRequirementDialog({
   requirement,
   onSuccess,
 }: StaffingRequirementDialogProps) {
-  const [loading, setLoading] = useState(false)
+  const [isLoading, setIsLoading] = React.useState(false)
   const { toast } = useToast()
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
 
-  const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+  const form = useForm<StaffingFormValues>({
+    resolver: zodResolver(staffingSchema),
     defaultValues: {
-      period_name: '',
-      start_time: '',
-      end_time: '',
-      minimum_employees: 1,
-      shift_supervisor_required: false,
+      day_of_week: requirement?.day_of_week || '',
+      period_name: requirement?.period_name || '',
+      start_time: requirement?.start_time || '',
+      end_time: requirement?.end_time || '',
+      min_employees: requirement?.min_employees || 1,
+      max_employees: requirement?.max_employees || 1,
+      requires_supervisor: requirement?.requires_supervisor || false,
     },
   })
 
-  // Reset form when requirement changes
-  useEffect(() => {
-    if (requirement) {
-      form.reset({
-        period_name: requirement.period_name,
-        start_time: stripSeconds(requirement.start_time),
-        end_time: stripSeconds(requirement.end_time),
-        minimum_employees: requirement.minimum_employees,
-        shift_supervisor_required: requirement.shift_supervisor_required,
-      })
-    } else {
-      form.reset({
-        period_name: '',
-        start_time: '',
-        end_time: '',
-        minimum_employees: 1,
-        shift_supervisor_required: false,
-      })
-    }
-  }, [requirement, form])
-
-  async function onSubmit(values: FormValues) {
+  async function onSubmit(data: StaffingFormValues) {
     try {
-      setLoading(true)
-      const { error } = requirement
-        ? await supabase
-            .from('staffing_requirements')
-            .update({
-              period_name: values.period_name,
-              start_time: addSeconds(values.start_time),
-              end_time: addSeconds(values.end_time),
-              minimum_employees: values.minimum_employees,
-              shift_supervisor_required: values.shift_supervisor_required,
-            })
-            .eq('id', requirement.id)
-        : await supabase.from('staffing_requirements').insert([{
-            ...values,
-            start_time: addSeconds(values.start_time),
-            end_time: addSeconds(values.end_time),
-          }])
+      setIsLoading(true)
 
-      if (error) throw error
+      // Create or update the requirement
+      const { error } = await (requirement
+        ? supabase
+            .from('staffing_requirements')
+            .update(data)
+            .eq('id', requirement.id)
+        : supabase.from('staffing_requirements').insert([data]))
+
+      if (error) {
+        throw error
+      }
 
       toast({
         title: 'Success',
-        description: `Staffing requirement ${requirement ? 'updated' : 'created'} successfully`,
+        description: `Staffing requirement ${requirement ? 'updated' : 'created'} successfully.`,
       })
-      onSuccess()
+
+      form.reset()
+      onOpenChange(false)
+      onSuccess?.()
     } catch (error) {
-      console.error('Error saving staffing requirement:', error)
+      console.error(error)
       toast({
         title: 'Error',
-        description: 'Failed to save staffing requirement',
+        description: `Failed to ${requirement ? 'update' : 'create'} staffing requirement. Please try again.`,
         variant: 'destructive',
       })
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
@@ -149,12 +124,38 @@ export function StaffingRequirementDialog({
             {requirement ? 'Edit' : 'Add'} Staffing Requirement
           </DialogTitle>
           <DialogDescription>
-            {requirement ? 'Update the staffing requirement details below.' : 'Enter the staffing requirement details below.'}
+            {requirement
+              ? 'Update the staffing requirement details below.'
+              : 'Add a new staffing requirement by filling out the form below.'}
           </DialogDescription>
         </DialogHeader>
-
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="day_of_week"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Day of Week</FormLabel>
+                  <FormControl>
+                    <select
+                      {...field}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="">Select a day</option>
+                      <option value="Monday">Monday</option>
+                      <option value="Tuesday">Tuesday</option>
+                      <option value="Wednesday">Wednesday</option>
+                      <option value="Thursday">Thursday</option>
+                      <option value="Friday">Friday</option>
+                      <option value="Saturday">Saturday</option>
+                      <option value="Sunday">Sunday</option>
+                    </select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <FormField
               control={form.control}
               name="period_name"
@@ -162,50 +163,57 @@ export function StaffingRequirementDialog({
                 <FormItem>
                   <FormLabel>Period Name</FormLabel>
                   <FormControl>
-                    <Input {...field} />
+                    <select
+                      {...field}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="">Select a period</option>
+                      <option value="Early Morning">Early Morning (5 AM - 9 AM)</option>
+                      <option value="Day">Day (9 AM - 9 PM)</option>
+                      <option value="Evening">Evening (9 PM - 1 AM)</option>
+                      <option value="Late Night">Late Night (1 AM - 5 AM)</option>
+                    </select>
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
-
             <FormField
               control={form.control}
               name="start_time"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Start Time (HH:MM)</FormLabel>
+                  <FormLabel>Start Time</FormLabel>
                   <FormControl>
-                    <Input {...field} placeholder="09:00" />
+                    <Input type="time" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
-
             <FormField
               control={form.control}
               name="end_time"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>End Time (HH:MM)</FormLabel>
+                  <FormLabel>End Time</FormLabel>
                   <FormControl>
-                    <Input {...field} placeholder="17:00" />
+                    <Input type="time" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
-
             <FormField
               control={form.control}
-              name="minimum_employees"
+              name="min_employees"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Minimum Employees</FormLabel>
                   <FormControl>
                     <Input
                       type="number"
+                      min={1}
                       {...field}
                       onChange={(e) => field.onChange(parseInt(e.target.value))}
                     />
@@ -214,25 +222,43 @@ export function StaffingRequirementDialog({
                 </FormItem>
               )}
             />
-
             <FormField
               control={form.control}
-              name="shift_supervisor_required"
+              name="max_employees"
               render={({ field }) => (
-                <FormItem className="flex flex-row items-start space-x-3 space-y-0">
+                <FormItem>
+                  <FormLabel>Maximum Employees</FormLabel>
                   <FormControl>
-                    <Checkbox
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
+                    <Input
+                      type="number"
+                      min={1}
+                      {...field}
+                      onChange={(e) => field.onChange(parseInt(e.target.value))}
                     />
                   </FormControl>
-                  <FormLabel>Shift Supervisor Required</FormLabel>
                   <FormMessage />
                 </FormItem>
               )}
             />
-
-            <div className="flex justify-end space-x-4">
+            <FormField
+              control={form.control}
+              name="requires_supervisor"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center space-x-2">
+                  <FormControl>
+                    <input
+                      type="checkbox"
+                      checked={field.value}
+                      onChange={(e) => field.onChange(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                  </FormControl>
+                  <FormLabel>Requires Supervisor</FormLabel>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <DialogFooter>
               <Button
                 type="button"
                 variant="outline"
@@ -240,10 +266,11 @@ export function StaffingRequirementDialog({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? 'Saving...' : 'Save'}
+              <Button type="submit" disabled={isLoading}>
+                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {requirement ? 'Update' : 'Create'}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </Form>
       </DialogContent>
