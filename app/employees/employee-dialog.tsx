@@ -34,7 +34,7 @@ import { Database } from '@/app/database.types'
 
 const formSchema = z.object({
   full_name: z.string().min(1, 'Full name is required'),
-  email: z.string().email('Invalid email').optional(),
+  email: z.string().email('Invalid email').min(1, 'Email is required'),
   employee_role: z.enum(['Dispatcher', 'Shift Supervisor', 'Management']),
   user_role: z.enum(['Employee', 'Manager', 'Admin']),
   weekly_hours_scheduled: z.coerce
@@ -111,6 +111,7 @@ export function EmployeeDialog({
   // Reset form when employee changes
   useEffect(() => {
     if (employee) {
+      console.log('Setting employee data:', employee)
       form.reset({
         full_name: employee.profiles?.full_name || '',
         email: employee.email || '',
@@ -209,7 +210,11 @@ export function EmployeeDialog({
                 <FormItem>
                   <FormLabel>Email</FormLabel>
                   <FormControl>
-                    <Input {...field} />
+                    <Input 
+                      {...field} 
+                      disabled={mode === 'edit'}
+                      placeholder={mode === 'edit' ? 'Email cannot be changed' : 'Enter email'}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
