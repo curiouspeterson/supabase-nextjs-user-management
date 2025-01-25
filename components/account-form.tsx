@@ -1,93 +1,104 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useSupabase } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/ui/use-toast'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import Avatar from '@/components/avatar'
+import { useSupabase } from '@/lib/supabase/client'
+import { Avatar } from '@/components/avatar'
 
 interface Profile {
   id: string
-  username: string
-  full_name: string | null
   avatar_url: string | null
+  full_name: string | null
+  username: string | null
   website: string | null
   updated_at: string
 }
 
-export default function AccountForm() {
-  const { supabase, user } = useSupabase()
+export function AccountForm() {
+  const router = useRouter()
   const { toast } = useToast()
-  const [loading, setLoading] = useState(true)
-  const [fullName, setFullName] = useState<string>('')
-  const [username, setUsername] = useState<string>('')
-  const [website, setWebsite] = useState<string>('')
-  const [avatarUrl, setAvatarUrl] = useState<string>('')
+  const { supabase, user } = useSupabase()
+  const [loading, setLoading] = useState(false)
+  const [fullName, setFullName] = useState('')
+  const [username, setUsername] = useState('')
+  const [website, setWebsite] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const getProfile = useCallback(async () => {
     try {
-      setLoading(true)
-
+      setError(null)
       if (!user) throw new Error('No user')
 
-      const { data: profile, error } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
         .single()
 
-      if (error) {
-        throw error
-      }
+      if (profileError) throw profileError
 
-      if (profile) {
-        setFullName(profile.full_name || '')
-        setUsername(profile.username || '')
-        setWebsite(profile.website || '')
-        setAvatarUrl(profile.avatar_url || '')
-      }
+      setFullName(profile.full_name || '')
+      setUsername(profile.username || '')
+      setWebsite(profile.website || '')
+      setAvatarUrl(profile.avatar_url)
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Error loading user profile',
-        variant: 'destructive'
-      })
-    } finally {
-      setLoading(false)
+      setError('Error loading profile')
+      console.error('Error loading profile:', error)
     }
-  }, [user, supabase, toast])
+  }, [user, supabase])
 
   useEffect(() => {
     getProfile()
   }, [getProfile])
 
-  async function updateProfile() {
+  async function updateProfile(updates: Partial<Profile> = {}) {
     try {
       setLoading(true)
+      setError(null)
 
       if (!user) throw new Error('No user')
+      if (!fullName.trim()) throw new Error('Full name is required')
 
-      const updates: Partial<Profile> = {
+      const { error: updateError } = await supabase.from('profiles').upsert({
         id: user.id,
         full_name: fullName,
         username,
         website,
         avatar_url: avatarUrl,
-        updated_at: new Date().toISOString()
-      }
+        updated_at: new Date().toISOString(),
+        ...updates
+      })
 
-      const { error } = await supabase.from('profiles').upsert(updates)
-
-      if (error) throw error
+      if (updateError) throw updateError
 
       toast({
-        title: 'Success',
-        description: 'Profile updated successfully'
+        title: 'Profile updated',
+        description: 'Your profile has been updated successfully.'
       })
+      
+      router.refresh()
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Error updating profile')
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Error updating profile',
+        variant: 'destructive'
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSignOut() {
+    try {
+      setLoading(true)
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+      router.refresh()
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Error updating profile',
+        description: 'Error signing out',
         variant: 'destructive'
       })
     } finally {
@@ -107,77 +118,86 @@ export default function AccountForm() {
           </p>
         </div>
         <div className="p-6 pt-0" role="form" aria-labelledby="account-settings-title">
+          {error && (
+            <div role="alert" className="text-destructive text-sm">
+              {error}
+            </div>
+          )}
           <div className="space-y-4">
             <div className="flex justify-center py-4">
               <Avatar
-                url={avatarUrl}
+                url={avatarUrl || undefined}
                 size={150}
-                onUpload={async (path) => {
-                  setAvatarUrl(path)
-                  await updateProfile()
+                onUpload={async (url) => {
+                  await updateProfile({ avatar_url: url })
                 }}
               />
             </div>
-
             <div>
-              <Label htmlFor="email">Email</Label>
-              <Input
+              <label htmlFor="email" className="text-sm font-medium">
+                Email
+              </label>
+              <input
                 id="email"
                 type="text"
                 value={user?.email}
                 disabled
-                className="mt-1"
+                className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
-
             <div>
-              <Label htmlFor="fullName">Full Name</Label>
-              <Input
+              <label htmlFor="fullName" className="text-sm font-medium">
+                Full Name
+              </label>
+              <input
                 id="fullName"
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                className="mt-1"
+                required
+                className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                aria-invalid={error ? 'true' : 'false'}
               />
             </div>
-
             <div>
-              <Label htmlFor="username">Username</Label>
-              <Input
+              <label htmlFor="username" className="text-sm font-medium">
+                Username
+              </label>
+              <input
                 id="username"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="mt-1"
+                className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
               />
             </div>
-
             <div>
-              <Label htmlFor="website">Website</Label>
-              <Input
+              <label htmlFor="website" className="text-sm font-medium">
+                Website
+              </label>
+              <input
                 id="website"
                 type="url"
                 value={website}
                 onChange={(e) => setWebsite(e.target.value)}
-                className="mt-1"
+                className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
               />
             </div>
-
             <div className="flex justify-end gap-4">
-              <Button
-                onClick={updateProfile}
+              <button
+                onClick={() => updateProfile()}
                 disabled={loading}
+                aria-disabled={loading}
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
               >
-                {loading ? 'Saving...' : 'Update Profile'}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  await supabase.auth.signOut()
-                }}
+                {loading ? 'Updating...' : 'Update Profile'}
+              </button>
+              <button
+                onClick={handleSignOut}
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
               >
                 Sign Out
-              </Button>
+              </button>
             </div>
           </div>
         </div>

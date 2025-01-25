@@ -1,15 +1,39 @@
 import '@testing-library/jest-dom'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { TimeOffRequestForm } from '@/components/time-off/TimeOffRequestForm'
+import { TimeOffRequestForm } from '@/components/time-off/time-off-request-form'
 import { User } from '@supabase/supabase-js'
 import { createClient } from '@/utils/supabase/client'
 import * as useToastModule from '@/components/ui/use-toast'
-import { mockToast } from '@/lib/test-utils'
+
+// Mock Next.js router
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({
+    refresh: jest.fn(),
+    push: jest.fn()
+  })
+}))
+
+// Mock useToast
+jest.mock('@/components/ui/use-toast', () => ({
+  useToast: () => ({
+    toast: jest.fn()
+  })
+}))
+
+// Mock useErrorHandler
+jest.mock('@/lib/error-handler', () => ({
+  useErrorHandler: () => ({
+    handleError: jest.fn()
+  })
+}))
 
 // Mock hasPointerCapture for Radix UI
 Element.prototype.hasPointerCapture = () => false
 Element.prototype.scrollIntoView = () => {}
+
+// Mock toast
+const mockToast = jest.fn()
 
 const mockUser: User = {
   id: '123',
@@ -70,7 +94,7 @@ describe('TimeOffRequestForm', () => {
         insert: mockInsert
       }))
 
-      render(<TimeOffRequestForm />)
+      render(<TimeOffRequestForm userId={mockUser.id} />)
 
       const startDate = screen.getByLabelText('Start Date')
       const endDate = screen.getByLabelText('End Date')
@@ -96,7 +120,7 @@ describe('TimeOffRequestForm', () => {
     })
 
     it('validates maximum consecutive days', async () => {
-      render(<TimeOffRequestForm />)
+      render(<TimeOffRequestForm userId={mockUser.id} />)
 
       const startDate = screen.getByLabelText('Start Date')
       const endDate = screen.getByLabelText('End Date')
@@ -120,7 +144,7 @@ describe('TimeOffRequestForm', () => {
 
     it('handles database connection errors', async () => {
       mockInsert.mockRejectedValueOnce(new Error('Database connection failed'))
-      render(<TimeOffRequestForm />)
+      render(<TimeOffRequestForm userId={mockUser.id} />)
 
       const startDate = screen.getByLabelText('Start Date')
       const endDate = screen.getByLabelText('End Date')
@@ -155,7 +179,7 @@ describe('TimeOffRequestForm', () => {
         insert: mockInsert
       }))
 
-      render(<TimeOffRequestForm />)
+      render(<TimeOffRequestForm userId={mockUser.id} />)
 
       const startDate = screen.getByLabelText('Start Date')
       const endDate = screen.getByLabelText('End Date')
@@ -179,7 +203,7 @@ describe('TimeOffRequestForm', () => {
 
     it('handles form reset after error', async () => {
       mockInsert.mockRejectedValueOnce(new Error('Submission failed'))
-      render(<TimeOffRequestForm />)
+      render(<TimeOffRequestForm userId={mockUser.id} />)
 
       const startDate = screen.getByLabelText('Start Date')
       const endDate = screen.getByLabelText('End Date')
@@ -206,7 +230,7 @@ describe('TimeOffRequestForm', () => {
     })
 
     it('provides accessible validation feedback', async () => {
-      render(<TimeOffRequestForm />)
+      render(<TimeOffRequestForm userId={mockUser.id} />)
 
       const submitButton = screen.getByRole('button', { name: 'Submit Request' })
       await user.click(submitButton)
@@ -222,7 +246,7 @@ describe('TimeOffRequestForm', () => {
   })
 
   it('renders form fields', () => {
-    render(<TimeOffRequestForm />)
+    render(<TimeOffRequestForm userId={mockUser.id} />)
     
     expect(screen.getByLabelText('Start Date')).toBeRequired()
     expect(screen.getByLabelText('End Date')).toBeRequired()
@@ -231,7 +255,7 @@ describe('TimeOffRequestForm', () => {
   })
 
   it('validates end date is not before start date', async () => {
-    render(<TimeOffRequestForm />)
+    render(<TimeOffRequestForm userId={mockUser.id} />)
 
     const startDateInput = screen.getByLabelText(/start date/i)
     const endDateInput = screen.getByLabelText(/end date/i)
@@ -252,7 +276,7 @@ describe('TimeOffRequestForm', () => {
   })
 
   it('submits the form successfully', async () => {
-    render(<TimeOffRequestForm />)
+    render(<TimeOffRequestForm userId={mockUser.id} />)
 
     const startDate = screen.getByLabelText('Start Date')
     const endDate = screen.getByLabelText('End Date')
@@ -298,7 +322,7 @@ describe('TimeOffRequestForm', () => {
       } as any
     })
     
-    render(<TimeOffRequestForm />)
+    render(<TimeOffRequestForm userId={mockUser.id} />)
 
     const startDate = screen.getByLabelText('Start Date')
     const endDate = screen.getByLabelText('End Date')
@@ -345,7 +369,7 @@ describe('TimeOffRequestForm', () => {
       }, 100)
     }))
 
-    render(<TimeOffRequestForm />)
+    render(<TimeOffRequestForm userId={mockUser.id} />)
 
     // Fill out form
     const startDateInput = screen.getByLabelText('Start Date')

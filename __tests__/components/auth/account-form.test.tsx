@@ -4,6 +4,9 @@ import AccountForm from '@/app/account/account-form'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import { User } from '@supabase/supabase-js'
+import userEvent from '@testing-library/user-event'
+import { useToast } from '@/components/ui/use-toast'
+import { useSupabase } from '@/lib/supabase/client'
 
 // Mock Next.js router
 const mockRouter = {
@@ -82,8 +85,16 @@ interface MockSupabaseClient {
 // Create mock Supabase client with proper types
 const mockUser = {
   id: 'test-user-id',
-  email: 'test@example.com'
-}
+  email: 'test@example.com',
+  app_metadata: {},
+  user_metadata: {},
+  aud: 'authenticated',
+  created_at: new Date().toISOString(),
+  confirmed_at: new Date().toISOString(),
+  last_sign_in_at: new Date().toISOString(),
+  role: 'authenticated',
+  updated_at: new Date().toISOString()
+} as const
 
 const mockProfile = {
   id: mockUser.id,
@@ -94,34 +105,34 @@ const mockProfile = {
   updated_at: new Date().toISOString()
 }
 
+type MockQueryBuilder = {
+  upsert: jest.Mock
+  select: jest.Mock
+  eq: jest.Mock
+  single: jest.Mock
+}
+
+const mockQueryBuilder: MockQueryBuilder = {
+  upsert: jest.fn().mockResolvedValue({ data: mockProfile, error: null }),
+  select: jest.fn().mockReturnThis(),
+  eq: jest.fn().mockReturnThis(),
+  single: jest.fn().mockResolvedValue({ data: mockProfile, error: null })
+}
+
 const mockSupabaseClient = {
-  from: jest.fn().mockReturnValue({
-    upsert: jest.fn().mockResolvedValue({
-      data: mockProfile,
-      error: null
-    }),
-    select: jest.fn().mockResolvedValue({
-      data: [mockProfile],
-      error: null
-    })
-  }),
-  storage: {
-    from: jest.fn().mockReturnValue({
-      upload: jest.fn().mockResolvedValue({ data: { path: 'avatars/test.jpg' }, error: null }),
-      getPublicUrl: jest.fn().mockReturnValue({ data: { publicUrl: 'https://test.com/avatar.jpg' } })
-    })
-  },
+  from: jest.fn(() => mockQueryBuilder),
   auth: {
-    signOut: jest.fn(() => Promise.resolve({ error: null })),
+    signOut: jest.fn().mockResolvedValue({ error: null }),
     getUser: jest.fn().mockResolvedValue({ data: { user: mockUser }, error: null })
   }
-}
+} as const
 
 // Mock useSupabase hook
 jest.mock('@/lib/supabase/client', () => ({
   useSupabase: () => ({
     supabase: mockSupabaseClient,
-    user: mockUser
+    user: mockUser,
+    error: null
   })
 }))
 
@@ -130,8 +141,52 @@ jest.mock('@supabase/auth-helpers-nextjs', () => ({
 }))
 
 describe('AccountForm', () => {
+  const mockToast = jest.fn()
+  const mockRouter = { refresh: jest.fn() }
+  const mockUser: User = {
+    id: 'test-user-id',
+    email: 'test@example.com',
+    app_metadata: {},
+    user_metadata: {},
+    aud: 'authenticated',
+    created_at: new Date().toISOString(),
+    confirmed_at: new Date().toISOString(),
+    last_sign_in_at: new Date().toISOString(),
+    role: 'authenticated',
+    updated_at: new Date().toISOString()
+  }
+  const mockProfile = {
+    id: mockUser.id,
+    full_name: 'Test User',
+    username: 'testuser',
+    website: 'https://test.com',
+    avatar_url: 'mock-url',
+    updated_at: mockUser.updated_at
+  }
+  const mockSupabaseClient = {
+    from: jest.fn(() => ({
+      select: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      upsert: jest.fn().mockResolvedValue({ data: mockProfile, error: null }),
+      single: jest.fn().mockResolvedValue({ data: mockProfile, error: null })
+    })),
+    auth: {
+      signOut: jest.fn().mockResolvedValue({ error: null })
+    }
+  }
+  let user: ReturnType<typeof userEvent.setup>
+
   beforeEach(() => {
     jest.clearAllMocks()
+    user = userEvent.setup()
+    ;(useRouter as jest.Mock).mockReturnValue(mockRouter)
+    ;(useToast as jest.Mock).mockReturnValue({ toast: mockToast })
+    ;(useSupabase as jest.Mock).mockReturnValue({
+      supabase: mockSupabaseClient,
+      user: mockUser,
+      error: null
+    })
     
     // Reset mock implementations with proper types
     const single = jest.fn().mockResolvedValue(defaultProfileData)
@@ -189,39 +244,28 @@ describe('AccountForm', () => {
   it('handles profile update', async () => {
     render(<AccountForm user={mockUser} />)
 
-    // Wait for loading to complete
-    await waitFor(() => {
-      expect(screen.queryByTestId('initial-loading-spinner')).not.toBeInTheDocument()
-    })
-
-    // Update form fields
     const fullNameInput = screen.getByLabelText(/full name/i)
-    await act(async () => {
-      fireEvent.change(fullNameInput, {
-        target: { value: 'Updated Name' }
-      })
-    })
+    await user.clear(fullNameInput)
+    await user.type(fullNameInput, 'Updated Name')
 
-    // Submit form
     const updateButton = screen.getByRole('button', { name: /update profile/i })
-    expect(updateButton).not.toBeDisabled()
-    
-    await act(async () => {
-      fireEvent.click(updateButton)
-    })
+    await user.click(updateButton)
 
-    // Verify Supabase calls
     await waitFor(() => {
       expect(mockSupabaseClient.from).toHaveBeenCalledWith('profiles')
-      expect(mockSupabaseClient.from().upsert).toHaveBeenCalledWith(expect.objectContaining({
+      expect(mockSupabaseClient.from().upsert).toHaveBeenCalledWith({
         id: mockUser.id,
         full_name: 'Updated Name',
-        username: 'testuser',
-        website: 'https://test.com',
-        avatar_url: 'https://test.com/avatar.jpg',
+        username: mockProfile.username,
+        website: mockProfile.website,
+        avatar_url: mockProfile.avatar_url,
         updated_at: expect.any(String)
-      }))
+      })
       expect(mockRouter.refresh).toHaveBeenCalled()
+      expect(mockToast).toHaveBeenCalledWith({
+        title: 'Success',
+        description: 'Profile updated successfully'
+      })
     })
   })
 
@@ -258,12 +302,11 @@ describe('AccountForm', () => {
     }
 
     const errorMockChain = {
-      select: jest.fn(() => ({
-        eq: jest.fn(() => ({
-          single: jest.fn(() => Promise.resolve(errorResponse))
-        }))
-      })),
-      upsert: jest.fn(() => Promise.resolve({ data: null, error: null }))
+      select: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      upsert: jest.fn().mockResolvedValue({ data: null, error: null }),
+      single: jest.fn().mockResolvedValue({ data: null, error: { message: errorMessage } })
     }
 
     mockSupabaseClient.from.mockImplementationOnce(() => errorMockChain)

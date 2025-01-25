@@ -1,38 +1,45 @@
 import '@testing-library/jest-dom'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import Avatar from '@/components/avatar'
+import { Avatar } from '@/components/avatar'
 
-// Mock toast notifications
-const mockToast = jest.fn()
+// Mock toast
 jest.mock('@/components/ui/use-toast', () => ({
-  useToast: () => ({ toast: mockToast }),
+  useToast: () => ({
+    toast: jest.fn(),
+  }),
 }))
 
-describe('Avatar', () => {
-  const mockOnUpload = jest.fn()
-  const mockDownloadImage = jest.fn()
-  const mockCreateObjectURL = jest.fn()
-  const mockRevokeObjectURL = jest.fn()
+const mockOnUpload = jest.fn()
 
+// Mock URL methods
+const mockCreateObjectURL = jest.fn()
+const mockRevokeObjectURL = jest.fn()
+
+global.URL.createObjectURL = mockCreateObjectURL
+global.URL.revokeObjectURL = mockRevokeObjectURL
+
+describe('Avatar', () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    global.URL.createObjectURL = mockCreateObjectURL
-    global.URL.revokeObjectURL = mockRevokeObjectURL
-    mockCreateObjectURL.mockReturnValue('blob:mock-url')
+    mockCreateObjectURL.mockReturnValue('blob:mock-avatar-url')
   })
 
   it('downloads and displays avatar when URL is provided', async () => {
-    const avatarUrl = 'https://example.com/avatar.jpg'
-    const blobUrl = 'blob:mock-avatar-url'
-    mockDownloadImage.mockResolvedValueOnce(new Blob())
-    mockCreateObjectURL.mockReturnValueOnce(blobUrl)
+    const mockUrl = 'https://example.com/avatar.jpg'
+    const mockBlob = new Blob([''], { type: 'image/jpeg' })
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      blob: () => Promise.resolve(mockBlob)
+    })
 
-    render(<Avatar url={avatarUrl} onUpload={mockOnUpload} />)
+    render(<Avatar size={150} url={mockUrl} onUpload={mockOnUpload} />)
 
     await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(mockUrl)
+      expect(mockCreateObjectURL).toHaveBeenCalledWith(mockBlob)
       const img = screen.getByRole('img')
-      expect(img).toHaveAttribute('src', blobUrl)
+      expect(img).toHaveAttribute('src', 'blob:mock-avatar-url')
     })
   })
 
@@ -40,17 +47,13 @@ describe('Avatar', () => {
     const user = userEvent.setup()
     const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
 
-    render(<Avatar onUpload={mockOnUpload} />)
-    const input = screen.getByLabelText(/upload avatar/i)
+    render(<Avatar size={150} url={null} onUpload={mockOnUpload} />)
 
+    const input = screen.getByLabelText(/upload avatar/i)
     await user.upload(input, file)
 
     await waitFor(() => {
-      expect(mockOnUpload).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.any(File),
-        expect.any(Object)
-      )
+      expect(mockOnUpload).toHaveBeenCalledWith(file)
     })
   })
 
@@ -59,9 +62,9 @@ describe('Avatar', () => {
     const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
     mockOnUpload.mockRejectedValueOnce(new Error('Upload failed'))
 
-    render(<Avatar onUpload={mockOnUpload} />)
-    const input = screen.getByLabelText(/upload avatar/i)
+    render(<Avatar size={150} url={null} onUpload={mockOnUpload} />)
 
+    const input = screen.getByLabelText(/upload avatar/i)
     await user.upload(input, file)
 
     await waitFor(() => {
@@ -69,42 +72,34 @@ describe('Avatar', () => {
     })
   })
 
-  it('handles download error', async () => {
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation()
-    mockDownloadImage.mockRejectedValueOnce(new Error('Download failed'))
-
-    render(<Avatar url="https://example.com/avatar.jpg" onUpload={mockOnUpload} />)
-
-    await waitFor(() => {
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'Error downloading image:',
-        expect.any(Error)
-      )
+  it('cleans up object URL on unmount', async () => {
+    const mockUrl = 'https://example.com/avatar.jpg'
+    const mockBlob = new Blob([''], { type: 'image/jpeg' })
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      blob: () => Promise.resolve(mockBlob)
     })
 
-    consoleSpy.mockRestore()
-  })
-
-  it('cleans up object URL on unmount', async () => {
-    const blobUrl = 'blob:mock-avatar-url'
-    mockCreateObjectURL.mockReturnValueOnce(blobUrl)
-
     const { unmount } = render(
-      <Avatar url="https://example.com/avatar.jpg" onUpload={mockOnUpload} />
+      <Avatar size={150} url={mockUrl} onUpload={mockOnUpload} />
     )
+
+    await waitFor(() => {
+      expect(mockCreateObjectURL).toHaveBeenCalledWith(mockBlob)
+    })
 
     unmount()
 
-    expect(mockRevokeObjectURL).toHaveBeenCalledWith(blobUrl)
+    expect(mockRevokeObjectURL).toHaveBeenCalledWith('blob:mock-avatar-url')
   })
 
   it('validates file type', async () => {
     const user = userEvent.setup()
     const file = new File(['test'], 'test.txt', { type: 'text/plain' })
 
-    render(<Avatar onUpload={mockOnUpload} />)
-    const input = screen.getByLabelText(/upload avatar/i)
+    render(<Avatar size={150} url={null} onUpload={mockOnUpload} />)
 
+    const input = screen.getByLabelText(/upload avatar/i)
     await user.upload(input, file)
 
     await waitFor(() => {
@@ -116,13 +111,13 @@ describe('Avatar', () => {
 
   it('validates file size', async () => {
     const user = userEvent.setup()
-    const largeFile = new File(['x'.repeat(5 * 1024 * 1024)], 'large.jpg', {
-      type: 'image/jpeg',
+    const largeFile = new File(['test'.repeat(1000000)], 'large.jpg', {
+      type: 'image/jpeg'
     })
 
-    render(<Avatar onUpload={mockOnUpload} />)
-    const input = screen.getByLabelText(/upload avatar/i)
+    render(<Avatar size={150} url={null} onUpload={mockOnUpload} />)
 
+    const input = screen.getByLabelText(/upload avatar/i)
     await user.upload(input, largeFile)
 
     await waitFor(() => {

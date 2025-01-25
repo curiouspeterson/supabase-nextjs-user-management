@@ -2,18 +2,33 @@ import '@testing-library/jest-dom'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { StaffingRequirementsTable } from '@/app/staffing/staffing-requirements-table'
-import { createClient } from '@supabase/supabase-js'
 import { useToast } from '@/components/ui/use-toast'
 
-// Mock the useToast hook
+// Mock useToast
 jest.mock('@/components/ui/use-toast', () => ({
-  useToast: jest.fn(() => ({
-    toast: jest.fn(),
-  })),
+  useToast: jest.fn()
 }))
 
-// Mock the createClient
-jest.mock('@supabase/supabase-js')
+// Mock createClient
+const mockSupabaseClient = {
+  from: jest.fn(() => ({
+    select: jest.fn().mockReturnThis(),
+    order: jest.fn().mockReturnThis(),
+    eq: jest.fn().mockReturnThis(),
+    delete: jest.fn().mockResolvedValue({ error: null }),
+    upsert: jest.fn().mockResolvedValue({ error: null }),
+    single: jest.fn().mockResolvedValue({ data: mockRequirements[0], error: null })
+  })),
+  auth: {
+    getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'test-user', role: 'manager' } }, error: null })
+  }
+}
+
+const mockCreateClient = jest.fn(() => mockSupabaseClient)
+
+jest.mock('@supabase/supabase-js', () => ({
+  createClient: mockCreateClient
+}))
 
 const mockRequirements = [
   {
@@ -28,14 +43,6 @@ const mockRequirements = [
   }
 ]
 
-const mockSupabaseClient = {
-  from: jest.fn(() => ({
-    select: jest.fn().mockResolvedValue({ data: mockRequirements, error: null }),
-    delete: jest.fn().mockResolvedValue({ error: null }),
-    upsert: jest.fn().mockResolvedValue({ error: null })
-  }))
-}
-
 describe('StaffingRequirementsTable', () => {
   let user: ReturnType<typeof userEvent.setup>
   const mockToast = jest.fn()
@@ -44,7 +51,6 @@ describe('StaffingRequirementsTable', () => {
     jest.clearAllMocks()
     user = userEvent.setup()
     ;(useToast as jest.Mock).mockReturnValue({ toast: mockToast })
-    ;(createClient as jest.Mock).mockReturnValue(mockSupabaseClient)
   })
 
   it('renders loading state initially', () => {
@@ -69,8 +75,11 @@ describe('StaffingRequirementsTable', () => {
   it('shows error state when loading fails', async () => {
     mockSupabaseClient.from.mockImplementationOnce(() => ({
       select: jest.fn().mockResolvedValue({ data: null, error: new Error('Failed to load') }),
+      order: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
       delete: jest.fn().mockResolvedValue({ error: null }),
-      upsert: jest.fn().mockResolvedValue({ error: null })
+      upsert: jest.fn().mockResolvedValue({ error: null }),
+      single: jest.fn().mockResolvedValue({ data: null, error: null })
     }))
 
     render(<StaffingRequirementsTable isManager={true} />)
@@ -210,10 +219,13 @@ describe('StaffingRequirementsTable', () => {
       // Mock error response
       mockSupabaseClient.from.mockImplementationOnce(() => ({
         select: jest.fn().mockResolvedValue({ data: mockRequirements, error: null }),
+        order: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
         delete: jest.fn().mockResolvedValue({ error: null }),
         upsert: jest.fn().mockResolvedValue({ 
           error: new Error('Failed to update requirement')
-        })
+        }),
+        single: jest.fn().mockResolvedValue({ data: null, error: null })
       }))
 
       const saveButton = screen.getByRole('button', { name: /save changes/i })
@@ -277,10 +289,13 @@ describe('StaffingRequirementsTable', () => {
     it('handles delete errors', async () => {
       mockSupabaseClient.from.mockImplementationOnce(() => ({
         select: jest.fn().mockResolvedValue({ data: mockRequirements, error: null }),
+        order: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
         delete: jest.fn().mockResolvedValue({ 
           error: new Error('Failed to delete requirement')
         }),
-        upsert: jest.fn().mockResolvedValue({ error: null })
+        upsert: jest.fn().mockResolvedValue({ error: null }),
+        single: jest.fn().mockResolvedValue({ data: null, error: null })
       }))
 
       render(<StaffingRequirementsTable isManager={true} />)
@@ -424,10 +439,13 @@ describe('StaffingRequirementsTable', () => {
     it('handles add errors', async () => {
       mockSupabaseClient.from.mockImplementationOnce(() => ({
         select: jest.fn().mockResolvedValue({ data: mockRequirements, error: null }),
+        order: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
         delete: jest.fn().mockResolvedValue({ error: null }),
         upsert: jest.fn().mockResolvedValue({ 
           error: new Error('Failed to add requirement')
-        })
+        }),
+        single: jest.fn().mockResolvedValue({ data: null, error: null })
       }))
 
       render(<StaffingRequirementsTable isManager={true} />)
@@ -503,8 +521,11 @@ describe('StaffingRequirementsTable', () => {
     it('shows empty state when no requirements exist', async () => {
       mockSupabaseClient.from.mockImplementationOnce(() => ({
         select: jest.fn().mockResolvedValue({ data: [], error: null }),
+        order: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
         delete: jest.fn().mockResolvedValue({ error: null }),
-        upsert: jest.fn().mockResolvedValue({ error: null })
+        upsert: jest.fn().mockResolvedValue({ error: null }),
+        single: jest.fn().mockResolvedValue({ data: null, error: null })
       }))
 
       render(<StaffingRequirementsTable isManager={true} />)
@@ -530,8 +551,11 @@ describe('StaffingRequirementsTable', () => {
 
       mockSupabaseClient.from.mockImplementationOnce(() => ({
         select: jest.fn().mockResolvedValue({ data: mockData, error: null }),
+        order: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
         delete: jest.fn().mockResolvedValue({ error: null }),
-        upsert: jest.fn().mockResolvedValue({ error: null })
+        upsert: jest.fn().mockResolvedValue({ error: null }),
+        single: jest.fn().mockResolvedValue({ data: null, error: null })
       }))
 
       render(<StaffingRequirementsTable isManager={true} />)
@@ -606,10 +630,13 @@ describe('StaffingRequirementsTable', () => {
     it('keeps dialog open on submission error', async () => {
       mockSupabaseClient.from.mockImplementationOnce(() => ({
         select: jest.fn().mockResolvedValue({ data: mockRequirements, error: null }),
+        order: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
         delete: jest.fn().mockResolvedValue({ error: null }),
         upsert: jest.fn().mockResolvedValue({ 
           error: new Error('Failed to update')
-        })
+        }),
+        single: jest.fn().mockResolvedValue({ data: null, error: null })
       }))
 
       render(<StaffingRequirementsTable isManager={true} />)

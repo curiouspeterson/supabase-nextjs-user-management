@@ -16,6 +16,7 @@ interface TimeOffRequestFormProps {
 
 export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffRequestFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
   const { handleError } = useErrorHandler()
   const { toast } = useToast()
@@ -73,13 +74,19 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
 
     try {
       setIsSubmitting(true)
+      setError(null)
       const formData = new FormData(event.currentTarget)
       const startDate = formData.get('start_date') as string
       const endDate = formData.get('end_date') as string
-      const reason = formData.get('reason') as string
+      const type = formData.get('type') as string
+      const notes = formData.get('notes') as string
 
-      if (!reason?.trim()) {
-        throw new ValidationError('Please provide a reason for your time off request')
+      if (!type) {
+        throw new ValidationError('Please select a type of time off')
+      }
+
+      if (!notes?.trim()) {
+        throw new ValidationError('Please provide notes for your time off request')
       }
 
       const { start, end } = validateDates(startDate, endDate)
@@ -91,7 +98,8 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
           user_id: userId,
           start_date: format(start, 'yyyy-MM-dd'),
           end_date: format(end, 'yyyy-MM-dd'),
-          reason: reason.trim(),
+          type,
+          notes: notes.trim(),
           status: 'pending'
         })
 
@@ -100,22 +108,44 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
       }
 
       toast({
-        title: 'Request Submitted',
-        description: 'Your time off request has been submitted for approval.',
+        title: 'Success',
+        description: 'Time off request submitted successfully',
         variant: 'default'
       })
 
       router.refresh()
       onSuccess?.()
     } catch (error) {
+      if (error instanceof Error) {
+        setError(error.message)
+        toast({
+          title: 'Error',
+          description: 'Failed to submit time off request',
+          variant: 'destructive'
+        })
+      }
       handleError(error, 'TimeOffRequestForm.handleSubmit')
     } finally {
       setIsSubmitting(false)
     }
   }
 
+  const handleReset = () => {
+    setError(null)
+    const form = document.querySelector('form')
+    if (form) {
+      form.reset()
+    }
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4" role="form">
+    <form onSubmit={handleSubmit} onReset={handleReset} className="space-y-4" role="form">
+      {error && (
+        <div role="alert" aria-live="polite" className="text-red-500">
+          {error}
+        </div>
+      )}
+      
       <div>
         <label htmlFor="start_date" className="block text-sm font-medium text-gray-700">
           Start Date
@@ -145,17 +175,35 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
       </div>
 
       <div>
-        <label htmlFor="reason" className="block text-sm font-medium text-gray-700">
-          Reason
+        <label htmlFor="type" className="block text-sm font-medium text-gray-700">
+          Type
+        </label>
+        <select
+          id="type"
+          name="type"
+          required
+          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+          aria-label="Type of time off"
+        >
+          <option value="">Select type</option>
+          <option value="vacation">Vacation</option>
+          <option value="sick">Sick Leave</option>
+          <option value="personal">Personal Leave</option>
+        </select>
+      </div>
+
+      <div>
+        <label htmlFor="notes" className="block text-sm font-medium text-gray-700">
+          Notes
         </label>
         <textarea
-          id="reason"
-          name="reason"
+          id="notes"
+          name="notes"
           rows={3}
           required
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-          placeholder="Please provide a reason for your time off request"
-          aria-label="Reason for time off request"
+          placeholder="Please provide notes for your time off request"
+          aria-label="Notes"
         />
       </div>
 
@@ -170,6 +218,13 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
             Cancel
           </button>
         )}
+        <button
+          type="reset"
+          disabled={isSubmitting}
+          className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Reset
+        </button>
         <button
           type="submit"
           disabled={isSubmitting}

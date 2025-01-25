@@ -1,45 +1,39 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useToast } from '@/components/ui/use-toast'
+import Image from 'next/image'
 
-interface AvatarProps {
+export interface AvatarProps {
   url?: string
   size?: number
-  onUpload?: (path: string, file: File, options?: { upsert?: boolean }) => Promise<void>
+  onUpload?: (url: string) => Promise<void>
 }
 
-export default function Avatar({ url, size = 150, onUpload }: AvatarProps) {
+export function Avatar({ url, size = 150, onUpload }: AvatarProps) {
   const { toast } = useToast()
-  const [avatarUrl, setAvatarUrl] = useState<string>('/default-avatar.png')
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(url || null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (url) downloadImage(url)
-    return () => {
-      if (avatarUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(avatarUrl)
-      }
-    }
   }, [url])
 
   async function downloadImage(path: string) {
     try {
       const response = await fetch(path)
-      if (!response.ok) throw new Error('Failed to download image')
-      
+      if (!response.ok) throw new Error('Download failed')
       const blob = await response.blob()
       const objectUrl = URL.createObjectURL(blob)
       setAvatarUrl(objectUrl)
     } catch (error) {
       console.error('Error downloading image:', error)
-      setAvatarUrl('/default-avatar.png')
       setError('Failed to load avatar')
     }
   }
 
-  const uploadAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  async function uploadAvatar(event: React.ChangeEvent<HTMLInputElement>) {
     try {
       if (!event.target.files || event.target.files.length === 0) {
         throw new Error('You must select an image to upload.')
@@ -47,8 +41,8 @@ export default function Avatar({ url, size = 150, onUpload }: AvatarProps) {
 
       const file = event.target.files[0]
       const fileSize = file.size / 1024 / 1024 // size in MB
-      if (fileSize > 2) {
-        throw new Error('File size must be less than 2MB')
+      if (fileSize > 5) {
+        throw new Error('File size must be less than 5MB')
       }
 
       if (!file.type.startsWith('image/')) {
@@ -59,59 +53,63 @@ export default function Avatar({ url, size = 150, onUpload }: AvatarProps) {
       setError(null)
 
       if (onUpload) {
-        await onUpload(file.name, file, { upsert: true })
+        const objectUrl = URL.createObjectURL(file)
+        await onUpload(objectUrl)
+        setAvatarUrl(objectUrl)
       }
-
-      // Create a local preview
-      const objectUrl = URL.createObjectURL(file)
-      setAvatarUrl(objectUrl)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Error uploading avatar'
-      setError(message)
+      setError(error instanceof Error ? error.message : 'Error uploading avatar')
       toast({
         title: 'Error',
-        description: message,
-        variant: 'destructive'
+        description: error instanceof Error ? error.message : 'Error uploading avatar',
+        variant: 'destructive',
       })
     } finally {
       setUploading(false)
-      if (event.target) {
-        event.target.value = '' // Reset input
-      }
     }
   }
 
+  useEffect(() => {
+    return () => {
+      if (avatarUrl) {
+        URL.revokeObjectURL(avatarUrl)
+      }
+    }
+  }, [avatarUrl])
+
   return (
     <div className="flex flex-col items-center gap-4">
-      <img
-        src={avatarUrl}
-        alt={error ? 'Default Avatar' : 'Avatar'}
-        className="rounded-full"
+      <Image
+        src={avatarUrl || '/default-avatar.png'}
+        alt="Avatar"
         width={size}
         height={size}
+        className="rounded-full"
       />
-      <div className="flex flex-col items-center gap-2">
-        <label
-          htmlFor="avatar"
-          className="cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 rounded-md"
-        >
-          {uploading ? 'Uploading...' : 'Upload Avatar'}
-        </label>
-        <input
-          type="file"
-          id="avatar"
-          accept="image/*"
-          onChange={uploadAvatar}
-          disabled={uploading}
-          className="hidden"
-          aria-label="Upload avatar"
-        />
-        {error && (
-          <div role="alert" aria-live="polite" className="text-destructive text-sm">
-            {error}
-          </div>
-        )}
-      </div>
+      {onUpload && (
+        <div className="flex flex-col items-center gap-2">
+          <label
+            htmlFor="avatar"
+            className="cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 rounded-md"
+          >
+            {uploading ? 'Uploading...' : 'Upload Avatar'}
+          </label>
+          <input
+            type="file"
+            id="avatar"
+            accept="image/*"
+            onChange={uploadAvatar}
+            disabled={uploading}
+            className="hidden"
+            aria-label="Upload avatar"
+          />
+          {error && (
+            <div role="alert" className="text-red-500 text-sm">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 } 
