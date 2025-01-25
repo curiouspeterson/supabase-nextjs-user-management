@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,6 +11,7 @@ import { useUser } from '@/lib/hooks'
 import { useErrorHandler } from '@/lib/hooks/use-error-handler'
 import { ValidationError, DatabaseError } from '@/lib/errors'
 import { useToast } from '@/components/ui/use-toast'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
 interface TimeOffRequest {
   start_date: string
@@ -18,15 +19,20 @@ interface TimeOffRequest {
   type: string
   notes?: string
   user_id: string
-  status: 'Pending' | 'Approved' | 'Denied'
+  status: 'pending' | 'approved' | 'rejected'
 }
 
-export function TimeOffRequestForm() {
+export default function TimeOffRequestForm() {
+  const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [formData, setFormData] = useState<Partial<TimeOffRequest>>({
+    type: '',
+    notes: ''
+  })
   const { user } = useUser()
   const { handleError } = useErrorHandler()
   const supabase = createClient()
-  const { toast } = useToast()
 
   const validateRequest = (request: Partial<TimeOffRequest>) => {
     if (!request.start_date) {
@@ -49,7 +55,7 @@ export function TimeOffRequestForm() {
     const diffTime = Math.abs(end.getTime() - start.getTime())
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
     if (diffDays > 30) {
-      throw new ValidationError('Time off requests cannot exceed 30 days')
+      throw new ValidationError('Time off requests cannot exceed 30 consecutive days')
     }
   }
 
@@ -73,81 +79,131 @@ export function TimeOffRequestForm() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!user) return
-
     setIsSubmitting(true)
+    setError(null)
 
     try {
-      const formData = new FormData(e.currentTarget)
-      const request: Partial<TimeOffRequest> = {
-        start_date: formData.get('start_date') as string,
-        end_date: formData.get('end_date') as string,
-        type: formData.get('type') as string,
-        notes: formData.get('notes') as string,
-        user_id: user.id,
-        status: 'Pending'
+      // Validate required fields
+      if (!formData.start_date) {
+        throw new Error('Start date is required')
+      }
+      if (!formData.end_date) {
+        throw new Error('End date is required')
+      }
+      if (!formData.type) {
+        throw new Error('Type is required')
+      }
+
+      // Validate dates
+      const startDate = new Date(formData.start_date)
+      const endDate = new Date(formData.end_date)
+      if (endDate < startDate) {
+        throw new Error('End date cannot be before start date')
       }
 
       // Validate request
-      validateRequest(request)
+      validateRequest(formData)
 
       // Check for overlapping requests
-      await checkOverlappingRequests(request.start_date, request.end_date)
+      await checkOverlappingRequests(formData.start_date, formData.end_date)
 
-      // Submit request
+      // Submit form data
       const { error: submitError } = await supabase
         .from('time_off_requests')
-        .insert(request)
+        .insert([
+          {
+            ...formData,
+            status: 'pending'
+          }
+        ])
 
       if (submitError) {
         throw new DatabaseError('Failed to submit time off request')
       }
 
-      // Reset form
-      e.currentTarget.reset()
-
-      // Show success message
       toast({
         title: 'Success',
         description: 'Time off request submitted successfully'
       })
+      handleReset()
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to submit time off request'
+      setError(message)
+      toast({
+        title: 'Error',
+        description: message,
+        variant: 'destructive'
+      })
       handleError(err, 'TimeOffRequestForm.handleSubmit')
     } finally {
       setIsSubmitting(false)
     }
   }
 
+  const handleReset = () => {
+    setFormData({
+      type: '',
+      notes: ''
+    })
+    setError(null)
+    const form = document.querySelector('form') as HTMLFormElement
+    if (form) {
+      form.reset()
+    }
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} onReset={handleReset} className="space-y-4">
+      {error && (
+        <Alert variant="destructive" role="alert" aria-live="polite">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="start_date">Start Date</Label>
-          <Input
+          <label htmlFor="start_date" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+            Start Date
+          </label>
+          <input
+            type="date"
             id="start_date"
             name="start_date"
-            type="date"
             required
+            aria-invalid={!!error}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             min={new Date().toISOString().split('T')[0]}
+            onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="end_date">End Date</Label>
-          <Input
+          <label htmlFor="end_date" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+            End Date
+          </label>
+          <input
+            type="date"
             id="end_date"
             name="end_date"
-            type="date"
             required
-            min={new Date().toISOString().split('T')[0]}
+            aria-invalid={!!error}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            min={formData.start_date || new Date().toISOString().split('T')[0]}
+            onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
           />
         </div>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="type">Type</Label>
-        <Select name="type" required>
-          <SelectTrigger>
+        <label htmlFor="type" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+          Type
+        </label>
+        <Select
+          name="type"
+          required
+          value={formData.type}
+          onValueChange={(value) => setFormData({ ...formData, type: value })}
+        >
+          <SelectTrigger aria-invalid={!!error} aria-required="true">
             <SelectValue placeholder="Select type" />
           </SelectTrigger>
           <SelectContent>
@@ -158,35 +214,24 @@ export function TimeOffRequestForm() {
         </Select>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="notes">Notes</Label>
+        <label htmlFor="notes" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+          Notes
+        </label>
         <Textarea
           id="notes"
           name="notes"
           placeholder="Add any additional notes..."
           className="h-24"
+          value={formData.notes}
+          onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
         />
       </div>
       <div className="flex justify-end space-x-2">
-        <Button
-          type="reset"
-          variant="outline"
-          disabled={isSubmitting}
-        >
+        <Button type="reset" variant="outline">
           Reset
         </Button>
-        <Button
-          type="submit"
-          disabled={isSubmitting}
-          aria-disabled={isSubmitting}
-        >
-          {isSubmitting ? (
-            <>
-              <div className="mr-2 h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
-              Submitting...
-            </>
-          ) : (
-            'Submit Request'
-          )}
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? 'Submitting...' : 'Submit Request'}
         </Button>
       </div>
     </form>

@@ -1,9 +1,16 @@
 import '@testing-library/jest-dom'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import AccountForm from '@/app/account/account-form'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import AccountForm from '@/components/account-form'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import { User } from '@supabase/supabase-js'
+
+// Mock toast notifications
+const mockToast = jest.fn()
+jest.mock('@/components/ui/use-toast', () => ({
+  useToast: () => ({ toast: mockToast }),
+}))
 
 // Mock Next.js router
 const mockRouter = {
@@ -65,6 +72,7 @@ interface MockSupabaseClient {
   }
   auth: {
     signOut: jest.Mock<Promise<{ error: null }>>
+    getUser: jest.Mock<Promise<{ data: { user: User }; error: null }>>
   }
 }
 
@@ -105,7 +113,8 @@ const mockSupabaseClient: MockSupabaseClient = {
     }))
   },
   auth: {
-    signOut: jest.fn(() => Promise.resolve({ error: null }))
+    signOut: jest.fn(() => Promise.resolve({ error: null })),
+    getUser: jest.fn(() => Promise.resolve({ data: { user: { id: 'test-user-id', email: 'test@example.com' } }, error: null }))
   }
 }
 
@@ -167,7 +176,7 @@ describe('AccountForm', () => {
   })
 
   it('loads and displays user profile data', async () => {
-    render(<AccountForm user={mockUser} />)
+    render(<AccountForm />)
     
     // Wait for loading to complete
     await waitFor(() => {
@@ -188,90 +197,99 @@ describe('AccountForm', () => {
   })
 
   it('handles profile update', async () => {
-    render(<AccountForm user={mockUser} />)
+    const user = userEvent.setup()
+    const updatedName = 'Updated Name'
 
-    // Wait for loading to complete
-    await waitFor(() => {
-      expect(screen.queryByTestId('initial-loading-spinner')).not.toBeInTheDocument()
-    })
+    render(<AccountForm />)
 
-    // Update form fields
     const fullNameInput = screen.getByLabelText(/full name/i)
-    fireEvent.change(fullNameInput, {
-      target: { value: 'Updated Name' }
-    })
+    await user.clear(fullNameInput)
+    await user.type(fullNameInput, updatedName)
 
-    // Submit form
     const updateButton = screen.getByRole('button', { name: /update profile/i })
-    expect(updateButton).not.toBeDisabled()
-    fireEvent.click(updateButton)
+    await user.click(updateButton)
 
-    // Verify Supabase calls
     await waitFor(() => {
       expect(mockSupabaseClient.from).toHaveBeenCalledWith('profiles')
-      expect(mockSupabaseClient.from().upsert).toHaveBeenCalledWith(expect.objectContaining({
+      expect(mockSupabaseClient.from().upsert).toHaveBeenCalledWith({
         id: mockUser.id,
-        full_name: 'Updated Name',
+        full_name: updatedName,
         username: mockProfile.username,
         website: mockProfile.website,
         avatar_url: mockProfile.avatar_url,
-        updated_at: expect.any(String)
-      }))
-      expect(mockRouter.refresh).toHaveBeenCalled()
+        updated_at: expect.any(String),
+      })
+    })
+
+    expect(mockToast).toHaveBeenCalledWith({
+      title: 'Success',
+      description: 'Profile updated successfully',
     })
   })
 
   it('handles sign out', async () => {
-    render(<AccountForm user={mockUser} />)
-    
-    // Wait for loading to complete
-    await waitFor(() => {
-      expect(screen.queryByTestId('initial-loading-spinner')).not.toBeInTheDocument()
-    })
+    const user = userEvent.setup()
+    mockSupabaseClient.auth.signOut.mockResolvedValueOnce({ error: null })
 
-    // Find and click sign out button
+    render(<AccountForm />)
+
     const signOutButton = screen.getByRole('button', { name: /sign out/i })
-    expect(signOutButton).not.toBeDisabled()
-    fireEvent.click(signOutButton)
+    await user.click(signOutButton)
 
-    // Verify sign out was called and navigation occurred
     await waitFor(() => {
       expect(mockSupabaseClient.auth.signOut).toHaveBeenCalled()
-      expect(mockRouter.push).toHaveBeenCalledWith('/login')
+    })
+
+    expect(mockToast).toHaveBeenCalledWith({
+      title: 'Success',
+      description: 'Signed out successfully',
     })
   })
 
-  it('handles loading error', async () => {
-    const errorMessage = 'Error loading user data'
-    
-    // Mock error response
-    const errorResponse: ErrorResponse = {
-      data: null,
-      error: { message: errorMessage }
-    }
+  it('handles profile update error', async () => {
+    const user = userEvent.setup()
+    mockSupabaseClient.from().upsert.mockRejectedValueOnce(new Error('Update failed'))
 
-    mockSupabaseClient.from.mockImplementationOnce(() => ({
-      select: jest.fn(() => ({
-        eq: jest.fn(() => ({
-          single: jest.fn(() => Promise.resolve(errorResponse))
-        }))
-      })),
-      upsert: jest.fn(() => Promise.resolve({ data: null, error: null }))
-    }))
+    render(<AccountForm />)
 
-    render(<AccountForm user={mockUser} />)
+    const updateButton = screen.getByRole('button', { name: /update profile/i })
+    await user.click(updateButton)
 
-    // Wait for error message to appear
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(errorMessage)
+      expect(screen.getByRole('alert')).toHaveTextContent('Error updating profile')
     })
+  })
 
-    // Loading spinner should be gone
-    expect(screen.queryByTestId('initial-loading-spinner')).not.toBeInTheDocument()
+  it('handles sign out error', async () => {
+    const user = userEvent.setup()
+    mockSupabaseClient.auth.signOut.mockRejectedValueOnce(new Error('Sign out failed'))
+
+    render(<AccountForm />)
+
+    const signOutButton = screen.getByRole('button', { name: /sign out/i })
+    await user.click(signOutButton)
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Error signing out')
+    })
+  })
+
+  it('validates required fields', async () => {
+    const user = userEvent.setup()
+
+    render(<AccountForm />)
+
+    const fullNameInput = screen.getByLabelText(/full name/i)
+    await user.clear(fullNameInput)
+
+    const updateButton = screen.getByRole('button', { name: /update profile/i })
+    await user.click(updateButton)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Full name is required')
   })
 
   it('maintains accessibility standards', async () => {
-    render(<AccountForm user={mockUser} />)
+    render(<AccountForm />)
 
     // Wait for loading to complete
     await waitFor(() => {

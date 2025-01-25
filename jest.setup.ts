@@ -741,12 +741,12 @@ global.FormData = MockFormData as any;
 // Mock HTMLFormElement.prototype.elements to support form data extraction
 Object.defineProperty(HTMLFormElement.prototype, 'elements', {
   get() {
-    return Array.from(this.querySelectorAll('input, select, textarea')).reduce((acc, element) => {
-      if (element.hasAttribute('name')) {
+    return Array.from(this.querySelectorAll('input, select, textarea')).reduce<Record<string, HTMLElement>>((acc, element) => {
+      if (element instanceof HTMLElement && element.hasAttribute('name')) {
         acc[element.getAttribute('name')!] = element;
       }
       return acc;
-    }, {} as { [key: string]: Element });
+    }, {});
   }
 });
 

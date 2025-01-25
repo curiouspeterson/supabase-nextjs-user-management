@@ -13,6 +13,10 @@ interface NavigationProps {
   className?: string
 }
 
+interface AuthSubscription {
+  unsubscribe: () => void
+}
+
 export function Navigation({ className }: NavigationProps) {
   const pathname = usePathname()
   const [userRole, setUserRole] = useState<string | null>(null)
@@ -25,18 +29,24 @@ export function Navigation({ className }: NavigationProps) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  const setupAuthListener = useCallback(() => {
+  const setupAuthListener = useCallback(async (): Promise<AuthSubscription> => {
     try {
       const {
         data: { subscription },
-      } = supabase.auth.onAuthStateChange((event) => {
-        if (event === 'SIGNED_OUT') {
-          setUserRole(null)
+      } = await supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN') {
+          router.refresh()
         }
-        router.refresh()
+        if (event === 'SIGNED_OUT') {
+          router.refresh()
+        }
       })
 
-      return subscription
+      return {
+        unsubscribe: () => {
+          subscription.unsubscribe()
+        }
+      }
     } catch (error) {
       handleError(new AuthError('Failed to setup auth listener'), 'Navigation.setupAuthListener')
       return { unsubscribe: () => {} }
@@ -44,9 +54,16 @@ export function Navigation({ className }: NavigationProps) {
   }, [supabase, router, handleError])
 
   useEffect(() => {
-    const subscription = setupAuthListener()
+    let subscription: AuthSubscription | null = null
+
+    const setupSubscription = async () => {
+      subscription = await setupAuthListener()
+    }
+
+    setupSubscription()
+
     return () => {
-      subscription.unsubscribe()
+      subscription?.unsubscribe()
     }
   }, [setupAuthListener])
 

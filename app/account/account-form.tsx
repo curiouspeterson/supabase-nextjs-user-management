@@ -4,11 +4,22 @@ import { useCallback, useEffect, useState } from 'react'
 import { User } from '@supabase/supabase-js'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
+import { useToast } from '@/components/ui/use-toast'
 import Avatar from './avatar'
+
+interface Profile {
+  id: string
+  username: string | null
+  full_name: string | null
+  avatar_url: string | null
+  website: string | null
+  updated_at: string
+}
 
 export default function AccountForm({ user }: { user: User | null }) {
   const supabase = createClientComponentClient()
   const router = useRouter()
+  const { toast } = useToast()
   const [loading, setLoading] = useState(true)
   const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState<string | null>(null)
@@ -44,9 +55,9 @@ export default function AccountForm({ user }: { user: User | null }) {
       setUsername(profile.username || null)
       setWebsite(profile.website || null)
       setAvatarUrl(profile.avatar_url)
-      setLoading(false)
     } catch (error: any) {
       setError(error.message || 'Error loading user data')
+    } finally {
       setLoading(false)
     }
   }, [user, supabase])
@@ -55,70 +66,78 @@ export default function AccountForm({ user }: { user: User | null }) {
     getProfile()
   }, [getProfile])
 
-  const updateProfile = useCallback(async ({
-    username,
-    website,
-    avatarUrl,
-  }: {
-    username: string | null
-    website: string | null
-    avatarUrl: string | null
-  }) => {
+  const handleAvatarUpload = async (path: string) => {
+    try {
+      setError(null)
+      setAvatarUrl(path)
+      await updateProfile({ avatar_url: path })
+    } catch (error: any) {
+      setError(error.message || 'Error updating avatar')
+    }
+  }
+
+  const updateProfile = async (updates: Partial<Profile>) => {
     try {
       setLoading(true)
       setError(null)
 
       if (!user) {
-        throw new Error('No user found')
+        throw new Error('No user')
       }
 
-      const updates = {
+      const profileUpdates = {
         id: user.id,
+        full_name: fullName,
         username,
         website,
         avatar_url: avatarUrl,
         updated_at: new Date().toISOString(),
+        ...updates
       }
 
-      const { error: supabaseError } = await supabase.from('profiles').upsert(updates)
+      const { error: supabaseError } = await supabase
+        .from('profiles')
+        .upsert(profileUpdates)
 
       if (supabaseError) {
         throw supabaseError
       }
 
-      router.refresh()
+      toast({
+        title: 'Success',
+        description: 'Profile updated successfully'
+      })
     } catch (error: any) {
       setError(error.message || 'Error updating profile')
+      toast({
+        title: 'Error',
+        description: 'Error updating profile',
+        variant: 'destructive'
+      })
     } finally {
       setLoading(false)
     }
-  }, [user, supabase, router])
+  }
 
-  const handleAvatarUpload = useCallback(async (
-    url: string,
-    file: File,
-    options: { cacheControl: string; upsert: boolean; }
-  ) => {
-    setAvatarUrl(url)
-    await updateProfile({ username, website, avatarUrl: url })
-  }, [username, website, updateProfile])
-
-  async function handleSignOut() {
+  const handleSignOut = async () => {
     try {
-      setLoading(true)
       setError(null)
-      
       const { error: signOutError } = await supabase.auth.signOut()
-      
       if (signOutError) {
         throw signOutError
       }
-
+      toast({
+        title: 'Success',
+        description: 'Signed out successfully'
+      })
       router.push('/login')
     } catch (error: any) {
       setError(error.message || 'Error signing out')
-    } finally {
-      setLoading(false)
+      toast({
+        title: 'Error',
+        description: 'Error signing out',
+        variant: 'destructive'
+      })
     }
   }
 
@@ -223,7 +242,7 @@ export default function AccountForm({ user }: { user: User | null }) {
                 <div className="flex justify-end gap-4">
                   <button
                     className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-                    onClick={() => updateProfile({ username, website, avatarUrl })}
+                    onClick={() => updateProfile({})}
                     disabled={loading || !user}
                   >
                     {loading ? 'Updating...' : 'Update Profile'}

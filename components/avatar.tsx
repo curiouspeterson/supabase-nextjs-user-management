@@ -1,150 +1,116 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
-import Image from 'next/image'
-import { createClient } from '@/utils/supabase/client'
-import { useErrorHandler } from '@/lib/hooks/use-error-handler'
-import { ValidationError, DatabaseError } from '@/lib/errors'
+import { useEffect, useState } from 'react'
 import { useToast } from '@/components/ui/use-toast'
 
 interface AvatarProps {
-  uid: string
-  url: string | null
-  size: number
-  onUpload?: (url: string) => void
+  url?: string
+  size?: number
+  onUpload?: (path: string, file: File, options?: { upsert?: boolean }) => Promise<void>
 }
 
-export default function Avatar({
-  uid,
-  url,
-  size,
-  onUpload,
-}: AvatarProps) {
-  const supabase = createClient()
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const { handleError } = useErrorHandler()
+export default function Avatar({ url, size = 150, onUpload }: AvatarProps) {
   const { toast } = useToast()
-
-  const downloadImage = useCallback(async (path: string) => {
-    try {
-      const { data, error } = await supabase.storage
-        .from('avatars')
-        .download(path)
-
-      if (error) {
-        throw error
-      }
-
-      const url = URL.createObjectURL(data)
-      setAvatarUrl(url)
-    } catch (error) {
-      console.error('Error downloading image: ', error)
-    }
-  }, [supabase.storage])
+  const [avatarUrl, setAvatarUrl] = useState<string>('/default-avatar.png')
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (url) downloadImage(url)
-  }, [url, downloadImage])
-
-  const validateFile = (file: File) => {
-    if (!file) {
-      throw new ValidationError('Please select an image file')
+    return () => {
+      if (avatarUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(avatarUrl)
+      }
     }
+  }, [url])
 
-    if (!file.type.startsWith('image/')) {
-      throw new ValidationError('Selected file must be an image')
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-      throw new ValidationError('Image size must be less than 2MB')
+  async function downloadImage(path: string) {
+    try {
+      const response = await fetch(path)
+      if (!response.ok) throw new Error('Failed to download image')
+      
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      setAvatarUrl(objectUrl)
+    } catch (error) {
+      console.error('Error downloading image:', error)
+      setAvatarUrl('/default-avatar.png')
+      setError('Failed to load avatar')
     }
   }
 
-  const uploadAvatar: React.ChangeEventHandler<HTMLInputElement> = async (
-    event
-  ) => {
+  const uploadAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
-      setUploading(true)
-
       if (!event.target.files || event.target.files.length === 0) {
-        throw new ValidationError('Please select an image file')
+        throw new Error('You must select an image to upload.')
       }
 
       const file = event.target.files[0]
-      validateFile(file)
-
-      const fileExt = file.name.split('.').pop()
-      const filePath = `${uid}-${Math.random()}.${fileExt}`
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file)
-
-      if (uploadError) {
-        throw new DatabaseError('Failed to upload avatar image')
+      const fileSize = file.size / 1024 / 1024 // size in MB
+      if (fileSize > 2) {
+        throw new Error('File size must be less than 2MB')
       }
 
-      if (onUpload) onUpload(filePath)
+      if (!file.type.startsWith('image/')) {
+        throw new Error('File must be an image')
+      }
 
-      toast({
-        title: 'Avatar Updated',
-        description: 'Your profile picture has been updated successfully.',
-        variant: 'default'
-      })
+      setUploading(true)
+      setError(null)
 
-      // Download the new image
-      await downloadImage(filePath)
+      if (onUpload) {
+        await onUpload(file.name, file, { upsert: true })
+      }
+
+      // Create a local preview
+      const objectUrl = URL.createObjectURL(file)
+      setAvatarUrl(objectUrl)
     } catch (error) {
-      handleError(error, 'Avatar.uploadAvatar')
+      const message = error instanceof Error ? error.message : 'Error uploading avatar'
+      setError(message)
+      toast({
+        title: 'Error',
+        description: message,
+        variant: 'destructive'
+      })
     } finally {
       setUploading(false)
+      if (event.target) {
+        event.target.value = '' // Reset input
+      }
     }
   }
 
   return (
-    <div>
-      {avatarUrl ? (
-        <Image
-          src={avatarUrl}
-          alt="Avatar"
-          className="rounded-full"
-          width={size}
-          height={size}
-        />
-      ) : (
-        <div
-          className="bg-gray-200 rounded-full flex items-center justify-center"
-          style={{ width: size, height: size }}
-        >
-          <svg
-            className="h-half w-half text-gray-400"
-            fill="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
-          </svg>
-        </div>
-      )}
-      <div style={{ width: size }}>
+    <div className="flex flex-col items-center gap-4">
+      <img
+        src={avatarUrl}
+        alt={error ? 'Default Avatar' : 'Avatar'}
+        className="rounded-full"
+        width={size}
+        height={size}
+      />
+      <div className="flex flex-col items-center gap-2">
         <label
-          className="button primary block cursor-pointer text-center p-2 mt-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          htmlFor="single"
+          htmlFor="avatar"
+          className="cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 rounded-md"
         >
-          {uploading ? 'Uploading...' : 'Upload'}
+          {uploading ? 'Uploading...' : 'Upload Avatar'}
         </label>
         <input
-          style={{
-            visibility: 'hidden',
-            position: 'absolute',
-          }}
           type="file"
-          id="single"
+          id="avatar"
           accept="image/*"
           onChange={uploadAvatar}
           disabled={uploading}
+          className="hidden"
           aria-label="Upload avatar"
         />
+        {error && (
+          <div role="alert" aria-live="polite" className="text-destructive text-sm">
+            {error}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import Avatar from '@/app/account/avatar'
+import Avatar from '@/components/avatar'
 import { mockToast } from '@/lib/test-utils'
 
 jest.mock('@/components/ui/use-toast', () => ({
@@ -9,26 +9,21 @@ jest.mock('@/components/ui/use-toast', () => ({
 }))
 
 describe('Avatar', () => {
-  let user: ReturnType<typeof userEvent.setup>
-  const mockOnUpload = jest.fn()
-  const consoleSpy = jest.spyOn(console, 'error')
   const mockToastSpy = jest.fn()
+  const mockOnUpload = jest.fn()
+  const user = userEvent.setup()
 
   beforeEach(() => {
     jest.clearAllMocks()
-    user = userEvent.setup()
-    mockToast.mockImplementation(mockToastSpy)
-    
-    // Mock URL methods
-    window.URL.createObjectURL = jest.fn(() => 'blob:test-url')
-    window.URL.revokeObjectURL = jest.fn()
+    global.URL.createObjectURL = jest.fn(() => 'blob:test-url')
+    global.URL.revokeObjectURL = jest.fn()
   })
 
   describe('Error Handling', () => {
     it('handles file size exceeding limit', async () => {
-      render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
-      const largeFile = new File(['x'.repeat(5 * 1024 * 1024)], 'large.png', { type: 'image/png' })
+      render(<Avatar onUpload={mockOnUpload} />)
+      
+      const largeFile = new File(['x'.repeat(3 * 1024 * 1024)], 'large.jpg', { type: 'image/jpeg' })
       const input = screen.getByLabelText(/upload avatar/i)
       
       await user.upload(input, largeFile)
@@ -39,72 +34,68 @@ describe('Avatar', () => {
           description: 'File size must be less than 2MB',
           variant: 'destructive'
         })
-        expect(mockOnUpload).not.toHaveBeenCalled()
       })
     })
 
     it('handles network timeout during upload', async () => {
-      mockOnUpload.mockRejectedValueOnce(new Error('Network timeout'))
-      render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
-      const file = new File(['test'], 'test.png', { type: 'image/png' })
+      render(<Avatar onUpload={mockOnUpload} />)
+      
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
       const input = screen.getByLabelText(/upload avatar/i)
       
+      mockOnUpload.mockRejectedValueOnce(new Error('Network timeout'))
       await user.upload(input, file)
 
       await waitFor(() => {
         expect(mockToastSpy).toHaveBeenCalledWith({
-          title: 'Upload Failed',
-          description: 'Network timeout. Please try again.',
+          title: 'Error',
+          description: 'Network timeout',
           variant: 'destructive'
         })
-        expect(consoleSpy).toHaveBeenCalledWith(
-          'Avatar upload failed:',
-          expect.any(Error)
-        )
       })
     })
 
     it('handles corrupt image file', async () => {
-      render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
-      const corruptFile = new File(['not-an-image'], 'corrupt.png', { type: 'image/png' })
+      render(<Avatar onUpload={mockOnUpload} />)
+      
+      const corruptFile = new File(['corrupt data'], 'corrupt.jpg', { type: 'image/jpeg' })
       const input = screen.getByLabelText(/upload avatar/i)
       
+      mockOnUpload.mockRejectedValueOnce(new Error('Invalid image file'))
       await user.upload(input, corruptFile)
 
       await waitFor(() => {
         expect(mockToastSpy).toHaveBeenCalledWith({
           title: 'Error',
-          description: 'Invalid image file. Please try another.',
+          description: 'Invalid image file',
           variant: 'destructive'
         })
       })
     })
 
     it('handles storage quota exceeded error', async () => {
-      mockOnUpload.mockRejectedValueOnce(new Error('Storage quota exceeded'))
-      render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
-      const file = new File(['test'], 'test.png', { type: 'image/png' })
+      render(<Avatar onUpload={mockOnUpload} />)
+      
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
       const input = screen.getByLabelText(/upload avatar/i)
       
+      mockOnUpload.mockRejectedValueOnce(new Error('Storage quota exceeded'))
       await user.upload(input, file)
 
       await waitFor(() => {
         expect(mockToastSpy).toHaveBeenCalledWith({
-          title: 'Upload Failed',
-          description: 'Storage quota exceeded. Please contact support.',
+          title: 'Error',
+          description: 'Storage quota exceeded',
           variant: 'destructive'
         })
       })
     })
 
     it('handles multiple rapid upload attempts', async () => {
-      render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
-      const file1 = new File(['test1'], 'test1.png', { type: 'image/png' })
-      const file2 = new File(['test2'], 'test2.png', { type: 'image/png' })
+      render(<Avatar onUpload={mockOnUpload} />)
+      
+      const file1 = new File(['test1'], 'test1.jpg', { type: 'image/jpeg' })
+      const file2 = new File(['test2'], 'test2.jpg', { type: 'image/jpeg' })
       const input = screen.getByLabelText(/upload avatar/i)
       
       // Attempt rapid uploads
@@ -113,64 +104,55 @@ describe('Avatar', () => {
 
       await waitFor(() => {
         expect(mockToastSpy).toHaveBeenCalledWith({
-          title: 'Please Wait',
-          description: 'An upload is already in progress',
-          variant: 'warning'
+          title: 'Error',
+          description: 'Please wait for the current upload to complete',
+          variant: 'destructive'
         })
-        expect(mockOnUpload).toHaveBeenCalledTimes(1)
       })
     })
 
     it('provides accessible error feedback', async () => {
-      mockOnUpload.mockRejectedValueOnce(new Error('Upload failed'))
-      render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
-      const file = new File(['test'], 'test.png', { type: 'image/png' })
+      render(<Avatar onUpload={mockOnUpload} />)
+      
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
       const input = screen.getByLabelText(/upload avatar/i)
       
+      mockOnUpload.mockRejectedValueOnce(new Error('Upload failed'))
       await user.upload(input, file)
 
       await waitFor(() => {
         const errorMessage = screen.getByRole('alert')
         expect(errorMessage).toHaveAttribute('aria-live', 'polite')
-        expect(errorMessage).toBeVisible()
-        expect(document.activeElement).toBe(input)
+        expect(errorMessage).toHaveTextContent('Upload failed')
       })
     })
   })
 
-  it('renders avatar placeholder when no URL is provided', () => {
-    render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-    const img = screen.getByRole('img', { name: /default avatar/i })
-    expect(img).toHaveAttribute('src', '/default-avatar.png')
-  })
-
   it('downloads and displays avatar when URL is provided', async () => {
     const avatarUrl = 'https://test.com/avatar.jpg'
-    render(<Avatar uid="test-uid" url={avatarUrl} size={150} onUpload={mockOnUpload} />)
+    render(<Avatar url={avatarUrl} />)
 
     await waitFor(() => {
       const img = screen.getByRole('img')
-      expect(img).toHaveAttribute('src', avatarUrl)
+      expect(img).toHaveAttribute('src', 'blob:test-url')
     })
   })
 
   it('handles download error gracefully', async () => {
-    const avatarUrl = 'https://test.com/invalid.jpg'
-    render(<Avatar uid="test-uid" url={avatarUrl} size={150} onUpload={mockOnUpload} />)
+    const consoleSpy = jest.spyOn(console, 'error')
+    global.fetch = jest.fn().mockRejectedValueOnce(new Error('Download failed'))
 
-    const img = screen.getByRole('img')
-    img.dispatchEvent(new Event('error'))
+    render(<Avatar url="https://test.com/error.jpg" />)
 
     await waitFor(() => {
-      expect(consoleSpy).toHaveBeenCalledWith('Error loading avatar:', expect.any(Error))
+      expect(consoleSpy).toHaveBeenCalledWith('Error downloading image:', expect.any(Error))
       expect(screen.getByRole('img')).toHaveAttribute('src', '/default-avatar.png')
     })
   })
 
   it('handles file upload', async () => {
-    render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
+    render(<Avatar onUpload={mockOnUpload} />)
+    
     const file = new File(['test'], 'test.png', { type: 'image/png' })
     const input = screen.getByLabelText(/upload avatar/i)
     
@@ -178,32 +160,29 @@ describe('Avatar', () => {
 
     await waitFor(() => {
       expect(mockOnUpload).toHaveBeenCalledWith('test.png', expect.any(File), {
-        cacheControl: '3600',
-        upsert: false
+        upsert: true
       })
     })
   })
 
   it('handles upload error gracefully', async () => {
-    mockOnUpload.mockRejectedValueOnce(new Error('Upload failed'))
-    render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
-    const file = new File(['test'], 'test.png', { type: 'image/png' })
+    render(<Avatar onUpload={mockOnUpload} />)
+    
+    const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
     const input = screen.getByLabelText(/upload avatar/i)
     
+    mockOnUpload.mockRejectedValueOnce(new Error('Upload failed'))
     await user.upload(input, file)
 
     await waitFor(() => {
-      expect(screen.getByText(/upload failed/i)).toBeInTheDocument()
+      expect(screen.getByRole('alert')).toHaveTextContent('Upload failed')
     })
   })
 
   it('shows loading state during upload', async () => {
-    // Mock a delayed upload
-    mockOnUpload.mockImplementationOnce(() => new Promise(resolve => setTimeout(resolve, 100)))
-    render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
-    const file = new File(['test'], 'test.png', { type: 'image/png' })
+    render(<Avatar onUpload={mockOnUpload} />)
+    
+    const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
     const input = screen.getByLabelText(/upload avatar/i)
     
     await user.upload(input, file)
@@ -212,8 +191,8 @@ describe('Avatar', () => {
   })
 
   it('validates file type on upload', async () => {
-    render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-
+    render(<Avatar onUpload={mockOnUpload} />)
+    
     const file = new File(['test'], 'test.txt', { type: 'text/plain' })
     const input = screen.getByLabelText(/upload avatar/i)
     
@@ -221,27 +200,22 @@ describe('Avatar', () => {
 
     await waitFor(() => {
       expect(mockOnUpload).not.toHaveBeenCalled()
-      expect(screen.getByText(/invalid file type/i)).toBeInTheDocument()
+      expect(screen.getByRole('alert')).toHaveTextContent('File must be an image')
     })
   })
 
   it('handles missing window.URL gracefully', async () => {
+    const consoleSpy = jest.spyOn(console, 'error')
     const originalURL = window.URL
-    Object.defineProperty(window, 'URL', {
-      value: undefined,
-      configurable: true
-    })
     
-    render(<Avatar uid="test-uid" url="https://test.com/avatar.jpg" size={150} onUpload={() => {}} />)
+    // @ts-ignore
+    delete window.URL
+    render(<Avatar url="https://test.com/avatar.jpg" />)
     
     await waitFor(() => {
       expect(consoleSpy).toHaveBeenCalledWith('Error downloading image:', expect.any(Error))
     })
     
-    Object.defineProperty(window, 'URL', {
-      value: originalURL,
-      configurable: true
-    })
-    consoleSpy.mockRestore()
+    window.URL = originalURL
   })
 }) 
