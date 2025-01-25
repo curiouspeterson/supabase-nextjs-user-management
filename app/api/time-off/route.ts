@@ -1,98 +1,170 @@
-import { createClient } from '@supabase/supabase-js'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
+import { createClient } from '@/utils/supabase/server'
+import { cookies } from 'next/headers'
 
-interface TimeOffRequest {
-  userId: string
-  startDate: string
-  endDate: string
-  reason: string
-}
-
-export async function handleTimeOffRequest(request: NextRequest) {
+export async function POST(request: Request) {
   try {
-    // Parse request body
-    const body = await request.json() as TimeOffRequest
-
-    // Validate required fields
-    if (!body.userId || !body.startDate || !body.endDate || !body.reason) {
-      return NextResponse.json({
-        success: false,
-        error: 'Missing required fields',
-      }, { status: 400 })
-    }
-
-    // Validate date range
-    const startDate = new Date(body.startDate)
-    const endDate = new Date(body.endDate)
-    if (endDate < startDate) {
-      return NextResponse.json({
-        success: false,
-        error: 'End date must be after start date',
-      }, { status: 400 })
-    }
-
-    // Initialize Supabase client
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
-
-    // Check for overlapping requests
-    const { data: existingRequests, error: fetchError } = await supabase
-      .from('time_off_requests')
-      .select('*')
-      .eq('userId', body.userId)
-
-    if (fetchError) {
-      throw fetchError
-    }
-
-    const hasOverlap = existingRequests?.some(request => {
-      const existingStart = new Date(request.startDate)
-      const existingEnd = new Date(request.endDate)
-      return (
-        (startDate >= existingStart && startDate <= existingEnd) ||
-        (endDate >= existingStart && endDate <= existingEnd) ||
-        (startDate <= existingStart && endDate >= existingEnd)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
       )
-    })
-
-    if (hasOverlap) {
-      return NextResponse.json({
-        success: false,
-        error: 'Time off request overlaps with existing request',
-      }, { status: 409 })
     }
 
-    // Insert time off request
+    const body = await request.json()
+    const { startDate, endDate, reason } = body
+
     const { data, error } = await supabase
       .from('time_off_requests')
-      .insert({
-        userId: body.userId,
-        startDate: body.startDate,
-        endDate: body.endDate,
-        reason: body.reason,
-        status: 'pending',
-      })
+      .insert([
+        {
+          user_id: user.id,
+          start_date: startDate,
+          end_date: endDate,
+          reason,
+          status: 'pending'
+        }
+      ])
+      .select()
       .single()
 
     if (error) {
-      throw error
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
     }
 
-    return NextResponse.json({
-      success: true,
-      data,
-    })
+    return NextResponse.json(data)
   } catch (error) {
-    console.error('Error handling time off request:', error)
-    return NextResponse.json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Internal server error',
-    }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    )
   }
 }
 
-export async function POST(request: NextRequest) {
-  return handleTimeOffRequest(request)
+export async function GET(request: Request) {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get('userId')
+
+    const query = supabase
+      .from('time_off_requests')
+      .select('*')
+      
+    if (userId) {
+      query.eq('user_id', userId)
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
+    }
+
+    return NextResponse.json(data)
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    const body = await request.json()
+    const { id, status } = body
+
+    const { data, error } = await supabase
+      .from('time_off_requests')
+      .update({ status })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
+    }
+
+    return NextResponse.json(data)
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    const { searchParams } = new URL(request.url)
+    const id = searchParams.get('id')
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'Missing request ID' },
+        { status: 400 }
+      )
+    }
+
+    const { error } = await supabase
+      .from('time_off_requests')
+      .delete()
+      .eq('id', id)
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    )
+  }
 } 

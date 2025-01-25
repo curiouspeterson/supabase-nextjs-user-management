@@ -11,8 +11,8 @@ export default function AccountForm({ user }: { user: User | null }) {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [fullName, setFullName] = useState('')
-  const [username, setUsername] = useState('')
-  const [website, setWebsite] = useState('')
+  const [username, setUsername] = useState<string | null>(null)
+  const [website, setWebsite] = useState<string | null>(null)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,8 +41,8 @@ export default function AccountForm({ user }: { user: User | null }) {
       }
 
       setFullName(profile.full_name || '')
-      setUsername(profile.username || '')
-      setWebsite(profile.website || '')
+      setUsername(profile.username || null)
+      setWebsite(profile.website || null)
       setAvatarUrl(profile.avatar_url)
       setLoading(false)
     } catch (error: any) {
@@ -55,15 +55,15 @@ export default function AccountForm({ user }: { user: User | null }) {
     getProfile()
   }, [getProfile])
 
-  async function updateProfile({
+  const updateProfile = useCallback(async ({
     username,
     website,
     avatarUrl,
   }: {
-    username: string
-    website: string
+    username: string | null
+    website: string | null
     avatarUrl: string | null
-  }) {
+  }) => {
     try {
       setLoading(true)
       setError(null)
@@ -92,7 +92,16 @@ export default function AccountForm({ user }: { user: User | null }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user, supabase, router])
+
+  const handleAvatarUpload = useCallback(async (
+    url: string,
+    file: File,
+    options: { cacheControl: string; upsert: boolean; }
+  ) => {
+    setAvatarUrl(url)
+    await updateProfile({ username, website, avatarUrl: url })
+  }, [username, website, updateProfile])
 
   async function handleSignOut() {
     try {
@@ -157,10 +166,7 @@ export default function AccountForm({ user }: { user: User | null }) {
                     uid={user?.id ?? null}
                     url={avatarUrl}
                     size={150}
-                    onUpload={(url) => {
-                      setAvatarUrl(url)
-                      updateProfile({ username, website, avatarUrl: url })
-                    }}
+                    onUpload={handleAvatarUpload}
                   />
                 </div>
                 <div>
@@ -195,7 +201,7 @@ export default function AccountForm({ user }: { user: User | null }) {
                   <input
                     id="username"
                     type="text"
-                    value={username}
+                    value={username || ''}
                     onChange={(e) => setUsername(e.target.value)}
                     disabled={!user}
                     className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
@@ -208,7 +214,7 @@ export default function AccountForm({ user }: { user: User | null }) {
                   <input
                     id="website"
                     type="url"
-                    value={website}
+                    value={website || ''}
                     onChange={(e) => setWebsite(e.target.value)}
                     disabled={!user}
                     className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"

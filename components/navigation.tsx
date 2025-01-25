@@ -6,6 +6,8 @@ import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
+import { useErrorHandler } from '@/lib/hooks/use-error-handler'
+import { AuthError, DatabaseError } from '@/lib/errors'
 
 interface NavigationProps {
   className?: string
@@ -17,20 +19,29 @@ export function Navigation({ className }: NavigationProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSigningOut, setIsSigningOut] = useState(false)
   const router = useRouter()
+  const { handleError } = useErrorHandler()
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
   const setupAuthListener = useCallback(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      router.refresh()
-    })
+    try {
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((event) => {
+        if (event === 'SIGNED_OUT') {
+          setUserRole(null)
+        }
+        router.refresh()
+      })
 
-    return subscription
-  }, [supabase, router])
+      return subscription
+    } catch (error) {
+      handleError(new AuthError('Failed to setup auth listener'), 'Navigation.setupAuthListener')
+      return { unsubscribe: () => {} }
+    }
+  }, [supabase, router, handleError])
 
   useEffect(() => {
     const subscription = setupAuthListener()
@@ -42,26 +53,36 @@ export function Navigation({ className }: NavigationProps) {
   const getUserRole = useCallback(async () => {
     try {
       setIsLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      
+      if (userError) {
+        throw new AuthError('Failed to get user data')
+      }
       
       // Check both user metadata and employees table for role
       if (user) {
-        const { data: employee } = await supabase
+        const { data: employee, error: employeeError } = await supabase
           .from('employees')
           .select('user_role')
           .eq('id', user.id)
           .single()
+        
+        if (employeeError) {
+          throw new DatabaseError('Failed to fetch employee role')
+        }
         
         // Use employee table role if available, fallback to metadata
         const role = employee?.user_role || user.user_metadata?.role
         setUserRole(role)
       }
     } catch (error) {
-      console.error('Error fetching user role:', error)
+      handleError(error, 'Navigation.getUserRole')
+      // Set a default role to prevent blocking the UI
+      setUserRole('Employee')
     } finally {
       setIsLoading(false)
     }
-  }, [supabase])
+  }, [supabase, handleError])
 
   useEffect(() => {
     getUserRole()
@@ -101,14 +122,20 @@ export function Navigation({ className }: NavigationProps) {
     },
   ]
 
-  async function handleSignOut() {
+  const handleSignOut = async () => {
     if (isSigningOut) return
+    
     try {
       setIsSigningOut(true)
-      await supabase.auth.signOut()
+      const { error } = await supabase.auth.signOut()
+      
+      if (error) {
+        throw new AuthError('Failed to sign out')
+      }
+      
       window.location.href = '/'
     } catch (error) {
-      console.error('Error signing out:', error)
+      handleError(error, 'Navigation.handleSignOut')
       setIsSigningOut(false)
     }
   }
@@ -126,7 +153,7 @@ export function Navigation({ className }: NavigationProps) {
       </div>
 
       {/* Center - Main Navigation */}
-      <nav className="flex space-x-4">
+      <nav className="flex space-x-4" role="navigation" aria-label="Main navigation">
         {mainLinks
           .filter(link => link.show)
           .map(link => (
@@ -139,6 +166,7 @@ export function Navigation({ className }: NavigationProps) {
                   ? 'bg-gray-900 text-white'
                   : 'text-gray-300 hover:bg-gray-700 hover:text-white'
               )}
+              aria-current={pathname === link.href ? 'page' : undefined}
             >
               {link.label}
             </Link>
@@ -155,6 +183,7 @@ export function Navigation({ className }: NavigationProps) {
               ? 'bg-gray-900 text-white'
               : 'text-gray-300 hover:bg-gray-700 hover:text-white'
           )}
+          aria-current={pathname === '/account' ? 'page' : undefined}
         >
           Account
         </Link>
@@ -167,6 +196,7 @@ export function Navigation({ className }: NavigationProps) {
               ? "opacity-50 cursor-not-allowed"
               : "text-gray-300 hover:bg-gray-700 hover:text-white"
           )}
+          aria-busy={isSigningOut}
         >
           {isSigningOut ? 'Signing Out...' : 'Sign Out'}
         </button>

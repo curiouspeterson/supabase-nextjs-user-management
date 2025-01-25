@@ -1,9 +1,19 @@
 import { createClient } from '@/utils/supabase/server'
 import { Database } from '@/app/database.types'
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
+import Link from 'next/link'
+import { formatDistanceToNow } from 'date-fns'
 
-type TimeOffRequest = Database['public']['Tables']['time_off_requests']['Row'] & {
-  employees: Database['public']['Tables']['profiles']['Row']
+interface TimeOffRequest {
+  id: number
+  user_id: string
+  start_date: string
+  end_date: string
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+  updated_at: string
 }
 
 export default async function TimeOffManagementPage() {
@@ -40,10 +50,18 @@ export default async function TimeOffManagementPage() {
     )
   }
 
-  const { data: requests } = await supabase
+  const { data: requests, error } = await supabase
     .from('time_off_requests')
-    .select('*, employees:profiles!inner(*)')
-    .order('start_date', { ascending: false })
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('Error fetching time off requests:', error)
+    return <div>Error loading time off requests</div>
+  }
+
+  const timeOffRequests = requests as TimeOffRequest[]
 
   async function updateRequestStatus(formData: FormData) {
     'use server'
@@ -66,97 +84,55 @@ export default async function TimeOffManagementPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col gap-8 px-4 py-8">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Time Off Request Management</h1>
+    <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-2xl font-bold">Time Off Requests</h1>
+        <Link
+          href="/dashboard/time-off/new"
+          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+        >
+          New Request
+        </Link>
       </div>
 
       <div className="space-y-4">
-        {requests && requests.length > 0 ? (
-          requests.map((request: TimeOffRequest) => (
-            <div
-              key={request.id}
-              className="bg-white p-4 rounded-lg shadow border border-gray-200"
-            >
-              <div className="flex justify-between items-start">
-                <div>
-                  <div className="font-medium">
-                    {request.employees?.full_name || 'Unknown Employee'}
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    {new Date(request.start_date).toLocaleDateString()} -{' '}
-                    {new Date(request.end_date).toLocaleDateString()}
-                  </div>
-                  <div className="text-sm text-gray-600 mt-1">
-                    {request.reason}
-                  </div>
-                </div>
+        {timeOffRequests.map((request) => (
+          <div
+            key={request.id}
+            className="bg-white p-4 rounded-lg shadow flex justify-between items-start"
+          >
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="font-medium">
+                  {new Date(request.start_date).toLocaleDateString()} - {new Date(request.end_date).toLocaleDateString()}
+                </span>
                 <span
                   className={`px-2 py-1 rounded text-sm ${
-                    request.status === 'Approved'
+                    request.status === 'approved'
                       ? 'bg-green-100 text-green-800'
-                      : request.status === 'Denied'
+                      : request.status === 'rejected'
                       ? 'bg-red-100 text-red-800'
                       : 'bg-yellow-100 text-yellow-800'
                   }`}
                 >
-                  {request.status}
+                  {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
                 </span>
               </div>
-
-              {request.status === 'Pending' && (
-                <form
-                  action={updateRequestStatus}
-                  className="mt-4 border-t pt-4 space-y-4"
-                >
-                  <input type="hidden" name="requestId" value={request.id} />
-                  
-                  <div>
-                    <label
-                      htmlFor={`notes-${request.id}`}
-                      className="block text-sm font-medium text-gray-700"
-                    >
-                      Notes
-                    </label>
-                    <textarea
-                      id={`notes-${request.id}`}
-                      name="notes"
-                      rows={2}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  <div className="flex gap-4">
-                    <button
-                      type="submit"
-                      name="status"
-                      value="Approved"
-                      className="flex-1 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="submit"
-                      name="status"
-                      value="Denied"
-                      className="flex-1 bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                    >
-                      Deny
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {request.manager_notes && (
-                <div className="mt-2 text-sm text-gray-600 border-t pt-2">
-                  <span className="font-medium">Manager Notes:</span>{' '}
-                  {request.manager_notes}
-                </div>
-              )}
+              <div className="text-sm text-gray-600 mt-1">
+                {request.reason}
+              </div>
             </div>
-          ))
-        ) : (
-          <div className="text-gray-500 text-center py-4">
+            <span
+              className="text-sm text-gray-500"
+              title={new Date(request.created_at).toLocaleString()}
+            >
+              {formatDistanceToNow(new Date(request.created_at), { addSuffix: true })}
+            </span>
+          </div>
+        ))}
+
+        {timeOffRequests.length === 0 && (
+          <div className="text-center py-8 text-gray-500">
             No time off requests found
           </div>
         )}

@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 
+interface LoginPageProps {
+  loginAction: (credentials: { email: string; password: string }) => Promise<{ error: string | null }>;
+  signupAction: (credentials: { email: string; password: string }) => Promise<{ error: string | null }>;
+}
+
 const LoginPage = ({ loginAction, signupAction }: LoginPageProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);

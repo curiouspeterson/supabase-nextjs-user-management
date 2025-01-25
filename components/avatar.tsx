@@ -1,26 +1,30 @@
 'use client'
-import React, { useEffect, useState, useCallback } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+
+import { useEffect, useState, useCallback } from 'react'
 import Image from 'next/image'
 import { createClient } from '@/utils/supabase/client'
 import { useErrorHandler } from '@/lib/hooks/use-error-handler'
-import { ValidationError, NetworkError, DatabaseError } from '@/lib/errors'
+import { ValidationError, DatabaseError } from '@/lib/errors'
+import { useToast } from '@/components/ui/use-toast'
+
+interface AvatarProps {
+  uid: string
+  url: string | null
+  size: number
+  onUpload?: (url: string) => void
+}
 
 export default function Avatar({
   uid,
   url,
-  size = 150,
+  size,
   onUpload,
-}: {
-  uid: string | null
-  url: string | null
-  size: number
-  onUpload: (url: string, file: File, options: { cacheControl: string, upsert: boolean }) => Promise<void>
-}) {
+}: AvatarProps) {
   const supabase = createClient()
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const { handleError } = useErrorHandler()
+  const { toast } = useToast()
 
   const downloadImage = useCallback(async (path: string) => {
     try {
@@ -40,25 +44,20 @@ export default function Avatar({
   }, [supabase.storage])
 
   useEffect(() => {
-    if (url) {
-      downloadImage(url)
-    }
+    if (url) downloadImage(url)
   }, [url, downloadImage])
 
   const validateFile = (file: File) => {
     if (!file) {
-      throw new ValidationError('Please select a file to upload')
+      throw new ValidationError('Please select an image file')
     }
 
-    // Check file type
     if (!file.type.startsWith('image/')) {
-      throw new ValidationError('Please upload an image file')
+      throw new ValidationError('Selected file must be an image')
     }
 
-    // Check file size (2MB limit)
-    const TWO_MB = 2 * 1024 * 1024
-    if (file.size > TWO_MB) {
-      throw new ValidationError('File size must be less than 2MB')
+    if (file.size > 2 * 1024 * 1024) {
+      throw new ValidationError('Image size must be less than 2MB')
     }
   }
 
@@ -69,33 +68,33 @@ export default function Avatar({
       setUploading(true)
 
       if (!event.target.files || event.target.files.length === 0) {
-        throw new Error('You must select an image to upload.')
+        throw new ValidationError('Please select an image file')
       }
 
       const file = event.target.files[0]
       validateFile(file)
 
-      if (!uid) {
-        throw new ValidationError('User ID is required')
-      }
-
       const fileExt = file.name.split('.').pop()
       const filePath = `${uid}-${Math.random()}.${fileExt}`
 
-      const options = {
-        cacheControl: '3600',
-        upsert: true
-      }
-
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(filePath, file, options)
+        .upload(filePath, file)
 
       if (uploadError) {
-        throw uploadError
+        throw new DatabaseError('Failed to upload avatar image')
       }
 
-      await onUpload(filePath, file, options)
+      if (onUpload) onUpload(filePath)
+
+      toast({
+        title: 'Avatar Updated',
+        description: 'Your profile picture has been updated successfully.',
+        variant: 'default'
+      })
+
+      // Download the new image
+      await downloadImage(filePath)
     } catch (error) {
       handleError(error, 'Avatar.uploadAvatar')
     } finally {
@@ -104,7 +103,7 @@ export default function Avatar({
   }
 
   return (
-    <div className="flex flex-col items-center gap-4">
+    <div>
       {avatarUrl ? (
         <Image
           src={avatarUrl}
@@ -114,31 +113,39 @@ export default function Avatar({
           height={size}
         />
       ) : (
-        <Image
-          src="/default-avatar.png"
-          alt="Default Avatar"
-          className="rounded-full"
-          width={size}
-          height={size}
-        />
-      )}
-      <div className="flex flex-col items-center gap-2">
-        <label
-          className="cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 rounded-md"
-          htmlFor="avatar"
+        <div
+          className="bg-gray-200 rounded-full flex items-center justify-center"
+          style={{ width: size, height: size }}
         >
-          {uploading ? 'Uploading...' : 'Upload Avatar'}
+          <svg
+            className="h-half w-half text-gray-400"
+            fill="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+        </div>
+      )}
+      <div style={{ width: size }}>
+        <label
+          className="button primary block cursor-pointer text-center p-2 mt-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          htmlFor="single"
+        >
+          {uploading ? 'Uploading...' : 'Upload'}
         </label>
         <input
+          style={{
+            visibility: 'hidden',
+            position: 'absolute',
+          }}
           type="file"
-          id="avatar"
+          id="single"
           accept="image/*"
           onChange={uploadAvatar}
           disabled={uploading}
-          className="hidden"
           aria-label="Upload avatar"
         />
       </div>
     </div>
   )
-}
+} 
