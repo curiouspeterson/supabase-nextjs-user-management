@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom'
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import AccountForm from '@/app/account/account-form'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import { User } from '@supabase/supabase-js'
 import userEvent from '@testing-library/user-event'
@@ -142,7 +141,12 @@ jest.mock('@supabase/auth-helpers-nextjs', () => ({
 
 describe('AccountForm', () => {
   const mockToast = jest.fn()
-  const mockRouter = { refresh: jest.fn() }
+  const mockRouter = {
+    refresh: jest.fn(),
+    push: jest.fn()
+  }
+  let user: ReturnType<typeof userEvent.setup>
+  
   const mockUser: User = {
     id: 'test-user-id',
     email: 'test@example.com',
@@ -155,6 +159,7 @@ describe('AccountForm', () => {
     role: 'authenticated',
     updated_at: new Date().toISOString()
   }
+
   const mockProfile = {
     id: mockUser.id,
     full_name: 'Test User',
@@ -163,6 +168,7 @@ describe('AccountForm', () => {
     avatar_url: 'mock-url',
     updated_at: mockUser.updated_at
   }
+
   const mockSupabaseClient = {
     from: jest.fn(() => ({
       select: jest.fn().mockReturnThis(),
@@ -175,7 +181,6 @@ describe('AccountForm', () => {
       signOut: jest.fn().mockResolvedValue({ error: null })
     }
   }
-  let user: ReturnType<typeof userEvent.setup>
 
   beforeEach(() => {
     jest.clearAllMocks()
@@ -187,31 +192,6 @@ describe('AccountForm', () => {
       user: mockUser,
       error: null
     })
-    
-    // Reset mock implementations with proper types
-    const single = jest.fn().mockResolvedValue(defaultProfileData)
-    const eq = jest.fn().mockReturnValue({ single })
-    const select = jest.fn().mockReturnValue({ eq })
-    const upsert = jest.fn().mockResolvedValue({ 
-      data: {
-        id: mockUser.id,
-        full_name: 'Updated Name',
-        username: 'testuser',
-        website: 'https://test.com',
-        avatar_url: 'https://test.com/avatar.jpg',
-        updated_at: expect.any(String)
-      },
-      error: null 
-    })
-    
-    mockSupabaseClient.from.mockImplementation(() => ({
-      select,
-      upsert
-    }))
-
-    mockSupabaseClient.auth.signOut.mockImplementation(() => 
-      Promise.resolve({ error: null })
-    )
 
     // Mock URL.createObjectURL
     if (typeof window !== 'undefined') {

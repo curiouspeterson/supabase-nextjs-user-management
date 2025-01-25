@@ -22,40 +22,77 @@ interface TimeOffRequest {
   status: 'pending' | 'approved' | 'rejected'
 }
 
+interface FormErrors {
+  start_date?: string
+  end_date?: string
+  type?: string
+  general?: string
+}
+
 export default function TimeOffRequestForm() {
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [errors, setErrors] = useState<FormErrors>({})
   const [formData, setFormData] = useState<Partial<TimeOffRequest>>({
     type: '',
     notes: ''
   })
+  const [isSelectOpen, setIsSelectOpen] = useState(false)
   const { user } = useUser()
   const { handleError } = useErrorHandler()
   const supabase = createClient()
 
-  const validateRequest = (request: Partial<TimeOffRequest>) => {
+  const validateRequest = (request: Partial<TimeOffRequest>): FormErrors => {
+    const errors: FormErrors = {}
+
     if (!request.start_date) {
-      throw new ValidationError('Start date is required')
+      errors.start_date = 'Start date is required'
     }
     if (!request.end_date) {
-      throw new ValidationError('End date is required')
+      errors.end_date = 'End date is required'
     }
     if (!request.type) {
-      throw new ValidationError('Type of time off is required')
+      errors.type = 'Type of time off is required'
     }
 
-    const start = new Date(request.start_date)
-    const end = new Date(request.end_date)
+    if (request.start_date && request.end_date) {
+      const start = new Date(request.start_date)
+      const end = new Date(request.end_date)
 
-    if (end < start) {
-      throw new ValidationError('End date cannot be before start date')
+      if (end < start) {
+        errors.end_date = 'End date cannot be before start date'
+      }
+
+      const diffTime = Math.abs(end.getTime() - start.getTime())
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+      if (diffDays > 30) {
+        errors.general = 'Time off requests cannot exceed 30 consecutive days'
+      }
     }
 
+    return errors
+  }
+
+  const checkVacationDays = async (start_date: string, end_date: string, type: string) => {
+    if (type.toLowerCase() !== 'vacation') return
+
+    const start = new Date(start_date)
+    const end = new Date(end_date)
     const diffTime = Math.abs(end.getTime() - start.getTime())
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    if (diffDays > 30) {
-      throw new ValidationError('Time off requests cannot exceed 30 consecutive days')
+    const requestedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+    const { data: vacationData, error } = await supabase
+      .from('vacation_days')
+      .select('total_days, used_days')
+      .eq('user_id', user?.id)
+      .single()
+
+    if (error) {
+      throw new DatabaseError('Failed to check vacation days')
+    }
+
+    if (vacationData && vacationData.used_days + requestedDays > vacationData.total_days) {
+      throw new ValidationError('Insufficient vacation days remaining')
     }
   }
 
@@ -82,32 +119,31 @@ export default function TimeOffRequestForm() {
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setIsSubmitting(true)
-    setError(null)
+    setErrors({})
 
     try {
-      // Validate required fields
-      if (!formData.start_date) {
-        throw new Error('Start date is required')
-      }
-      if (!formData.end_date) {
-        throw new Error('End date is required')
-      }
-      if (!formData.type) {
-        throw new Error('Type is required')
-      }
-
-      // Validate dates
-      const startDate = new Date(formData.start_date)
-      const endDate = new Date(formData.end_date)
-      if (endDate < startDate) {
-        throw new Error('End date cannot be before start date')
+      // Validate form data
+      const validationErrors = validateRequest(formData)
+      if (Object.keys(validationErrors).length > 0) {
+        setErrors(validationErrors)
+        const firstError = Object.values(validationErrors)[0]
+        toast({
+          title: 'Error',
+          description: firstError,
+          variant: 'destructive'
+        })
+        throw new ValidationError(firstError || 'Validation failed')
       }
 
-      // Validate request
-      validateRequest(formData)
+      // Check vacation days if applicable
+      if (formData.start_date && formData.end_date && formData.type) {
+        await checkVacationDays(formData.start_date, formData.end_date, formData.type)
+      }
 
       // Check for overlapping requests
-      await checkOverlappingRequests(formData.start_date, formData.end_date)
+      if (formData.start_date && formData.end_date) {
+        await checkOverlappingRequests(formData.start_date, formData.end_date)
+      }
 
       // Submit form data
       const { error: submitError } = await supabase
@@ -115,12 +151,13 @@ export default function TimeOffRequestForm() {
         .insert([
           {
             ...formData,
+            user_id: user?.id,
             status: 'pending'
           }
         ])
 
       if (submitError) {
-        throw new DatabaseError('Failed to submit time off request')
+        throw new DatabaseError('Unable to submit request. Please try again later.')
       }
 
       toast({
@@ -130,7 +167,7 @@ export default function TimeOffRequestForm() {
       handleReset()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to submit time off request'
-      setError(message)
+      setErrors(prev => ({ ...prev, general: message }))
       toast({
         title: 'Error',
         description: message,
@@ -147,7 +184,8 @@ export default function TimeOffRequestForm() {
       type: '',
       notes: ''
     })
-    setError(null)
+    setErrors({})
+    setIsSelectOpen(false)
     const form = document.querySelector('form') as HTMLFormElement
     if (form) {
       form.reset()
@@ -155,82 +193,123 @@ export default function TimeOffRequestForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} onReset={handleReset} className="space-y-4">
-      {error && (
-        <Alert variant="destructive" role="alert" aria-live="polite">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+    <form onSubmit={handleSubmit} onReset={handleReset} className="space-y-4" role="form">
+      {Object.entries(errors).map(([key, message]) => (
+        message && (
+          <Alert key={key} variant="destructive" role="alert" aria-live="polite">
+            <AlertDescription>{message}</AlertDescription>
+          </Alert>
+        )
+      ))}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label htmlFor="start_date" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-            Start Date
-          </label>
-          <input
+          <Label htmlFor="start_date">Start Date</Label>
+          <Input
             type="date"
             id="start_date"
             name="start_date"
             required
-            aria-invalid={!!error}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Start date"
+            aria-invalid={!!errors.start_date}
+            aria-describedby={errors.start_date ? "start-date-error" : undefined}
+            className="mt-1"
             min={new Date().toISOString().split('T')[0]}
-            onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+            onChange={(e) => {
+              setFormData({ ...formData, start_date: e.target.value })
+              if (errors.start_date) {
+                setErrors(prev => ({ ...prev, start_date: undefined }))
+              }
+            }}
           />
+          {errors.start_date && (
+            <div id="start-date-error" role="alert" aria-live="polite" className="text-sm text-red-500">
+              {errors.start_date}
+            </div>
+          )}
         </div>
         <div className="space-y-2">
-          <label htmlFor="end_date" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-            End Date
-          </label>
-          <input
+          <Label htmlFor="end_date">End Date</Label>
+          <Input
             type="date"
             id="end_date"
             name="end_date"
             required
-            aria-invalid={!!error}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="End date"
+            aria-invalid={!!errors.end_date}
+            aria-describedby={errors.end_date ? "end-date-error" : undefined}
+            className="mt-1"
             min={formData.start_date || new Date().toISOString().split('T')[0]}
-            onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+            onChange={(e) => {
+              setFormData({ ...formData, end_date: e.target.value })
+              if (errors.end_date) {
+                setErrors(prev => ({ ...prev, end_date: undefined }))
+              }
+            }}
           />
+          {errors.end_date && (
+            <div id="end-date-error" role="alert" aria-live="polite" className="text-sm text-red-500">
+              {errors.end_date}
+            </div>
+          )}
         </div>
       </div>
       <div className="space-y-2">
-        <label htmlFor="type" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-          Type
-        </label>
-        <Select
-          name="type"
-          required
-          value={formData.type}
-          onValueChange={(value) => setFormData({ ...formData, type: value })}
-        >
-          <SelectTrigger aria-invalid={!!error} aria-required="true">
-            <SelectValue placeholder="Select type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="Vacation">Vacation</SelectItem>
-            <SelectItem value="Sick">Sick</SelectItem>
-            <SelectItem value="Personal">Personal</SelectItem>
-          </SelectContent>
-        </Select>
+        <Label htmlFor="type">Type</Label>
+        <div className="relative">
+          <select
+            id="type"
+            name="type"
+            required
+            aria-label="Type of time off"
+            aria-invalid={!!errors.type}
+            aria-expanded={isSelectOpen}
+            role="combobox"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            value={formData.type}
+            onChange={(e) => {
+              setFormData({ ...formData, type: e.target.value })
+              if (errors.type) {
+                setErrors(prev => ({ ...prev, type: undefined }))
+              }
+            }}
+            onFocus={() => setIsSelectOpen(true)}
+            onBlur={() => setIsSelectOpen(false)}
+          >
+            <option value="">Select type</option>
+            <option value="vacation">Vacation</option>
+            <option value="sick">Sick Leave</option>
+            <option value="personal">Personal Leave</option>
+          </select>
+        </div>
+        {errors.type && (
+          <div role="alert" aria-live="polite" className="text-sm text-red-500">
+            {errors.type}
+          </div>
+        )}
       </div>
       <div className="space-y-2">
-        <label htmlFor="notes" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-          Notes
-        </label>
+        <Label htmlFor="notes">Notes</Label>
         <Textarea
           id="notes"
           name="notes"
-          placeholder="Add any additional notes..."
-          className="h-24"
+          placeholder="Please provide notes for your time off request"
+          required
+          aria-label="Notes"
+          rows={3}
           value={formData.notes}
           onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
         />
       </div>
-      <div className="flex justify-end space-x-2">
-        <Button type="reset" variant="outline">
+      <div className="flex justify-end space-x-3">
+        <Button type="reset">
           Reset
         </Button>
-        <Button type="submit" disabled={isSubmitting}>
+        <Button 
+          type="submit" 
+          disabled={isSubmitting}
+          aria-busy={isSubmitting}
+          className="inline-flex justify-center"
+        >
           {isSubmitting ? 'Submitting...' : 'Submit Request'}
         </Button>
       </div>
