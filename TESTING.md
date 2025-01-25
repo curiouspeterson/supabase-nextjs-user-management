@@ -40,6 +40,16 @@ The test suite is organized into the following categories:
    - ⚠️ Employee Management (partial)
    - ⚠️ Schedule Management (partial)
 
+5. **Error Boundary Tests** (`__tests__/error/`)
+   - ✅ Global error page rendering
+   - ✅ API error handling
+   - ⚠️ Employee deletion error states
+
+6. **Role-Based Access Tests** (`__tests__/security/`)
+   - ✅ Manager schedule access
+   - ✅ Admin employee management
+   - ⚠️ Dispatch worker restrictions
+
 ## Current Test Coverage
 
 ### Completed
@@ -83,6 +93,22 @@ The test suite is organized into the following categories:
    - Test in production-like environment
    - Include mobile and desktop scenarios
 
+5. **Supabase Mocking**
+   - Always mock RPC calls:
+   ```javascript
+   .rpc: jest.fn(() => Promise.resolve({ data: null, error: null }))
+   ```
+
+6. **Accessibility**
+   - Verify all interactive elements have ARIA labels
+   - Test keyboard navigation sequences
+
+7. **Error Testing**
+   - Force error states in:
+   - API response handling
+   - Database function failures
+   - Invalid role access attempts
+
 ## Running Tests
 
 ```bash
@@ -106,5 +132,38 @@ npm test -- --coverage
 3. Implement performance testing suite
 4. Add cross-browser testing configuration
 5. Set up continuous integration test workflow
+6. Implement schedule conflict detection tests
+7. Add employee edit history tracking
+8. Create load test for schedule generation
+9. Verify 508 compliance for all components
 
-Last Updated: March 14, 2024 
+Last Updated: June 15, 2024 
+
+## Coverage Targets
+
+| Area              | Current | Target |
+|-------------------|---------|--------|
+| API Routes        | 85%     | 95%    |
+| UI Components     | 90%     | 98%    |
+| Database Functions| 65%     | 90%    |
+| Error Boundaries  | 50%     | 100%   |
+
+## New Troubleshooting Section
+
+**Common Issues**  
+1. Timeout Errors:
+   ```bash
+   jest --testTimeout=30000
+   ```
+2. ESM Module Issues:
+   ```javascript
+   transformIgnorePatterns: [
+     'node_modules/(?!(geist|@supabase)/)'
+   ]
+   ```
+3. Missing Mocks:
+   ```typescript
+   jest.mock('@/utils/supabase/middleware')
+   ```
+
+Test Coverage Leader: @web 

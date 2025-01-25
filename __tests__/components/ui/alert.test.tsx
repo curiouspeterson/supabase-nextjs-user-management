@@ -1,11 +1,18 @@
-import * as React from 'react'
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import React from 'react'
+import {
+  render,
+  screen,
+  setupUser,
+  hasClasses,
+  cleanupAfterEach,
+  userEvent,
+  waitFor
+} from '../../test-utils'
 import {
   Alert,
   AlertTitle,
   AlertDescription,
-} from '@/components/ui/alert'
+} from '../../../components/ui/alert'
 import { Terminal, AlertCircle, AlertTriangle, Info } from 'lucide-react'
 
 describe('Alert', () => {
@@ -133,14 +140,13 @@ describe('Alert', () => {
   it('should handle custom class names', () => {
     render(
       <Alert className="custom-alert">
-        <Info className="h-4 w-4" />
         <AlertTitle className="custom-title">Title</AlertTitle>
         <AlertDescription className="custom-description">Description</AlertDescription>
       </Alert>
     )
 
     expect(screen.getByRole('alert')).toHaveClass('custom-alert')
-    expect(screen.getByText('Title').parentElement).toHaveClass('custom-title')
+    expect(screen.getByText('Title')).toHaveClass('custom-title')
     expect(screen.getByText('Description')).toHaveClass('custom-description')
   })
 
@@ -148,13 +154,14 @@ describe('Alert', () => {
     const longText = 'Very long alert text '.repeat(20)
     render(
       <Alert>
-        <AlertCircle className="h-4 w-4" />
         <AlertTitle>Long Title</AlertTitle>
         <AlertDescription>{longText}</AlertDescription>
       </Alert>
     )
 
-    expect(screen.getByText(longText)).toBeInTheDocument()
+    const description = screen.getByText(longText.trim())
+    expect(description).toBeInTheDocument()
+    expect(description).toHaveClass('text-sm')
   })
 
   it('should handle alert without icon', () => {

@@ -1,6 +1,13 @@
-import * as React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import React from 'react'
+import {
+  render,
+  screen,
+  setupUser,
+  hasClasses,
+  cleanupAfterEach,
+  userEvent,
+  waitFor
+} from '../../test-utils'
 import {
   Dialog,
   DialogTrigger,
@@ -13,8 +20,52 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 
+// Constants for timeouts
+const TEST_TIMEOUT = 15000
+const ANIMATION_TIMEOUT = 1000
+
 describe('Dialog Component', () => {
-  const user = userEvent.setup()
+  // Modern cleanup after each test
+  cleanupAfterEach()
+
+  // Modern user event setup
+  const user = userEvent.setup({
+    delay: null,
+    pointerEventsCheck: 0
+  })
+
+  beforeAll(() => {
+    // Mock animation end events since JSDOM doesn't handle them
+    Element.prototype.getAnimations = function() {
+      return [{
+        finished: Promise.resolve(),
+        cancel: () => {},
+        currentTime: 0,
+        effect: null,
+        id: '',
+        oncancel: null,
+        onfinish: null,
+        onremove: null,
+        pending: false,
+        playState: 'finished' as const,
+        playbackRate: 1,
+        ready: Promise.resolve(),
+        replaceState: 'active' as const,
+        startTime: 0,
+        timeline: null,
+        play: () => {},
+        pause: () => {},
+        finish: () => {},
+        reverse: () => {},
+        persist: () => {},
+        commitStyles: () => {},
+        updatePlaybackRate: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => true,
+      } as unknown as Animation]
+    }
+  })
 
   const renderDialog = () => {
     return render(
@@ -27,65 +78,108 @@ describe('Dialog Component', () => {
           </DialogHeader>
           <div>Dialog Content</div>
           <DialogFooter>
-            <button className="close-button">Close</button>
+            <DialogClose asChild>
+              <button aria-label="Close dialog footer">Close Dialog</button>
+            </DialogClose>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     )
   }
 
+  const openDialog = async () => {
+    const trigger = screen.getByRole('button', { name: 'Open Dialog' })
+    await user.click(trigger)
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { hidden: true })).toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
+  }
+
   it('renders dialog with all subcomponents', async () => {
     renderDialog()
+    await openDialog()
     
-    await user.click(screen.getByRole('button', { name: 'Open Dialog' }))
-    
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(screen.getByText('Dialog Title')).toBeInTheDocument()
-    expect(screen.getByText('Dialog Description')).toBeInTheDocument()
-    expect(screen.getByText('Dialog Content')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
+    await waitFor(() => {
+      const dialog = screen.getByRole('dialog', { hidden: true })
+      expect(dialog).toBeInTheDocument()
+      expect(screen.getByText('Dialog Title')).toBeInTheDocument()
+      expect(screen.getByText('Dialog Description')).toBeInTheDocument()
+      expect(screen.getByText('Dialog Content')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Close dialog footer' })).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
   })
 
   it('closes dialog on clicking close button', async () => {
     renderDialog()
-    
-    await user.click(screen.getByRole('button', { name: 'Open Dialog' }))
-    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await openDialog()
+
+    const closeButton = screen.getByRole('button', { name: 'Close dialog footer' })
+    await user.click(closeButton)
     
     await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    })
+      expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
   })
 
   it('closes dialog on pressing escape', async () => {
     renderDialog()
+    await openDialog()
     
-    await user.click(screen.getByRole('button', { name: 'Open Dialog' }))
     await user.keyboard('{Escape}')
     
     await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    })
+      expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
   })
 
   it('maintains focus trap within dialog', async () => {
-    renderDialog()
-    
-    await user.click(screen.getByRole('button', { name: 'Open Dialog' }))
-    
-    const dialog = screen.getByRole('dialog')
-    const closeButton = screen.getByRole('button', { name: 'Close' })
-    
-    // Initial focus should be on the first focusable element
-    expect(closeButton).toHaveFocus()
-    
-    // Tab should cycle through focusable elements
+    render(
+      <Dialog>
+        <DialogTrigger>Open Dialog</DialogTrigger>
+        <DialogContent hideCloseButton>
+          <DialogHeader>
+            <DialogTitle>Dialog Title</DialogTitle>
+            <DialogDescription>Dialog Description</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <button>First Button</button>
+            <button>Second Button</button>
+            <DialogClose asChild>
+              <button aria-label="Close dialog footer">Close Dialog</button>
+            </DialogClose>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Open Dialog' })
+    await user.click(trigger)
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { hidden: true })).toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
+
+    // Wait for initial focus
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'First Button' })).toHaveFocus()
+    }, { timeout: ANIMATION_TIMEOUT })
+
+    // Tab through all focusable elements
     await user.tab()
-    expect(closeButton).toHaveFocus() // Should cycle back to first element
-    
-    // Shift+Tab should cycle backwards
-    await user.keyboard('{Shift>}{Tab}{/Shift}')
-    expect(closeButton).toHaveFocus() // Should cycle to last element
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Second Button' })).toHaveFocus()
+    }, { timeout: ANIMATION_TIMEOUT })
+
+    await user.tab()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Close dialog footer' })).toHaveFocus()
+    }, { timeout: ANIMATION_TIMEOUT })
+
+    // Should cycle back to first button
+    await user.tab()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'First Button' })).toHaveFocus()
+    }, { timeout: ANIMATION_TIMEOUT })
   })
 
   it('renders with custom class names', async () => {
@@ -99,19 +193,23 @@ describe('Dialog Component', () => {
           </DialogHeader>
           <div>Dialog Content</div>
           <DialogFooter className="custom-footer">
-            <button className="close-button" aria-label="Close dialog">Close</button>
+            <button aria-label="Close dialog footer">Close Dialog</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     )
-    
-    await user.click(screen.getByRole('button', { name: 'Open Dialog' }))
-    
-    expect(screen.getByRole('dialog')).toHaveClass('custom-content')
-    expect(screen.getByText('Dialog Title').parentElement).toHaveClass('custom-header')
-    expect(screen.getByText('Dialog Title')).toHaveClass('custom-title')
-    expect(screen.getByText('Dialog Description')).toHaveClass('custom-description')
-    expect(screen.getByRole('button', { name: 'Close dialog' }).parentElement).toHaveClass('custom-footer')
+
+    const trigger = screen.getByRole('button', { name: 'Open Dialog' })
+    await user.click(trigger)
+
+    await waitFor(() => {
+      const dialog = screen.getByRole('dialog', { hidden: true })
+      expect(dialog).toHaveClass('custom-content')
+      expect(trigger).toHaveClass('custom-trigger')
+      expect(screen.getByText('Dialog Title')).toHaveClass('custom-title')
+      expect(screen.getByText('Dialog Description')).toHaveClass('custom-description')
+      expect(screen.getByRole('button', { name: 'Close dialog footer' }).parentElement).toHaveClass('custom-footer')
+    }, { timeout: TEST_TIMEOUT })
   })
 
   it('should handle controlled open state', async () => {
@@ -130,17 +228,20 @@ describe('Dialog Component', () => {
     render(<TestComponent />)
 
     // Initially closed
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument()
 
     // Open dialog
     await user.click(screen.getByRole('button', { name: 'Open' }))
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { hidden: true })).toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
 
     // Close with Escape
     await user.keyboard('{Escape}')
     await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    })
+      expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
   })
 
   it('should handle nested dialogs', async () => {
@@ -163,50 +264,64 @@ describe('Dialog Component', () => {
 
     // Open first dialog
     await user.click(screen.getByRole('button', { name: 'Open First' }))
-    expect(screen.getByText('First Dialog')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('First Dialog')).toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
 
     // Open second dialog
     await user.click(screen.getByRole('button', { name: 'Open Second' }))
-    expect(screen.getByText('Second Dialog')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Second Dialog')).toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
 
     // Close second dialog
     await user.click(screen.getByRole('button', { name: 'Close Second' }))
     await waitFor(() => {
       expect(screen.queryByText('Second Dialog')).not.toBeInTheDocument()
       expect(screen.getByText('First Dialog')).toBeInTheDocument()
-    })
+    }, { timeout: ANIMATION_TIMEOUT })
 
     // Close first dialog
     await user.click(screen.getByRole('button', { name: 'Close First' }))
     await waitFor(() => {
       expect(screen.queryByText('First Dialog')).not.toBeInTheDocument()
-    })
+    }, { timeout: ANIMATION_TIMEOUT })
   })
 
   it('should handle dialog with form submission', async () => {
-    const handleSubmit = jest.fn()
+    const handleSubmit = jest.fn((e) => {
+      e.preventDefault()
+    })
 
     render(
       <Dialog>
-        <DialogTrigger>Open</DialogTrigger>
+        <DialogTrigger>Open Form</DialogTrigger>
         <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Form Dialog</DialogTitle>
+            <DialogDescription>Please fill out the form</DialogDescription>
+          </DialogHeader>
           <form onSubmit={handleSubmit}>
             <input type="text" placeholder="Enter text" />
-            <button type="submit">Submit</button>
+            <button type="submit">Submit Form</button>
           </form>
-          <DialogClose>Cancel</DialogClose>
         </DialogContent>
       </Dialog>
     )
 
     // Open dialog
-    await user.click(screen.getByRole('button', { name: 'Open' }))
+    await user.click(screen.getByRole('button', { name: 'Open Form' }))
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Enter text')).toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
 
     // Fill and submit form
     await user.type(screen.getByPlaceholderText('Enter text'), 'Test input')
-    await user.click(screen.getByRole('button', { name: 'Submit' }))
+    await user.click(screen.getByRole('button', { name: 'Submit Form' }))
 
-    expect(handleSubmit).toHaveBeenCalled()
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalled()
+    }, { timeout: ANIMATION_TIMEOUT })
   })
 
   it('should handle dialog with dynamic content', async () => {
@@ -214,14 +329,14 @@ describe('Dialog Component', () => {
       const [content, setContent] = React.useState('Initial content')
       return (
         <Dialog>
-          <DialogTrigger>Open</DialogTrigger>
+          <DialogTrigger>Open Dynamic</DialogTrigger>
           <DialogContent>
-            <DialogTitle>Dynamic Content</DialogTitle>
+            <DialogHeader>
+              <DialogTitle>Dynamic Dialog</DialogTitle>
+              <DialogDescription>Content changes dynamically</DialogDescription>
+            </DialogHeader>
             <div>{content}</div>
-            <Button onClick={() => setContent('Updated content')}>
-              Update Content
-            </Button>
-            <DialogClose>Close</DialogClose>
+            <button onClick={() => setContent('Updated content')}>Update Content</button>
           </DialogContent>
         </Dialog>
       )
@@ -230,11 +345,15 @@ describe('Dialog Component', () => {
     render(<TestComponent />)
 
     // Open dialog
-    await user.click(screen.getByRole('button', { name: 'Open' }))
-    expect(screen.getByText('Initial content')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Open Dynamic' }))
+    await waitFor(() => {
+      expect(screen.getByText('Initial content')).toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
 
     // Update content
     await user.click(screen.getByRole('button', { name: 'Update Content' }))
-    expect(screen.getByText('Updated content')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Updated content')).toBeInTheDocument()
+    }, { timeout: ANIMATION_TIMEOUT })
   })
 }) 

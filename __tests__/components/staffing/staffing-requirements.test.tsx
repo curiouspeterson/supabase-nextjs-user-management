@@ -17,18 +17,25 @@ jest.mock('@supabase/ssr', () => ({
   createBrowserClient: jest.fn(),
 }))
 
-const mockRequirements = [
-  {
-    id: '1',
-    period_name: 'Morning',
-    start_time: '09:00',
-    end_time: '17:00',
-    minimum_employees: 3,
-    shift_supervisor_required: true,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-01-01T00:00:00Z',
-  },
-]
+const mockRequirements = [{
+  id: 'test-req-1',
+  shift: 'morning',
+  day_of_week: 'monday',
+  num_staff_required: 2,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString()
+}]
+
+const mockSupabaseClient = {
+  from: jest.fn().mockReturnValue({
+    select: jest.fn().mockResolvedValue({ data: mockRequirements, error: null }),
+    delete: jest.fn().mockResolvedValue({ data: null, error: null })
+  })
+}
+
+jest.mock('@/utils/supabase/client', () => ({
+  createClient: () => mockSupabaseClient
+}))
 
 describe('StaffingRequirementsTable', () => {
   const user = userEvent.setup()
@@ -39,16 +46,32 @@ describe('StaffingRequirementsTable', () => {
     jest.clearAllMocks()
     ;(useToast as jest.Mock).mockReturnValue({ toast: mockToast })
 
-    // Set up mock Supabase client
+    // Set up mock Supabase client with proper chaining
     mockClient = {
-      from: () => ({
-        select: jest.fn().mockResolvedValue({ data: mockRequirements, error: null }),
-        insert: jest.fn().mockResolvedValue({ data: mockRequirements[0], error: null }),
-        update: jest.fn().mockResolvedValue({ data: mockRequirements[0], error: null }),
-        delete: jest.fn().mockResolvedValue({ data: null, error: null }),
-        eq: jest.fn().mockReturnThis(),
-      }),
+      from: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      single: jest.fn().mockReturnThis(),
+      delete: jest.fn().mockReturnThis(),
     }
+
+    // Set up default successful responses
+    mockClient.order.mockImplementation(() => ({
+      data: mockRequirements,
+      error: null,
+    }))
+
+    mockClient.single.mockImplementation(() => ({
+      data: mockRequirements[0],
+      error: null,
+    }))
+
+    mockClient.delete.mockImplementation(() => ({
+      data: [mockRequirements[0]],
+      error: null,
+    }))
+
     ;(createBrowserClient as jest.Mock).mockReturnValue(mockClient)
   })
 
@@ -72,10 +95,9 @@ describe('StaffingRequirementsTable', () => {
   })
 
   it('shows error state when loading fails', async () => {
-    mockClient.from.mockImplementationOnce(() => ({
-      select: jest.fn(() => ({
-        order: jest.fn(() => Promise.resolve({ data: null, error: new Error('Failed to load') })),
-      })),
+    mockClient.order.mockImplementationOnce(() => ({
+      data: null,
+      error: new Error('Failed to load'),
     }))
 
     render(<StaffingRequirementsTable isManager={true} />)
@@ -94,24 +116,24 @@ describe('StaffingRequirementsTable', () => {
   it('allows managers to delete requirements', async () => {
     render(<StaffingRequirementsTable isManager={true} />)
     
+    // Wait for requirements to load
     await waitFor(() => {
-      expect(screen.queryByTestId('loading-spinner')).not.toBeInTheDocument()
+      expect(screen.getByText('monday')).toBeInTheDocument()
     })
-
-    const deleteButton = screen.getByRole('button', { name: /delete morning requirement/i })
+    
+    // Click delete button
+    const deleteButton = screen.getByRole('button', { name: /delete/i })
     await user.click(deleteButton)
-
-    expect(screen.getByText('Are you sure?')).toBeInTheDocument()
-    expect(screen.getByText(/This will permanently delete the staffing requirement for Morning/i)).toBeInTheDocument()
-
-    const confirmButton = screen.getByRole('button', { name: /delete/i })
-    await user.click(confirmButton)
-
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith({
-        title: 'Success',
-        description: 'Staffing requirement deleted successfully',
-      })
+    
+    // Verify delete call
+    expect(mockSupabaseClient.from).toHaveBeenCalledWith('staffing_requirements')
+    expect(mockSupabaseClient.from().delete).toHaveBeenCalledWith({ id: 'test-req-1' })
+    
+    // Verify success toast
+    expect(mockToast).toHaveBeenCalledWith({
+      title: 'Success',
+      description: 'Requirement deleted successfully',
+      variant: 'default'
     })
   })
 

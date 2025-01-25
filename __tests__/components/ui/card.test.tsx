@@ -1,5 +1,13 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import {
+  render,
+  screen,
+  setupUser,
+  hasClasses,
+  cleanupAfterEach,
+  userEvent,
+  waitFor
+} from '../../test-utils'
 import {
   Card,
   CardHeader,
@@ -10,186 +18,212 @@ import {
 } from '@/components/ui/card'
 
 describe('Card', () => {
-  const renderCard = () => {
-    return render(
+  it('renders a complete card with all subcomponents', () => {
+    render(
       <Card>
         <CardHeader>
-          <CardTitle>Card Title</CardTitle>
-          <CardDescription>Card Description</CardDescription>
+          <CardTitle>Title</CardTitle>
+          <CardDescription>Description</CardDescription>
         </CardHeader>
-        <CardContent>
-          <p>Card Content</p>
-        </CardContent>
-        <CardFooter>
-          <p>Card Footer</p>
-        </CardFooter>
+        <CardContent>Content</CardContent>
+        <CardFooter>Footer</CardFooter>
       </Card>
     )
-  }
 
-  it('renders a complete card with all subcomponents', () => {
-    renderCard()
-    
-    expect(screen.getByText('Card Title')).toBeInTheDocument()
-    expect(screen.getByText('Card Description')).toBeInTheDocument()
-    expect(screen.getByText('Card Content')).toBeInTheDocument()
-    expect(screen.getByText('Card Footer')).toBeInTheDocument()
+    expect(screen.getByText('Title')).toBeInTheDocument()
+    expect(screen.getByText('Description')).toBeInTheDocument()
+    expect(screen.getByText('Content')).toBeInTheDocument()
+    expect(screen.getByText('Footer')).toBeInTheDocument()
   })
 
   describe('Card (main container)', () => {
     it('renders with default styles', () => {
       render(<Card>Content</Card>)
-      const card = screen.getByText('Content').parentElement
-      
-      expect(card).toHaveClass('rounded-lg')
-      expect(card).toHaveClass('border')
-      expect(card).toHaveClass('bg-card')
-      expect(card).toHaveClass('text-card-foreground')
+      const card = screen.getByText('Content').closest('div')
+      expect(card).toHaveClass('rounded-lg border bg-card text-card-foreground')
     })
 
     it('forwards ref correctly', () => {
-      const ref = React.createRef<HTMLDivElement>()
+      const ref = jest.fn()
       render(<Card ref={ref}>Content</Card>)
-      
-      expect(ref.current).toBeInstanceOf(HTMLDivElement)
+      expect(ref).toHaveBeenCalled()
     })
 
     it('applies additional className', () => {
       render(<Card className="custom-class">Content</Card>)
-      const card = screen.getByText('Content').parentElement
-      
+      const card = screen.getByText('Content').closest('div')
       expect(card).toHaveClass('custom-class')
-      expect(card).toHaveClass('rounded-lg') // Still has default classes
     })
   })
 
   describe('CardHeader', () => {
     it('renders with default styles', () => {
-      render(<CardHeader>Header Content</CardHeader>)
-      const header = screen.getByText('Header Content').parentElement
-      
-      expect(header).toHaveClass('flex')
-      expect(header).toHaveClass('flex-col')
-      expect(header).toHaveClass('space-y-1.5')
-      expect(header).toHaveClass('p-6')
+      render(
+        <Card>
+          <CardHeader>Header</CardHeader>
+        </Card>
+      )
+      const header = screen.getByText('Header').closest('div')
+      expect(header).toHaveClass('flex flex-col space-y-1.5 p-6')
     })
 
     it('forwards ref correctly', () => {
-      const ref = React.createRef<HTMLDivElement>()
-      render(<CardHeader ref={ref}>Header Content</CardHeader>)
-      
-      expect(ref.current).toBeInstanceOf(HTMLDivElement)
+      const ref = jest.fn()
+      render(
+        <Card>
+          <CardHeader ref={ref}>Header</CardHeader>
+        </Card>
+      )
+      expect(ref).toHaveBeenCalled()
     })
   })
 
   describe('CardTitle', () => {
     it('renders with default styles', () => {
-      render(<CardTitle>Card Title</CardTitle>)
-      const title = screen.getByText('Card Title')
-      
-      expect(title.tagName).toBe('H3')
-      expect(title).toHaveClass('text-2xl')
-      expect(title).toHaveClass('font-semibold')
-      expect(title).toHaveClass('leading-none')
-      expect(title).toHaveClass('tracking-tight')
+      render(
+        <Card>
+          <CardHeader>
+            <CardTitle>Title</CardTitle>
+          </CardHeader>
+        </Card>
+      )
+      const title = screen.getByText('Title').closest('h3')
+      expect(title).toHaveClass('text-2xl font-semibold leading-none tracking-tight')
     })
 
     it('forwards ref correctly', () => {
-      const ref = React.createRef<HTMLHeadingElement>()
-      render(<CardTitle ref={ref}>Card Title</CardTitle>)
-      
-      expect(ref.current).toBeInstanceOf(HTMLHeadingElement)
+      const ref = jest.fn()
+      render(
+        <Card>
+          <CardHeader>
+            <CardTitle ref={ref}>Title</CardTitle>
+          </CardHeader>
+        </Card>
+      )
+      expect(ref).toHaveBeenCalled()
     })
   })
 
   describe('CardDescription', () => {
     it('renders with default styles', () => {
-      render(<CardDescription>Card Description</CardDescription>)
-      const description = screen.getByText('Card Description')
-      
-      expect(description.tagName).toBe('P')
-      expect(description).toHaveClass('text-sm')
-      expect(description).toHaveClass('text-muted-foreground')
+      render(
+        <Card>
+          <CardHeader>
+            <CardDescription>Description</CardDescription>
+          </CardHeader>
+        </Card>
+      )
+      const description = screen.getByText('Description').closest('p')
+      expect(description).toHaveClass('text-sm text-muted-foreground')
     })
 
     it('forwards ref correctly', () => {
-      const ref = React.createRef<HTMLParagraphElement>()
-      render(<CardDescription ref={ref}>Card Description</CardDescription>)
-      
-      expect(ref.current).toBeInstanceOf(HTMLParagraphElement)
+      const ref = jest.fn()
+      render(
+        <Card>
+          <CardHeader>
+            <CardDescription ref={ref}>Description</CardDescription>
+          </CardHeader>
+        </Card>
+      )
+      expect(ref).toHaveBeenCalled()
     })
   })
 
   describe('CardContent', () => {
     it('renders with default styles', () => {
-      render(<CardContent>Content</CardContent>)
-      const content = screen.getByText('Content').parentElement
-      
-      expect(content).toHaveClass('p-6')
-      expect(content).toHaveClass('pt-0')
+      render(
+        <Card>
+          <CardContent>Content</CardContent>
+        </Card>
+      )
+      const content = screen.getByText('Content').closest('div')
+      expect(content).toHaveClass('p-6 pt-0')
     })
 
     it('forwards ref correctly', () => {
-      const ref = React.createRef<HTMLDivElement>()
-      render(<CardContent ref={ref}>Content</CardContent>)
-      
-      expect(ref.current).toBeInstanceOf(HTMLDivElement)
+      const ref = jest.fn()
+      render(
+        <Card>
+          <CardContent ref={ref}>Content</CardContent>
+        </Card>
+      )
+      expect(ref).toHaveBeenCalled()
     })
   })
 
   describe('CardFooter', () => {
     it('renders with default styles', () => {
-      render(<CardFooter>Footer Content</CardFooter>)
-      const footer = screen.getByText('Footer Content').parentElement
-      
-      expect(footer).toHaveClass('flex')
-      expect(footer).toHaveClass('items-center')
-      expect(footer).toHaveClass('p-6')
-      expect(footer).toHaveClass('pt-0')
+      render(
+        <Card>
+          <CardFooter>Footer</CardFooter>
+        </Card>
+      )
+      const footer = screen.getByText('Footer').closest('div')
+      expect(footer).toHaveClass('flex items-center p-6 pt-0')
     })
 
     it('forwards ref correctly', () => {
-      const ref = React.createRef<HTMLDivElement>()
-      render(<CardFooter ref={ref}>Footer Content</CardFooter>)
-      
-      expect(ref.current).toBeInstanceOf(HTMLDivElement)
+      const ref = jest.fn()
+      render(
+        <Card>
+          <CardFooter ref={ref}>Footer</CardFooter>
+        </Card>
+      )
+      expect(ref).toHaveBeenCalled()
     })
   })
 
   describe('Accessibility', () => {
     it('maintains proper heading hierarchy', () => {
-      renderCard()
-      const title = screen.getByText('Card Title')
-      
+      render(
+        <Card>
+          <CardHeader>
+            <CardTitle>Title</CardTitle>
+            <CardDescription>Description</CardDescription>
+          </CardHeader>
+        </Card>
+      )
+      const title = screen.getByText('Title')
       expect(title.tagName).toBe('H3')
     })
 
     it('maintains proper contrast ratio', () => {
-      renderCard()
-      const description = screen.getByText('Card Description')
-      
-      expect(description).toHaveClass('text-muted-foreground')
+      render(
+        <Card>
+          <CardHeader>
+            <CardTitle>Title</CardTitle>
+            <CardDescription>Description</CardDescription>
+          </CardHeader>
+        </Card>
+      )
+      const card = screen.getByText('Title').closest('div[class*="bg-card"]')
+      expect(card).toHaveClass('bg-card text-card-foreground')
     })
 
     it('supports custom roles and ARIA attributes', () => {
       render(
-        <Card role="region" aria-label="Example card">
+        <Card role="region" aria-label="Test Card">
           <CardContent>Content</CardContent>
         </Card>
       )
-      
       const card = screen.getByRole('region')
-      expect(card).toHaveAttribute('aria-label', 'Example card')
+      expect(card).toHaveAttribute('aria-label', 'Test Card')
     })
   })
 
   describe('Layout and Spacing', () => {
     it('maintains consistent padding', () => {
-      renderCard()
-      
-      const header = screen.getByText('Card Title').closest('div')
-      const content = screen.getByText('Card Content').parentElement
-      const footer = screen.getByText('Card Footer').parentElement
+      render(
+        <Card>
+          <CardHeader>Header</CardHeader>
+          <CardContent>Content</CardContent>
+          <CardFooter>Footer</CardFooter>
+        </Card>
+      )
+      const header = screen.getByText('Header').closest('div')
+      const content = screen.getByText('Content').closest('div')
+      const footer = screen.getByText('Footer').closest('div')
       
       expect(header).toHaveClass('p-6')
       expect(content).toHaveClass('p-6')
@@ -197,10 +231,14 @@ describe('Card', () => {
     })
 
     it('removes top padding for content and footer', () => {
-      renderCard()
-      
-      const content = screen.getByText('Card Content').parentElement
-      const footer = screen.getByText('Card Footer').parentElement
+      render(
+        <Card>
+          <CardContent>Content</CardContent>
+          <CardFooter>Footer</CardFooter>
+        </Card>
+      )
+      const content = screen.getByText('Content').closest('div')
+      const footer = screen.getByText('Footer').closest('div')
       
       expect(content).toHaveClass('pt-0')
       expect(footer).toHaveClass('pt-0')

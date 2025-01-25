@@ -142,11 +142,11 @@ export async function isEmployeeAvailable(
 export async function getStaffingRequirement(time: string): Promise<number> {
   const supabase = createSupabaseClient() as SupabaseClient<Database>
   
-  const { data: requirements } = await supabase
+  const { data: requirements, error } = await supabase
     .from('staffing_requirements')
     .select('*')
 
-  if (!requirements) return 0
+  if (error || !requirements || requirements.length === 0) return 0
 
   for (const req of requirements) {
     if (timeRangesOverlap(req.start_time, req.end_time, time, time)) {
@@ -167,13 +167,13 @@ export async function checkStaffingRequirements(
   const minRequired = await getStaffingRequirement(time)
   
   // Get all schedules for this day
-  const { data: schedules } = await supabase
+  const { data: schedules, error } = await supabase
     .from('schedules')
     .select('*, shifts(*)')
     .eq('week_start_date', formatDate(getWeekStart(date)))
     .eq('day_of_week', DAYS_OF_WEEK[date.getDay()])
 
-  if (!schedules) return false
+  if (error || !schedules) return false
 
   let staffedCount = 0
   for (const schedule of schedules) {

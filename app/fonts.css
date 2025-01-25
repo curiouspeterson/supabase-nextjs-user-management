@@ -1,0 +1,9 @@
+@import '@fontsource/geist-sans';
+
+:root {
+  --font-geist: 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.font-sans {
+  font-family: var(--font-geist);
+}

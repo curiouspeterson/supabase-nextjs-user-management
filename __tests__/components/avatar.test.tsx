@@ -25,28 +25,41 @@ jest.mock('@/utils/supabase/client', () => ({
   })
 }))
 
-// Mock URL.createObjectURL
-const mockCreateObjectURL = jest.fn()
-global.URL.createObjectURL = mockCreateObjectURL
+const mockCreateObjectURL = jest.fn().mockReturnValue('blob:mock-avatar-url')
+const mockRevokeObjectURL = jest.fn()
+
+beforeAll(() => {
+  window.URL.createObjectURL = mockCreateObjectURL
+  window.URL.revokeObjectURL = mockRevokeObjectURL
+})
+
+afterAll(() => {
+  delete window.URL.createObjectURL
+  delete window.URL.revokeObjectURL
+})
+
+beforeEach(() => {
+  mockCreateObjectURL.mockClear()
+  mockRevokeObjectURL.mockClear()
+  mockOnUpload.mockClear()
+})
 
 describe('Avatar', () => {
   const mockOnUpload = jest.fn()
-
-  beforeEach(() => {
-    jest.clearAllMocks()
-    mockCreateObjectURL.mockReturnValue('blob:test-url')
-  })
+  const user = userEvent.setup()
 
   it('renders avatar placeholder when no URL is provided', () => {
     render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-    expect(screen.getByText('?')).toBeInTheDocument()
+    const img = screen.getByRole('img', { name: /default avatar/i })
+    expect(img).toHaveAttribute('src', '/default-avatar.png')
   })
 
   it('downloads and displays avatar when URL is provided', async () => {
-    render(<Avatar uid="test-uid" url="test-avatar.jpg" size={150} onUpload={mockOnUpload} />)
+    render(<Avatar uid="test-uid" url="https://test.com/avatar.jpg" size={150} onUpload={mockOnUpload} />)
     
     await waitFor(() => {
       expect(mockCreateObjectURL).toHaveBeenCalled()
+      expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:mock-avatar-url')
     })
   })
 
@@ -68,7 +81,7 @@ describe('Avatar', () => {
     const file = new File(['test'], 'test.png', { type: 'image/png' })
     const input = screen.getByLabelText(/upload avatar/i)
     
-    await userEvent.upload(input, file)
+    fireEvent.change(input, { target: { files: [file] } })
     
     await waitFor(() => {
       expect(mockOnUpload).toHaveBeenCalled()
@@ -76,27 +89,34 @@ describe('Avatar', () => {
   })
 
   it('handles upload error gracefully', async () => {
-    render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
-    
-    const file = new File(['test'], 'error.png', { type: 'image/png' })
-    const input = screen.getByLabelText(/upload avatar/i)
-    
-    await userEvent.upload(input, file)
-    
-    await waitFor(() => {
-      expect(screen.queryByText(/uploading/i)).not.toBeInTheDocument()
-    })
-  })
-
-  it('shows loading state during upload', async () => {
+    mockOnUpload.mockRejectedValueOnce(new Error('Upload failed'))
     render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
     
     const file = new File(['test'], 'test.png', { type: 'image/png' })
     const input = screen.getByLabelText(/upload avatar/i)
     
-    await userEvent.upload(input, file)
+    fireEvent.change(input, { target: { files: [file] } })
+    
+    await waitFor(() => {
+      expect(screen.queryByText(/uploading/i)).not.toBeInTheDocument()
+      expect(screen.getByText(/Upload failed/i)).toBeInTheDocument()
+    })
+  })
+
+  it('shows loading state during upload', async () => {
+    mockOnUpload.mockImplementationOnce(() => new Promise(resolve => setTimeout(resolve, 100)))
+    render(<Avatar uid="test-uid" url={null} size={150} onUpload={mockOnUpload} />)
+    
+    const file = new File(['test'], 'test.png', { type: 'image/png' })
+    const input = screen.getByLabelText(/upload avatar/i)
+    
+    fireEvent.change(input, { target: { files: [file] } })
     
     expect(screen.getByText(/uploading/i)).toBeInTheDocument()
+    
+    await waitFor(() => {
+      expect(screen.queryByText(/uploading/i)).not.toBeInTheDocument()
+    })
   })
 
   it('validates file type on upload', async () => {
@@ -105,25 +125,26 @@ describe('Avatar', () => {
     const file = new File(['test'], 'test.txt', { type: 'text/plain' })
     const input = screen.getByLabelText(/upload avatar/i)
     
-    await userEvent.upload(input, file)
+    fireEvent.change(input, { target: { files: [file] } })
     
-    expect(mockOnUpload).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(mockOnUpload).not.toHaveBeenCalled()
+      expect(screen.getByText(/Invalid file type/i)).toBeInTheDocument()
+    })
   })
 
   it('handles missing window.URL gracefully', async () => {
-    const originalURL = global.URL
-    // @ts-ignore
-    delete global.URL
+    const originalURL = window.URL
+    delete window.URL
+    const consoleSpy = jest.spyOn(console, 'error')
     
-    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation()
-    
-    render(<Avatar uid="test-uid" url="test-avatar.jpg" size={150} onUpload={mockOnUpload} />)
+    render(<Avatar uid="test-uid" url="https://test.com/avatar.jpg" size={150} onUpload={mockOnUpload} />)
     
     await waitFor(() => {
-      expect(consoleSpy).toHaveBeenCalledWith('URL.createObjectURL is not available')
+      expect(consoleSpy).toHaveBeenCalledWith('Error downloading image:', expect.any(Error))
     })
     
-    global.URL = originalURL
+    window.URL = originalURL
     consoleSpy.mockRestore()
   })
 }) 

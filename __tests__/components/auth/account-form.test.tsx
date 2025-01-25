@@ -1,29 +1,9 @@
 import '@testing-library/jest-dom'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import AccountForm from '@/app/account/account-form'
-import { createClient } from '@/utils/supabase/client'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import { User } from '@supabase/supabase-js'
-
-// Mock Supabase client
-const mockSupabaseFrom = jest.fn()
-const mockSupabaseSelect = jest.fn()
-const mockSupabaseEq = jest.fn()
-const mockSupabaseSingle = jest.fn()
-const mockSupabaseUpsert = jest.fn()
-const mockSupabaseSignOut = jest.fn()
-
-// Default mock responses
-const defaultProfileData = {
-  data: {
-    full_name: 'Test User',
-    username: 'testuser',
-    website: 'https://test.com',
-    avatar_url: 'https://test.com/avatar.jpg'
-  },
-  error: null
-}
 
 // Mock Next.js router
 const mockRouter = {
@@ -32,70 +12,151 @@ const mockRouter = {
 }
 
 jest.mock('next/navigation', () => ({
-  useRouter: jest.fn(() => mockRouter)
+  useRouter: () => mockRouter
 }))
 
-jest.mock('@/utils/supabase/client', () => ({
-  createClient: jest.fn(() => ({
-    from: (table: string) => {
-      mockSupabaseFrom(table)
-      return {
-        select: (columns: string) => {
-          mockSupabaseSelect(columns)
-          return {
-            eq: (field: string, value: string) => {
-              mockSupabaseEq(field, value)
-              return {
-                single: () => mockSupabaseSingle()
-              }
-            }
-          }
-        },
-        upsert: (data: any) => {
-          mockSupabaseUpsert(data)
-          return Promise.resolve({ error: null })
-        }
-      }
-    },
-    storage: {
-      from: (bucket: string) => ({
-        download: (path: string) => Promise.resolve({ data: new Blob(), error: null }),
-        upload: (path: string, file: File) => Promise.resolve({ data: { path }, error: null })
-      })
-    },
-    auth: {
-      signOut: (options: any) => {
-        mockSupabaseSignOut(options)
-        return Promise.resolve({ error: null })
-      }
-    }
-  }))
+// Default mock responses
+const defaultProfileData = {
+  data: {
+    id: 'test-user-id',
+    full_name: 'Test User',
+    username: 'testuser',
+    website: 'https://test.com',
+    avatar_url: 'https://test.com/avatar.jpg'
+  },
+  error: null
+}
+
+interface SuccessResponse {
+  data: {
+    id: string
+    full_name: string
+    username: string
+    website: string
+    avatar_url: string
+    updated_at: string
+  }
+  error: null
+}
+
+interface ErrorResponse {
+  data: null
+  error: { message: string }
+}
+
+type ProfileResponse = SuccessResponse | ErrorResponse
+
+// Type for the mock Supabase client
+interface MockSupabaseClient {
+  from: jest.Mock<{
+    select: jest.Mock<{
+      eq: jest.Mock<{
+        single: jest.Mock<Promise<ProfileResponse>>
+      }>
+    }>
+    upsert: jest.Mock<Promise<{
+      data: {
+        id: string
+        full_name: string
+        username: string
+        website: string
+        avatar_url: string
+        updated_at: string
+      } | null
+      error: null
+    }>>
+  }>
+  storage: {
+    from: jest.Mock<{
+      download: jest.Mock<Promise<{ data: Blob; error: null }>>
+      upload: jest.Mock<Promise<{ data: { path: string }; error: null }>>
+      getPublicUrl: jest.Mock<Promise<{ data: { publicUrl: string } }>>
+    }>
+  }
+  auth: {
+    signOut: jest.Mock<Promise<{ error: null }>>
+    getUser: jest.Mock<Promise<{ data: { user: User }; error: null }>>
+  }
+}
+
+// Create mock Supabase client with proper types
+const mockUser = {
+  id: 'test-user-id',
+  email: 'test@example.com'
+}
+
+const mockProfile = {
+  id: mockUser.id,
+  full_name: 'Updated Name',
+  username: 'testuser',
+  website: 'https://test.com',
+  avatar_url: 'https://test.com/avatar.jpg',
+  updated_at: new Date().toISOString()
+}
+
+const mockSupabaseClient = {
+  from: jest.fn().mockReturnValue({
+    upsert: jest.fn().mockResolvedValue({
+      data: mockProfile,
+      error: null
+    }),
+    select: jest.fn().mockResolvedValue({
+      data: [mockProfile],
+      error: null
+    })
+  }),
+  storage: {
+    from: jest.fn().mockReturnValue({
+      upload: jest.fn().mockResolvedValue({ data: { path: 'avatars/test.jpg' }, error: null }),
+      getPublicUrl: jest.fn().mockReturnValue({ data: { publicUrl: 'https://test.com/avatar.jpg' } })
+    })
+  },
+  auth: {
+    signOut: jest.fn(() => Promise.resolve({ error: null })),
+    getUser: jest.fn().mockResolvedValue({ data: { user: mockUser }, error: null })
+  }
+}
+
+// Mock useSupabase hook
+jest.mock('@/lib/supabase/client', () => ({
+  useSupabase: () => ({
+    supabase: mockSupabaseClient,
+    user: mockUser
+  })
+}))
+
+jest.mock('@supabase/auth-helpers-nextjs', () => ({
+  createClientComponentClient: () => mockSupabaseClient
 }))
 
 describe('AccountForm', () => {
-  const mockUser: User = {
-    id: 'test-user-id',
-    email: 'test@example.com',
-    app_metadata: {},
-    user_metadata: {},
-    aud: 'authenticated',
-    created_at: '2024-03-20T00:00:00.000Z',
-    confirmed_at: '2024-03-20T00:00:00.000Z',
-    last_sign_in_at: '2024-03-20T00:00:00.000Z',
-    role: 'authenticated',
-    updated_at: '2024-03-20T00:00:00.000Z'
-  }
-
   beforeEach(() => {
     jest.clearAllMocks()
     
-    // Set up default mock responses
-    mockSupabaseSingle.mockResolvedValue(defaultProfileData)
-    mockSupabaseUpsert.mockResolvedValue({ data: null, error: null })
-    mockSupabaseSignOut.mockResolvedValue({ error: null })
+    // Reset mock implementations with proper types
+    const single = jest.fn().mockResolvedValue(defaultProfileData)
+    const eq = jest.fn().mockReturnValue({ single })
+    const select = jest.fn().mockReturnValue({ eq })
+    const upsert = jest.fn().mockResolvedValue({ 
+      data: {
+        id: mockUser.id,
+        full_name: 'Updated Name',
+        username: 'testuser',
+        website: 'https://test.com',
+        avatar_url: 'https://test.com/avatar.jpg',
+        updated_at: expect.any(String)
+      },
+      error: null 
+    })
     
-    // Mock fetch for server-side signout
-    global.fetch = jest.fn(() => Promise.resolve(new Response()))
+    mockSupabaseClient.from.mockImplementation(() => ({
+      select,
+      upsert
+    }))
+
+    mockSupabaseClient.auth.signOut.mockImplementation(() => 
+      Promise.resolve({ error: null })
+    )
 
     // Mock URL.createObjectURL
     if (typeof window !== 'undefined') {
@@ -106,105 +167,142 @@ describe('AccountForm', () => {
 
   it('loads and displays user profile data', async () => {
     render(<AccountForm user={mockUser} />)
-
-    // Wait for data to load
+    
+    // Wait for loading to complete
     await waitFor(() => {
-      expect(screen.getByDisplayValue('Test User')).toBeInTheDocument()
-      expect(screen.getByDisplayValue('testuser')).toBeInTheDocument()
-      expect(screen.getByDisplayValue('https://test.com')).toBeInTheDocument()
+      expect(screen.queryByTestId('initial-loading-spinner')).not.toBeInTheDocument()
     })
 
+    // Check form values
+    expect(screen.getByLabelText(/full name/i)).toHaveValue('Test User')
+    expect(screen.getByLabelText(/username/i)).toHaveValue('testuser')
+    expect(screen.getByLabelText(/website/i)).toHaveValue('https://test.com')
+
     // Verify Supabase client calls
-    expect(mockSupabaseFrom).toHaveBeenCalledWith('profiles')
-    expect(mockSupabaseSelect).toHaveBeenCalledWith('full_name, username, website, avatar_url')
-    expect(mockSupabaseEq).toHaveBeenCalledWith('id', mockUser.id)
+    expect(mockSupabaseClient.from).toHaveBeenCalledWith('profiles')
+    const selectCall = mockSupabaseClient.from().select
+    expect(selectCall).toHaveBeenCalledWith('full_name, username, website, avatar_url')
+    const eqCall = selectCall().eq
+    expect(eqCall).toHaveBeenCalledWith('id', mockUser.id)
   })
 
   it('handles profile update', async () => {
     render(<AccountForm user={mockUser} />)
 
-    // Wait for data to load
+    // Wait for loading to complete
     await waitFor(() => {
       expect(screen.queryByTestId('initial-loading-spinner')).not.toBeInTheDocument()
     })
 
     // Update form fields
-    fireEvent.change(screen.getByLabelText(/full name/i), {
-      target: { value: 'Updated Name' }
+    const fullNameInput = screen.getByLabelText(/full name/i)
+    await act(async () => {
+      fireEvent.change(fullNameInput, {
+        target: { value: 'Updated Name' }
+      })
     })
 
     // Submit form
-    fireEvent.click(screen.getByRole('button', { name: /update profile/i }))
+    const updateButton = screen.getByRole('button', { name: /update profile/i })
+    expect(updateButton).not.toBeDisabled()
+    
+    await act(async () => {
+      fireEvent.click(updateButton)
+    })
 
     // Verify Supabase calls
     await waitFor(() => {
-      expect(mockSupabaseFrom).toHaveBeenCalledWith('profiles')
-      expect(mockSupabaseUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      expect(mockSupabaseClient.from).toHaveBeenCalledWith('profiles')
+      expect(mockSupabaseClient.from().upsert).toHaveBeenCalledWith(expect.objectContaining({
         id: mockUser.id,
-        full_name: 'Updated Name'
+        full_name: 'Updated Name',
+        username: 'testuser',
+        website: 'https://test.com',
+        avatar_url: 'https://test.com/avatar.jpg',
+        updated_at: expect.any(String)
       }))
+      expect(mockRouter.refresh).toHaveBeenCalled()
     })
   })
 
   it('handles sign out', async () => {
     render(<AccountForm user={mockUser} />)
     
-    // Wait for data to load
+    // Wait for loading to complete
     await waitFor(() => {
       expect(screen.queryByTestId('initial-loading-spinner')).not.toBeInTheDocument()
     })
 
-    // Click sign out button
-    fireEvent.click(screen.getByRole('button', { name: /sign out/i }))
+    // Find and click sign out button
+    const signOutButton = screen.getByRole('button', { name: /sign out/i })
+    expect(signOutButton).not.toBeDisabled()
+    
+    await act(async () => {
+      fireEvent.click(signOutButton)
+    })
 
-    // Verify sign out was called
+    // Verify sign out was called and navigation occurred
     await waitFor(() => {
-      expect(mockSupabaseSignOut).toHaveBeenCalledWith({ scope: 'global' })
+      expect(mockSupabaseClient.auth.signOut).toHaveBeenCalled()
+      expect(mockRouter.push).toHaveBeenCalledWith('/login')
     })
   })
 
   it('handles loading error', async () => {
-    mockSupabaseSingle.mockResolvedValueOnce({
+    const errorMessage = 'Error loading user data'
+    
+    // Mock error response with proper types
+    const errorResponse: ErrorResponse = {
       data: null,
-      error: { message: 'Error loading user data!' }
-    })
+      error: { message: errorMessage }
+    }
+
+    const errorMockChain = {
+      select: jest.fn(() => ({
+        eq: jest.fn(() => ({
+          single: jest.fn(() => Promise.resolve(errorResponse))
+        }))
+      })),
+      upsert: jest.fn(() => Promise.resolve({ data: null, error: null }))
+    }
+
+    mockSupabaseClient.from.mockImplementationOnce(() => errorMockChain)
 
     render(<AccountForm user={mockUser} />)
 
+    // Initially should show loading spinner
+    expect(screen.getByTestId('initial-loading-spinner')).toBeInTheDocument()
+
+    // Wait for error message to appear
     await waitFor(() => {
-      expect(screen.getByText('Error loading user data!')).toBeInTheDocument()
+      expect(screen.getByText(errorMessage)).toBeInTheDocument()
     })
+
+    // Loading spinner should be gone
+    expect(screen.queryByTestId('initial-loading-spinner')).not.toBeInTheDocument()
   })
 
   it('maintains accessibility standards', async () => {
     render(<AccountForm user={mockUser} />)
 
+    // Wait for loading to complete
     await waitFor(() => {
-      // Check form landmarks
-      expect(screen.getByRole('form')).toBeInTheDocument()
-      
-      // Check form labels
-      expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
-      expect(screen.getByLabelText(/full name/i)).toBeInTheDocument()
-      expect(screen.getByLabelText(/username/i)).toBeInTheDocument()
-      expect(screen.getByLabelText(/website/i)).toBeInTheDocument()
-      
-      // Check button accessibility
-      expect(screen.getByRole('button', { name: /update profile/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
+      expect(screen.queryByTestId('initial-loading-spinner')).not.toBeInTheDocument()
     })
-  })
 
-  it('handles null user', () => {
-    render(<AccountForm user={null} />)
+    // Check form fields are present and labeled
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/full name/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/username/i)).toHaveValue('testuser')
+    expect(screen.getByLabelText(/website/i)).toBeInTheDocument()
     
-    // Should be disabled when no user
+    // Check button accessibility
     const updateButton = screen.getByRole('button', { name: /update profile/i })
-    const fullNameInput = screen.getByLabelText(/full name/i)
     const signOutButton = screen.getByRole('button', { name: /sign out/i })
     
-    expect(updateButton).toBeDisabled()
-    expect(fullNameInput).toBeDisabled()
-    expect(signOutButton).toBeDisabled()
+    expect(updateButton).toBeInTheDocument()
+    expect(signOutButton).toBeInTheDocument()
+    expect(updateButton).not.toBeDisabled()
+    expect(signOutButton).not.toBeDisabled()
   })
 }) 

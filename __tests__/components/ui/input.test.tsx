@@ -1,9 +1,29 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import {
+  render,
+  screen,
+  setupUser,
+  hasClasses,
+  cleanupAfterEach,
+  userEvent,
+  waitFor
+} from '../../test-utils'
 import { Input } from '@/components/ui/input'
 
+// Constants for timeouts
+const TEST_TIMEOUT = 1000
+const ANIMATION_TIMEOUT = 100
+
 describe('Input', () => {
+  // Modern cleanup after each test
+  cleanupAfterEach()
+
+  // Modern user event setup with specific config
+  const user = userEvent.setup({
+    delay: null,
+    pointerEventsCheck: 0
+  })
+
   it('renders with default props', () => {
     render(<Input />)
     const input = screen.getByRole('textbox')
@@ -22,7 +42,7 @@ describe('Input', () => {
     expect(input).toHaveAttribute('type', 'email')
 
     rerender(<Input type="password" />)
-    input = screen.getByLabelText('') // password inputs don't have role='textbox'
+    input = screen.getByDisplayValue('') // Password inputs don't have a textbox role
     expect(input).toHaveAttribute('type', 'password')
 
     rerender(<Input type="number" />)
@@ -31,15 +51,17 @@ describe('Input', () => {
   })
 
   it('handles user input', async () => {
-    render(<Input />)
+    render(<Input aria-label="Test input" />)
     const input = screen.getByRole('textbox')
     
-    await userEvent.type(input, 'Hello, World!')
-    expect(input).toHaveValue('Hello, World!')
+    await user.type(input, 'Hello, World!')
+    await waitFor(() => {
+      expect(input).toHaveValue('Hello, World!')
+    }, { timeout: TEST_TIMEOUT })
   })
 
   it('can be disabled', () => {
-    render(<Input disabled />)
+    render(<Input disabled aria-label="Disabled input" />)
     const input = screen.getByRole('textbox')
     
     expect(input).toBeDisabled()
@@ -49,13 +71,13 @@ describe('Input', () => {
 
   it('forwards ref correctly', () => {
     const ref = React.createRef<HTMLInputElement>()
-    render(<Input ref={ref} />)
+    render(<Input ref={ref} aria-label="Referenced input" />)
     
     expect(ref.current).toBeInstanceOf(HTMLInputElement)
   })
 
   it('applies additional className', () => {
-    render(<Input className="custom-class" />)
+    render(<Input className="custom-class" aria-label="Custom class input" />)
     const input = screen.getByRole('textbox')
     
     expect(input).toHaveClass('custom-class')
@@ -63,7 +85,7 @@ describe('Input', () => {
   })
 
   it('handles placeholder text', () => {
-    render(<Input placeholder="Enter text..." />)
+    render(<Input placeholder="Enter text..." aria-label="Placeholder input" />)
     const input = screen.getByPlaceholderText('Enter text...')
     
     expect(input).toBeInTheDocument()
@@ -71,49 +93,55 @@ describe('Input', () => {
   })
 
   it('supports controlled value', () => {
-    const { rerender } = render(<Input value="Initial" readOnly />)
+    const { rerender } = render(<Input value="Initial" readOnly aria-label="Controlled input" />)
     const input = screen.getByRole('textbox')
     
     expect(input).toHaveValue('Initial')
     
-    rerender(<Input value="Updated" readOnly />)
+    rerender(<Input value="Updated" readOnly aria-label="Controlled input" />)
     expect(input).toHaveValue('Updated')
   })
 
   describe('Event Handling', () => {
     it('calls onChange handler', async () => {
       const handleChange = jest.fn()
-      render(<Input onChange={handleChange} />)
+      render(<Input onChange={handleChange} aria-label="Change input" />)
       const input = screen.getByRole('textbox')
       
-      await userEvent.type(input, 'a')
-      expect(handleChange).toHaveBeenCalledTimes(1)
+      await user.type(input, 'a')
+      await waitFor(() => {
+        expect(handleChange).toHaveBeenCalledTimes(1)
+      }, { timeout: TEST_TIMEOUT })
     })
 
     it('calls onFocus handler', async () => {
       const handleFocus = jest.fn()
-      render(<Input onFocus={handleFocus} />)
+      render(<Input onFocus={handleFocus} aria-label="Focus input" />)
       const input = screen.getByRole('textbox')
       
-      await userEvent.click(input)
-      expect(handleFocus).toHaveBeenCalledTimes(1)
+      await user.click(input)
+      await waitFor(() => {
+        expect(handleFocus).toHaveBeenCalledTimes(1)
+      }, { timeout: TEST_TIMEOUT })
     })
 
     it('calls onBlur handler', async () => {
       const handleBlur = jest.fn()
-      render(<Input onBlur={handleBlur} />)
+      render(<Input onBlur={handleBlur} aria-label="Blur input" />)
       const input = screen.getByRole('textbox')
       
-      await userEvent.click(input)
-      await userEvent.tab()
-      expect(handleBlur).toHaveBeenCalledTimes(1)
+      await user.click(input)
+      await user.tab()
+      await waitFor(() => {
+        expect(handleBlur).toHaveBeenCalledTimes(1)
+      }, { timeout: TEST_TIMEOUT })
     })
   })
 
   describe('Accessibility', () => {
     it('supports aria-label', () => {
-      render(<Input aria-label="Username" />)
-      const input = screen.getByLabelText('Username')
+      render(<Input aria-label="Username input" />)
+      const input = screen.getByLabelText('Username input')
       
       expect(input).toBeInTheDocument()
     })
@@ -121,7 +149,7 @@ describe('Input', () => {
     it('supports aria-describedby', () => {
       render(
         <>
-          <Input aria-describedby="hint" />
+          <Input aria-describedby="hint" aria-label="Described input" />
           <div id="hint">Enter your username</div>
         </>
       )
@@ -130,12 +158,15 @@ describe('Input', () => {
       expect(input).toHaveAttribute('aria-describedby', 'hint')
     })
 
-    it('has visible focus indicator', () => {
-      render(<Input />)
+    it('has visible focus indicator', async () => {
+      render(<Input aria-label="Focus indicator input" />)
       const input = screen.getByRole('textbox')
       
-      expect(input).toHaveClass('focus-visible:ring-2')
-      expect(input).toHaveClass('focus-visible:ring-ring')
+      await user.click(input)
+      await waitFor(() => {
+        expect(input).toHaveClass('focus-visible:ring-2')
+        expect(input).toHaveClass('focus-visible:ring-ring')
+      }, { timeout: TEST_TIMEOUT })
     })
   })
 }) 

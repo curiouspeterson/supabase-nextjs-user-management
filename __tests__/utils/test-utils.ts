@@ -1,105 +1,339 @@
-import { faker } from '@faker-js/faker'
+import React from 'react'
 import { render } from '@testing-library/react'
-import { Database } from '@/app/database.types'
-import { createClient } from '@supabase/supabase-js'
+import { faker } from '@faker-js/faker'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { PostgrestQueryBuilder } from '@supabase/postgrest-js'
+import 'whatwg-fetch'
+import { NextRequest } from 'next/server'
 
-// Mock Supabase client
-export const mockSupabaseClient = {
-  auth: {
-    getUser: jest.fn(),
-    signOut: jest.fn(),
-    signInWithPassword: jest.fn(),
-    signUp: jest.fn(),
-  },
-  from: jest.fn(() => ({
+export const BASE_URL = 'http://localhost:3000'
+
+// Create a wrapper around fetch that handles relative URLs
+const originalFetch = global.fetch
+global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  let url = input
+  if (typeof input === 'string' && !input.startsWith('http')) {
+    url = `${BASE_URL}${input}`
+  } else if (input instanceof Request && !input.url.startsWith('http')) {
+    url = new Request(`${BASE_URL}${input.url}`, input)
+  }
+  return originalFetch(url, init)
+}
+
+interface QueryBuilder {
+  select: jest.Mock
+  insert: jest.Mock
+  update: jest.Mock
+  delete: jest.Mock
+  eq: jest.Mock
+  neq: jest.Mock
+  gt: jest.Mock
+  gte: jest.Mock
+  lt: jest.Mock
+  lte: jest.Mock
+  like: jest.Mock
+  ilike: jest.Mock
+  is: jest.Mock
+  in: jest.Mock
+  contains: jest.Mock
+  containedBy: jest.Mock
+  overlap: jest.Mock
+  order: jest.Mock
+  single: jest.Mock
+  maybeSingle: jest.Mock
+  execute: jest.Mock
+}
+
+function createQueryBuilder(table: string): QueryBuilder {
+  const builder = {
     select: jest.fn().mockReturnThis(),
     insert: jest.fn().mockReturnThis(),
     update: jest.fn().mockReturnThis(),
     delete: jest.fn().mockReturnThis(),
     eq: jest.fn().mockReturnThis(),
-    single: jest.fn(),
-  })),
+    neq: jest.fn().mockReturnThis(),
+    gt: jest.fn().mockReturnThis(),
+    gte: jest.fn().mockReturnThis(),
+    lt: jest.fn().mockReturnThis(),
+    lte: jest.fn().mockReturnThis(),
+    like: jest.fn().mockReturnThis(),
+    ilike: jest.fn().mockReturnThis(),
+    is: jest.fn().mockReturnThis(),
+    in: jest.fn().mockReturnThis(),
+    contains: jest.fn().mockReturnThis(),
+    containedBy: jest.fn().mockReturnThis(),
+    overlap: jest.fn().mockReturnThis(),
+    order: jest.fn().mockReturnThis(),
+    single: jest.fn().mockResolvedValue({ data: null, error: null }),
+    maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
+    execute: jest.fn().mockResolvedValue({ data: [], error: null })
+  }
+
+  tableNames.set(builder as QueryBuilder, table)
+  return builder as QueryBuilder
 }
 
-// Test data factories
-export const createTestUser = () => ({
-  id: faker.string.uuid(),
-  email: faker.internet.email(),
-  created_at: faker.date.recent().toISOString(),
-  updated_at: faker.date.recent().toISOString(),
-})
+const tableNames = new Map<QueryBuilder, string>()
 
-export const createTestEmployee = () => ({
-  id: faker.string.uuid(),
-  user_id: faker.string.uuid(),
-  first_name: faker.person.firstName(),
-  last_name: faker.person.lastName(),
-  email: faker.internet.email(),
-  phone: faker.phone.number(),
-  created_at: faker.date.recent().toISOString(),
-  updated_at: faker.date.recent().toISOString(),
-})
+export function getTableName(builder: QueryBuilder): string | undefined {
+  return tableNames.get(builder)
+}
 
-export const createTestShift = () => ({
-  id: faker.string.uuid(),
-  shift_type_id: faker.string.uuid(),
-  start_time: '09:00:00',
-  end_time: '17:00:00',
-  duration_hours: 8,
-  created_at: faker.date.recent().toISOString(),
-  updated_at: faker.date.recent().toISOString(),
-})
+export const mockSupabaseClient = {
+  auth: {
+    signInWithPassword: jest.fn().mockResolvedValue({ data: { user: null }, error: null }),
+    signUp: jest.fn().mockResolvedValue({ data: { user: null }, error: null }),
+    signOut: jest.fn().mockResolvedValue({ error: null }),
+    verifyOtp: jest.fn().mockResolvedValue({ data: { user: null }, error: null })
+  },
+  from: jest.fn((table: string) => {
+    const builder = createQueryBuilder(table)
+    const chainedMethods = {
+      ...builder,
+      select: jest.fn().mockImplementation(() => ({
+        ...builder,
+        eq: jest.fn().mockImplementation(() => ({
+          ...builder,
+          order: jest.fn().mockResolvedValue({ data: [], error: null }),
+          single: jest.fn().mockResolvedValue({ data: null, error: null }),
+          execute: jest.fn().mockResolvedValue({ data: [], error: null })
+        }))
+      })),
+      insert: jest.fn().mockImplementation(() => ({
+        ...builder,
+        select: jest.fn().mockImplementation(() => ({
+          ...builder,
+          single: jest.fn().mockResolvedValue({ data: null, error: null }),
+          execute: jest.fn().mockResolvedValue({ data: [], error: null })
+        }))
+      })),
+      update: jest.fn().mockImplementation(() => ({
+        ...builder,
+        eq: jest.fn().mockResolvedValue({ data: null, error: null }),
+        execute: jest.fn().mockResolvedValue({ data: null, error: null })
+      })),
+      delete: jest.fn().mockImplementation(() => ({
+        ...builder,
+        eq: jest.fn().mockResolvedValue({ data: null, error: null }),
+        execute: jest.fn().mockResolvedValue({ data: null, error: null })
+      })),
+      rpc: jest.fn().mockResolvedValue({ data: [], error: null })
+    }
+    return chainedMethods
+  }),
+  rpc: jest.fn().mockResolvedValue({ data: [], error: null })
+} as unknown as SupabaseClient
 
-// Custom render function with providers
-export function renderWithProviders(ui: React.ReactElement) {
+export function mockCreateClient(): SupabaseClient {
+  jest.clearAllMocks()
+  tableNames.clear()
+  return mockSupabaseClient
+}
+
+export function createMockUser(overrides = {}) {
+  return {
+    id: faker.string.uuid(),
+    email: faker.internet.email(),
+    role: 'employee',
+    created_at: faker.date.past().toISOString(),
+    updated_at: faker.date.recent().toISOString(),
+    ...overrides
+  }
+}
+
+export function createMockEmployee(overrides = {}) {
+  return {
+    id: faker.string.uuid(),
+    email: faker.internet.email(),
+    weekly_hours: faker.number.int({ min: 20, max: 40 }),
+    shift_type_id: faker.string.uuid(),
+    role: 'employee',
+    created_at: faker.date.past().toISOString(),
+    updated_at: faker.date.recent().toISOString(),
+    ...overrides
+  }
+}
+
+export function createMockTimeOff(overrides = {}) {
+  return {
+    id: faker.string.uuid(),
+    employee_id: faker.string.uuid(),
+    start_date: faker.date.future().toISOString(),
+    end_date: faker.date.future().toISOString(),
+    status: 'Pending',
+    notes: faker.lorem.sentence(),
+    submitted_at: faker.date.past().toISOString(),
+    reviewed_by: null,
+    reviewed_at: null,
+    created_at: faker.date.past().toISOString(),
+    updated_at: faker.date.recent().toISOString(),
+    ...overrides
+  }
+}
+
+export function customRender(ui: React.ReactElement) {
   return render(ui)
 }
 
-// Helper to create a mock response
-export const createMockResponse = () => {
-  const res = {
-    json: jest.fn(),
-    status: jest.fn().mockReturnThis(),
-    headers: new Headers(),
-  }
-  return res
-}
-
-// Helper to create a mock request
-export const createMockRequest = (method = 'GET', body?: any) => {
-  return new Request('http://localhost:3000', {
-    method,
-    body: body ? JSON.stringify(body) : undefined,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  })
-}
-
-// Helper to wait for async operations
-export const waitForAsync = () => new Promise(resolve => setTimeout(resolve, 0))
-
-// Type guard for checking if response is error
-export const isErrorResponse = (response: any): response is { error: string } => {
-  return response && typeof response.error === 'string'
-}
-
-// Helper to mock Next.js navigation
-export const mockNextNavigation = () => {
-  const push = jest.fn()
-  const replace = jest.fn()
-  const refresh = jest.fn()
-  
+export function createMockResponse(overrides = {}) {
   return {
-    push,
-    replace,
-    refresh,
-    back: jest.fn(),
-    forward: jest.fn(),
+    status: 200,
+    headers: new Headers(),
+    ok: true,
+    json: jest.fn().mockResolvedValue({}),
+    ...overrides
   }
 }
 
-// Helper to setup MSW handlers
-export const setupMockHandlers = () => {
-  // Add MSW handlers here when needed
+export function createMockRequest(overrides = {}) {
+  return {
+    method: 'GET',
+    headers: new Headers(),
+    url: `${BASE_URL}/api/test`,
+    ...overrides
+  }
+}
+
+export function createMockCookie(overrides = {}) {
+  return {
+    name: 'test-cookie',
+    value: 'test-value',
+    ...overrides
+  }
+}
+
+export function isErrorResponse(response: Response) {
+  return !response.ok
+}
+
+// Re-export everything
+export * from '@testing-library/react'
+
+// Override render method
+export { customRender as render }
+
+// Add a helper function to create error responses
+export function createErrorResponse(message: string) {
+  return { data: null, error: new Error(message) }
+}
+
+type SafeRequestInit = Omit<RequestInit, 'signal'> & {
+  signal?: AbortSignal | undefined
+}
+
+type NextRequestInit = {
+  [K in keyof RequestInit]: K extends 'signal'
+    ? AbortSignal | undefined
+    : RequestInit[K]
+}
+
+export function createTestRequest(path: string, options: Partial<SafeRequestInit> = {}) {
+  const url = new URL(`http://localhost:3000${path}`)
+  const safeOptions = { ...options }
+  if (safeOptions.signal === null) {
+    delete safeOptions.signal
+  }
+  return new NextRequest(url, safeOptions as NextRequestInit)
+}
+
+export function createTestResponse() {
+  return {
+    status: 200,
+    headers: new Headers(),
+    json: jest.fn(),
+  }
+}
+
+export const createMockSupabaseClient = (): SupabaseClient => {
+  const client = {
+    auth: {
+      signInWithPassword: jest.fn(),
+      signUp: jest.fn(),
+      signOut: jest.fn(),
+      verifyOtp: jest.fn(),
+      getUser: jest.fn(),
+      getSession: jest.fn(),
+      setSession: jest.fn(),
+      onAuthStateChange: jest.fn(),
+      resetPasswordForEmail: jest.fn(),
+      updateUser: jest.fn(),
+      admin: {
+        createUser: jest.fn(),
+        deleteUser: jest.fn(),
+        listUsers: jest.fn(),
+        updateUser: jest.fn(),
+      },
+    },
+    from: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    insert: jest.fn().mockReturnThis(),
+    update: jest.fn().mockReturnThis(),
+    delete: jest.fn().mockReturnThis(),
+    eq: jest.fn().mockReturnThis(),
+    single: jest.fn().mockReturnThis(),
+    order: jest.fn().mockReturnThis(),
+    storage: {
+      from: jest.fn().mockReturnThis(),
+      upload: jest.fn(),
+      download: jest.fn(),
+      remove: jest.fn(),
+      list: jest.fn(),
+      createSignedUrl: jest.fn(),
+    },
+    realtime: {
+      on: jest.fn(),
+      subscribe: jest.fn(),
+      unsubscribe: jest.fn(),
+    },
+  }
+  return client as unknown as SupabaseClient
+}
+
+export function mockToast() {
+  return {
+    toast: jest.fn(),
+  }
+}
+
+export function mockNextRouter() {
+  return {
+    push: jest.fn(),
+    replace: jest.fn(),
+    prefetch: jest.fn(),
+    back: jest.fn(),
+    reload: jest.fn(),
+    events: {
+      on: jest.fn(),
+      off: jest.fn(),
+      emit: jest.fn(),
+    },
+    beforePopState: jest.fn(),
+    isFallback: false,
+    isReady: true,
+    isPreview: false,
+  }
+}
+
+export function mockNextAuth() {
+  return {
+    getSession: jest.fn(),
+    signIn: jest.fn(),
+    signOut: jest.fn(),
+    useSession: jest.fn(),
+  }
+}
+
+export function mockSupabaseAuthUI() {
+  return {
+    Auth: jest.fn(),
+    ThemeSupa: {},
+  }
+}
+
+export function mockSupabaseAuthHelpers() {
+  return {
+    createServerSupabaseClient: jest.fn(),
+    createBrowserSupabaseClient: jest.fn(),
+    createMiddlewareSupabaseClient: jest.fn(),
+  }
 } 

@@ -1,5 +1,4 @@
 import './globals.css'
-import { GeistSans } from 'geist/font/sans'
 import { Navigation } from '@/components/navigation'
 import { Toaster } from '@/components/ui/toaster'
 
@@ -19,7 +18,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={GeistSans.className}>
+    <html lang="en" className="font-sans">
       <body className="bg-background text-foreground">
         <main className="min-h-screen flex flex-col">
           <header className="bg-gray-800 text-white">

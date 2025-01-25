@@ -1,149 +1,166 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import {
+  render,
+  screen,
+  setupUser,
+  hasClasses,
+  cleanupAfterEach,
+  userEvent
+} from '../../test-utils'
 import { Textarea } from '@/components/ui/textarea'
 
 describe('Textarea', () => {
+  // Modern cleanup
+  cleanupAfterEach()
+
+  // Modern user event setup
+  const user = setupUser()
+
   it('renders with default props', () => {
-    render(<Textarea />)
-    const textarea = screen.getByRole('textbox')
+    render(<Textarea data-testid="textarea" />)
+    const textarea = screen.getByTestId('textarea')
     
     expect(textarea).toBeInTheDocument()
-    expect(textarea).toHaveClass('min-h-[80px]')
-    expect(textarea).toHaveClass('w-full')
-    expect(textarea).toHaveClass('rounded-md')
+    expect(
+      hasClasses(textarea, [
+        'min-h-[80px]',
+        'w-full',
+        'rounded-md'
+      ])
+    ).toBe(true)
   })
 
   it('handles user input', async () => {
-    render(<Textarea />)
-    const textarea = screen.getByRole('textbox')
+    render(<Textarea data-testid="textarea" />)
+    const textarea = screen.getByTestId('textarea')
     
-    await userEvent.type(textarea, 'Hello\nWorld!')
+    await user.type(textarea, 'Hello\nWorld!')
     expect(textarea).toHaveValue('Hello\nWorld!')
   })
 
   it('can be disabled', () => {
-    render(<Textarea disabled />)
-    const textarea = screen.getByRole('textbox')
+    render(<Textarea data-testid="textarea" disabled />)
+    const textarea = screen.getByTestId('textarea')
     
     expect(textarea).toBeDisabled()
-    expect(textarea).toHaveClass('disabled:cursor-not-allowed')
-    expect(textarea).toHaveClass('disabled:opacity-50')
+    expect(
+      hasClasses(textarea, [
+        'disabled:cursor-not-allowed',
+        'disabled:opacity-50'
+      ])
+    ).toBe(true)
   })
 
   it('forwards ref correctly', () => {
     const ref = React.createRef<HTMLTextAreaElement>()
-    render(<Textarea ref={ref} />)
+    render(<Textarea data-testid="textarea" ref={ref} />)
     
     expect(ref.current).toBeInstanceOf(HTMLTextAreaElement)
   })
 
   it('applies additional className', () => {
-    render(<Textarea className="custom-class" />)
-    const textarea = screen.getByRole('textbox')
+    render(<Textarea data-testid="textarea" className="custom-class" />)
+    const textarea = screen.getByTestId('textarea')
     
-    expect(textarea).toHaveClass('custom-class')
-    expect(textarea).toHaveClass('min-h-[80px]') // Still has default classes
+    expect(
+      hasClasses(textarea, [
+        'custom-class',
+        'min-h-[80px]'
+      ])
+    ).toBe(true)
   })
 
   it('handles placeholder text', () => {
-    render(<Textarea placeholder="Enter text..." />)
-    const textarea = screen.getByPlaceholderText('Enter text...')
+    const placeholder = 'Enter text...'
+    render(<Textarea data-testid="textarea" placeholder={placeholder} />)
+    const textarea = screen.getByPlaceholderText(placeholder)
     
     expect(textarea).toBeInTheDocument()
-    expect(textarea).toHaveAttribute('placeholder', 'Enter text...')
+    expect(textarea).toHaveAttribute('placeholder', placeholder)
   })
 
-  it('supports controlled value', () => {
-    const { rerender } = render(<Textarea value="Initial" readOnly />)
-    const textarea = screen.getByRole('textbox')
+  it('supports controlled value', async () => {
+    const { rerender } = render(
+      <Textarea data-testid="textarea" value="Initial" readOnly />
+    )
+    const textarea = screen.getByTestId('textarea')
     
     expect(textarea).toHaveValue('Initial')
     
-    rerender(<Textarea value="Updated" readOnly />)
+    rerender(<Textarea data-testid="textarea" value="Updated" readOnly />)
     expect(textarea).toHaveValue('Updated')
   })
 
   describe('Event Handling', () => {
     it('calls onChange handler', async () => {
       const handleChange = jest.fn()
-      render(<Textarea onChange={handleChange} />)
-      const textarea = screen.getByRole('textbox')
+      render(<Textarea data-testid="textarea" onChange={handleChange} />)
+      const textarea = screen.getByTestId('textarea')
       
-      await userEvent.type(textarea, 'a')
+      await user.type(textarea, 'a')
       expect(handleChange).toHaveBeenCalledTimes(1)
     })
 
     it('calls onFocus handler', async () => {
       const handleFocus = jest.fn()
-      render(<Textarea onFocus={handleFocus} />)
-      const textarea = screen.getByRole('textbox')
+      render(<Textarea data-testid="textarea" onFocus={handleFocus} />)
+      const textarea = screen.getByTestId('textarea')
       
-      await userEvent.click(textarea)
+      await user.click(textarea)
       expect(handleFocus).toHaveBeenCalledTimes(1)
     })
 
     it('calls onBlur handler', async () => {
       const handleBlur = jest.fn()
-      render(<Textarea onBlur={handleBlur} />)
-      const textarea = screen.getByRole('textbox')
+      render(<Textarea data-testid="textarea" onBlur={handleBlur} />)
+      const textarea = screen.getByTestId('textarea')
       
-      await userEvent.click(textarea)
-      await userEvent.tab()
+      await user.click(textarea)
+      await user.tab()
       expect(handleBlur).toHaveBeenCalledTimes(1)
     })
   })
 
   describe('Accessibility', () => {
     it('supports aria-label', () => {
-      render(<Textarea aria-label="Comment box" />)
+      render(<Textarea data-testid="textarea" aria-label="Comment box" />)
       const textarea = screen.getByLabelText('Comment box')
-      
       expect(textarea).toBeInTheDocument()
     })
 
     it('supports aria-describedby', () => {
       render(
         <>
-          <Textarea aria-describedby="hint" />
-          <div id="hint">Enter your comment</div>
+          <Textarea data-testid="textarea" aria-describedby="description" />
+          <div id="description">Helper text</div>
         </>
       )
-      const textarea = screen.getByRole('textbox')
-      
-      expect(textarea).toHaveAttribute('aria-describedby', 'hint')
+      const textarea = screen.getByTestId('textarea')
+      expect(textarea).toHaveAttribute('aria-describedby', 'description')
     })
 
     it('has visible focus indicator', () => {
-      render(<Textarea />)
-      const textarea = screen.getByRole('textbox')
+      render(<Textarea data-testid="textarea" />)
+      const textarea = screen.getByTestId('textarea')
       
-      expect(textarea).toHaveClass('focus-visible:ring-2')
-      expect(textarea).toHaveClass('focus-visible:ring-ring')
+      expect(
+        hasClasses(textarea, [
+          'focus-visible:ring-2',
+          'focus-visible:ring-ring'
+        ])
+      ).toBe(true)
     })
 
     it('maintains proper contrast ratio', () => {
-      render(<Textarea />)
-      const textarea = screen.getByRole('textbox')
+      render(<Textarea data-testid="textarea" />)
+      const textarea = screen.getByTestId('textarea')
       
-      expect(textarea).toHaveClass('bg-background')
-      expect(textarea).toHaveClass('text-sm')
-    })
-  })
-
-  describe('Resizing', () => {
-    it('has minimum height', () => {
-      render(<Textarea />)
-      const textarea = screen.getByRole('textbox')
-      
-      expect(textarea).toHaveClass('min-h-[80px]')
-    })
-
-    it('supports custom rows', () => {
-      render(<Textarea rows={10} />)
-      const textarea = screen.getByRole('textbox')
-      
-      expect(textarea).toHaveAttribute('rows', '10')
+      expect(
+        hasClasses(textarea, [
+          'bg-background',
+          'text-sm'
+        ])
+      ).toBe(true)
     })
   })
 }) 

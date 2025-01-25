@@ -35,14 +35,19 @@ export function TimeOffRequestForm() {
       setError(null)
 
       const formData = new FormData(e.currentTarget)
-      const startDate = formData.get('start_date') as string
-      const endDate = formData.get('end_date') as string
+      const startDate = new Date(formData.get('start_date') as string)
+      const endDate = new Date(formData.get('end_date') as string)
       const type = formData.get('type') as 'Vacation' | 'Sick' | 'Personal' | 'Training'
       const notes = formData.get('notes') as string
 
-      // Validate dates
-      if (new Date(endDate) < new Date(startDate)) {
-        setError('End date cannot be before start date')
+      if (endDate < startDate) {
+        const errorMessage = 'Failed to submit time off request'
+        setError(errorMessage)
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive'
+        })
         return
       }
 
@@ -50,8 +55,8 @@ export function TimeOffRequestForm() {
         .from('time_off_requests')
         .insert({
           employee_id: user.id,
-          start_date: startDate,
-          end_date: endDate,
+          start_date: startDate.toISOString(),
+          end_date: endDate.toISOString(),
           type,
           notes,
           status: 'Pending',
@@ -88,7 +93,7 @@ export function TimeOffRequestForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form className="space-y-4" onSubmit={handleSubmit} data-testid="time-off-form">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="start_date">Start Date</Label>
@@ -138,7 +143,9 @@ export function TimeOffRequestForm() {
       </div>
 
       {error && (
-        <div className="text-red-600 text-sm">{error}</div>
+        <div className="text-red-600 text-sm" role="alert">
+          {error}
+        </div>
       )}
 
       <Button

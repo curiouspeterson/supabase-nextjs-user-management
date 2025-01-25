@@ -111,10 +111,10 @@ export function TimeOffRequestDialog({
         onOpenAutoFocus={(e) => {
           // Prevent default focus behavior
           e.preventDefault()
-          // Focus the close button
-          const closeButton = document.querySelector('[aria-label="Close"]') as HTMLButtonElement
-          if (closeButton) {
-            closeButton.focus()
+          // Focus the close button using a more reliable selector
+          const closeButton = document.querySelector('button[type="button"] > .sr-only') as HTMLElement
+          if (closeButton?.parentElement) {
+            closeButton.parentElement.focus()
           }
         }}
         onInteractOutside={(e) => {

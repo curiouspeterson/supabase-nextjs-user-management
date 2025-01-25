@@ -9,14 +9,18 @@ const mockRevokeObjectURL = jest.fn()
 
 // Setup URL mock before tests
 beforeAll(() => {
-  // Mock URL constructor and methods
-  global.URL = class {
-    static createObjectURL = mockCreateObjectURL
-    static revokeObjectURL = mockRevokeObjectURL
-  } as unknown as typeof global.URL
+  // Store original URL
+  const originalURL = global.URL
 
-  // Mock createObjectURL to return a fake URL
-  mockCreateObjectURL.mockImplementation(() => 'blob:mock-avatar-url')
+  // Mock URL constructor and methods
+  global.URL = class MockURL {
+    static createObjectURL = mockCreateObjectURL.mockReturnValue('blob:mock-avatar-url')
+    static revokeObjectURL = mockRevokeObjectURL
+    
+    constructor(url: string) {
+      return new originalURL(url)
+    }
+  } as unknown as typeof global.URL
 })
 
 // Restore original URL after tests
@@ -27,7 +31,6 @@ afterAll(() => {
 // Mock Supabase client
 const mockDownload = jest.fn()
 const mockUpload = jest.fn()
-const mockFrom = jest.fn()
 
 jest.mock('@supabase/auth-helpers-nextjs', () => ({
   createClientComponentClient: () => ({
@@ -41,6 +44,7 @@ jest.mock('@supabase/auth-helpers-nextjs', () => ({
 }))
 
 describe('Avatar', () => {
+  const user = userEvent.setup()
   const mockProps = {
     uid: 'test-user-id',
     url: 'test-avatar.jpg',
@@ -65,11 +69,15 @@ describe('Avatar', () => {
     
     await waitFor(() => {
       expect(mockDownload).toHaveBeenCalledWith('test-avatar.jpg')
+    })
+
+    await waitFor(() => {
       expect(mockCreateObjectURL).toHaveBeenCalled()
     })
 
     const avatar = screen.getByRole('img', { name: /user avatar/i })
     expect(avatar).toBeInTheDocument()
+    expect(avatar).toHaveAttribute('src', 'blob:mock-avatar-url')
   })
 
   it('handles file upload', async () => {
@@ -77,23 +85,29 @@ describe('Avatar', () => {
     render(<Avatar {...mockProps} />)
 
     const input = screen.getByLabelText(/upload avatar/i)
-    await userEvent.upload(input, file)
+    await user.upload(input, file)
 
     await waitFor(() => {
-      expect(mockUpload).toHaveBeenCalled()
-      expect(mockProps.onUpload).toHaveBeenCalled()
+      expect(mockUpload).toHaveBeenCalledWith('test.png', expect.any(File), {
+        cacheControl: '3600',
+        upsert: true
+      })
+    })
+
+    await waitFor(() => {
+      expect(mockProps.onUpload).toHaveBeenCalledWith('test-path')
     })
   })
 
   it('handles upload error', async () => {
-    mockUpload.mockResolvedValueOnce({ error: new Error('Upload failed') })
+    mockUpload.mockResolvedValueOnce({ data: null, error: new Error('Upload failed') })
     const alertMock = jest.spyOn(window, 'alert').mockImplementation()
 
     render(<Avatar {...mockProps} />)
 
     const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
     const input = screen.getByLabelText(/upload avatar/i)
-    await userEvent.upload(input, file)
+    await user.upload(input, file)
 
     await waitFor(() => {
       expect(alertMock).toHaveBeenCalledWith('Error uploading avatar!')
@@ -101,7 +115,7 @@ describe('Avatar', () => {
   })
 
   it('handles download error', async () => {
-    mockDownload.mockResolvedValueOnce({ error: new Error('Download failed') })
+    mockDownload.mockResolvedValueOnce({ data: null, error: new Error('Download failed') })
     const consoleMock = jest.spyOn(console, 'error').mockImplementation()
 
     render(<Avatar {...mockProps} />)
@@ -118,7 +132,11 @@ describe('Avatar', () => {
       expect(mockCreateObjectURL).toHaveBeenCalled()
     })
 
+    const objectUrl = mockCreateObjectURL.mock.results[0].value
     unmount()
-    expect(mockRevokeObjectURL).toHaveBeenCalled()
+
+    await waitFor(() => {
+      expect(mockRevokeObjectURL).toHaveBeenCalledWith(objectUrl)
+    })
   })
 }) 

@@ -1,10 +1,11 @@
 import '@testing-library/jest-dom'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TimeOffPage from '@/app/time-off/page'
 import { useUser } from '@/lib/hooks'
 import { createClient } from '@/utils/supabase/client'
 import { User } from '@supabase/supabase-js'
+import { mockSupabaseClient } from '@/__tests__/utils/test-utils'
 
 // Mock useUser hook
 jest.mock('@/lib/hooks', () => ({
@@ -57,37 +58,35 @@ describe('TimeOffPage', () => {
       loading: false
     })
 
-    // Set up Supabase client mock
-    const mockSupabase = {
-      from: jest.fn(() => ({
-        select: jest.fn(() => ({
-          order: jest.fn(() => Promise.resolve({ data: mockTimeOffRequests, error: null }))
-        }))
-      }))
+    // Mock Supabase client
+    const mockClient = {
+      ...mockSupabaseClient,
+      rpc: jest.fn().mockResolvedValue({ data: mockTimeOffRequests, error: null })
     }
-    ;(createClient as jest.Mock).mockReturnValue(mockSupabase)
+    ;(createClient as jest.Mock).mockReturnValue(mockClient)
   })
 
   it('renders the page title and request time off button', async () => {
     render(<TimeOffPage />)
 
-    // Wait for loading spinner to disappear
+    // Wait for loading state to resolve
     await waitFor(() => {
       expect(screen.queryByTestId('loading-spinner')).not.toBeInTheDocument()
     })
 
-    expect(screen.getByText(/time off requests/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /time off/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /request time off/i })).toBeInTheDocument()
   })
 
   it('displays time off requests with correct status tabs', async () => {
     render(<TimeOffPage />)
 
-    // Wait for loading spinner to disappear
+    // Wait for loading state to resolve
     await waitFor(() => {
       expect(screen.queryByTestId('loading-spinner')).not.toBeInTheDocument()
     })
 
+    expect(screen.getByRole('tablist')).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /pending/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /approved/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /declined/i })).toBeInTheDocument()
@@ -96,7 +95,7 @@ describe('TimeOffPage', () => {
   it('filters requests by status when changing tabs', async () => {
     render(<TimeOffPage />)
 
-    // Wait for loading spinner to disappear
+    // Wait for loading state to resolve
     await waitFor(() => {
       expect(screen.queryByTestId('loading-spinner')).not.toBeInTheDocument()
     })
@@ -109,7 +108,7 @@ describe('TimeOffPage', () => {
   })
 
   it('handles loading state', () => {
-    (useUser as jest.Mock).mockReturnValue({
+    ;(useUser as jest.Mock).mockReturnValue({
       user: null,
       loading: true
     })
@@ -118,14 +117,11 @@ describe('TimeOffPage', () => {
   })
 
   it('handles error state when fetching requests fails', async () => {
-    const errorMockSupabase = {
-      from: jest.fn(() => ({
-        select: jest.fn(() => ({
-          order: jest.fn(() => Promise.resolve({ data: null, error: new Error('Failed to fetch') }))
-        }))
-      }))
+    const errorClient = {
+      ...mockSupabaseClient,
+      rpc: jest.fn().mockResolvedValue({ data: null, error: new Error('Failed to fetch') })
     }
-    ;(createClient as jest.Mock).mockReturnValue(errorMockSupabase)
+    ;(createClient as jest.Mock).mockReturnValue(errorClient)
 
     render(<TimeOffPage />)
 
@@ -137,34 +133,36 @@ describe('TimeOffPage', () => {
   describe('Accessibility', () => {
     it('has correct ARIA labels and roles', async () => {
       render(<TimeOffPage />)
-
-      // Wait for loading spinner to disappear
+      
+      // Wait for loading to complete
       await waitFor(() => {
         expect(screen.queryByTestId('loading-spinner')).not.toBeInTheDocument()
       })
 
-      expect(screen.getByRole('tablist')).toBeInTheDocument()
-      expect(screen.getByRole('tab', { name: /pending/i })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tablist', { name: /filter time off requests/i })).toBeInTheDocument()
     })
 
     it('maintains focus management when opening dialog', async () => {
       render(<TimeOffPage />)
-
-      // Wait for loading spinner to disappear
+      
+      // Wait for loading to complete
       await waitFor(() => {
         expect(screen.queryByTestId('loading-spinner')).not.toBeInTheDocument()
       })
 
       const requestButton = screen.getByRole('button', { name: /request time off/i })
-      await user.click(requestButton)
+      await act(async () => {
+        await userEvent.click(requestButton)
+      })
 
       await waitFor(() => {
-        expect(screen.getByRole('dialog')).toBeInTheDocument()
-      })
-      
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /close/i })).toHaveFocus()
-      })
+        const dialog = screen.getByRole('dialog')
+        expect(dialog).toBeInTheDocument()
+        const closeButton = screen.getByRole('button', { name: /close/i })
+        expect(closeButton).toBeInTheDocument()
+        const focusedElement = document.activeElement
+        expect(focusedElement).toBe(closeButton)
+      }, { timeout: 1000 })
     })
   })
 }) 

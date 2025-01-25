@@ -15,6 +15,7 @@ export function Navigation({ className }: NavigationProps) {
   const pathname = usePathname()
   const [userRole, setUserRole] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isSigningOut, setIsSigningOut] = useState(false)
   const router = useRouter()
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -101,8 +102,15 @@ export function Navigation({ className }: NavigationProps) {
   ]
 
   async function handleSignOut() {
-    await supabase.auth.signOut()
-    window.location.href = '/'
+    if (isSigningOut) return
+    try {
+      setIsSigningOut(true)
+      await supabase.auth.signOut()
+      window.location.href = '/'
+    } catch (error) {
+      console.error('Error signing out:', error)
+      setIsSigningOut(false)
+    }
   }
 
   return (
@@ -152,9 +160,15 @@ export function Navigation({ className }: NavigationProps) {
         </Link>
         <button
           onClick={handleSignOut}
-          className="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+          disabled={isSigningOut}
+          className={cn(
+            "px-3 py-2 rounded-md text-sm font-medium transition-colors",
+            isSigningOut 
+              ? "opacity-50 cursor-not-allowed"
+              : "text-gray-300 hover:bg-gray-700 hover:text-white"
+          )}
         >
-          Sign Out
+          {isSigningOut ? 'Signing Out...' : 'Sign Out'}
         </button>
       </div>
     </div>

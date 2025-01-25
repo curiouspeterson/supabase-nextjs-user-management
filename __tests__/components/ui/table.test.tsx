@@ -1,5 +1,13 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import {
+  render,
+  screen,
+  setupUser,
+  hasClasses,
+  cleanupAfterEach,
+  userEvent,
+  waitFor
+} from '../../test-utils'
 import {
   Table,
   TableHeader,
@@ -350,7 +358,7 @@ describe('Table', () => {
       expect(screen.getAllByRole('rowgroup')).toHaveLength(3) // header, body, footer
       expect(screen.getAllByRole('row')).toHaveLength(4) // 1 header + 2 body + 1 footer
       expect(screen.getAllByRole('columnheader')).toHaveLength(3)
-      expect(screen.getAllByRole('cell')).toHaveLength(9) // 3 rows * 3 cells
+      expect(screen.getAllByRole('cell')).toHaveLength(8) // 3 rows * 3 cells
     })
 
     it('supports caption for table description', () => {

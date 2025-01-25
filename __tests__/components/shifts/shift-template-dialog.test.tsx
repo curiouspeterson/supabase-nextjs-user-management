@@ -1,7 +1,13 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import React from 'react'
+import { render, screen, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ShiftTemplateDialog } from '@/components/shifts/shift-template-dialog'
 import * as supabaseClient from '@/utils/supabase/client'
+import { cleanupAfterEach } from '../../test-utils'
+
+// Constants for timeouts
+const TEST_TIMEOUT = 5000
+const ANIMATION_TIMEOUT = 100
 
 jest.mock('@/utils/supabase/client')
 
@@ -10,104 +16,152 @@ const mockShiftTypes = [
   { id: '2', name: 'Day Shift', start_time: '09:00', end_time: '17:00' }
 ]
 
-const mockEq = jest.fn().mockReturnValue({ data: null, error: null })
-const mockUpdate = jest.fn().mockReturnValue({ eq: mockEq })
-const mockInsert = jest.fn().mockReturnValue({ data: null, error: null })
-const mockOrder = jest.fn().mockReturnValue({ data: mockShiftTypes, error: null })
-const mockSelect = jest.fn().mockReturnValue({ order: mockOrder })
-const mockFrom = jest.fn((table: string) => {
+// Improved mock setup with error handling and timeouts
+const createMockPromise = (data: any, delay = 0) => {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve({ data, error: null }), delay)
+  })
+}
+
+const mockEq = jest.fn().mockImplementation(() => createMockPromise(null))
+const mockUpdate = jest.fn().mockImplementation(() => ({ eq: mockEq }))
+const mockInsert = jest.fn().mockImplementation(() => createMockPromise(null))
+const mockOrder = jest.fn().mockImplementation(() => createMockPromise(mockShiftTypes))
+const mockSelect = jest.fn().mockImplementation(() => ({ order: mockOrder }))
+const mockFrom = jest.fn().mockImplementation((table: string) => {
   if (table === 'shift_types') {
     return { select: mockSelect }
   }
   return {
     select: mockSelect,
-    insert: (data: any) => mockInsert(data),
-    update: (data: any) => mockUpdate(data)
+    insert: mockInsert,
+    update: mockUpdate
   }
 })
+
 const mockSupabase = { from: mockFrom }
 
 jest.mock('@/utils/supabase/client', () => ({
   createClient: () => mockSupabase
 }))
 
-beforeAll(() => {
-  // Mock scrollIntoView
-  HTMLElement.prototype.scrollIntoView = jest.fn()
-  // Mock hasPointerCapture
-  HTMLElement.prototype.hasPointerCapture = jest.fn()
-})
-
-beforeEach(() => {
-  jest.clearAllMocks()
-  mockFrom.mockClear()
-  mockSelect.mockClear()
-  mockOrder.mockClear()
-  mockInsert.mockClear()
-  mockUpdate.mockClear()
-  mockEq.mockClear()
-})
-
 describe('ShiftTemplateDialog', () => {
-  it('loads shift types on mount', async () => {
-    render(<ShiftTemplateDialog open onOpenChange={() => {}} />)
+  // Modern cleanup after each test
+  cleanupAfterEach()
 
-    expect(mockFrom).toHaveBeenCalledWith('shift_types')
-    expect(mockSelect).toHaveBeenCalled()
-    expect(mockOrder).toHaveBeenCalledWith('name')
+  // Modern user event setup
+  const user = userEvent.setup({
+    delay: null,
+    pointerEventsCheck: 0
+  })
+
+  beforeAll(() => {
+    HTMLElement.prototype.scrollIntoView = jest.fn()
+    HTMLElement.prototype.hasPointerCapture = jest.fn()
+  })
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockFrom.mockClear()
+    mockSelect.mockClear()
+    mockOrder.mockClear()
+    mockInsert.mockClear()
+    mockUpdate.mockClear()
+    mockEq.mockClear()
+  })
+
+  afterEach(() => {
+    jest.clearAllTimers()
+  })
+
+  it('loads shift types on mount', async () => {
+    const { unmount } = render(
+      <React.Suspense fallback={<div>Loading...</div>}>
+        <ShiftTemplateDialog open onOpenChange={() => {}} />
+      </React.Suspense>
+    )
+
+    await waitFor(() => {
+      expect(mockFrom).toHaveBeenCalledWith('shift_types')
+      expect(mockSelect).toHaveBeenCalled()
+      expect(mockOrder).toHaveBeenCalledWith('name')
+    }, { timeout: TEST_TIMEOUT })
+
+    unmount()
   })
 
   it('handles form submission for creating a shift', async () => {
     const mockOnOpenChange = jest.fn()
     const mockOnSuccess = jest.fn()
 
-    render(
-      <ShiftTemplateDialog
-        open
-        onOpenChange={mockOnOpenChange}
-        onSuccess={mockOnSuccess}
-      />
+    const { unmount } = render(
+      <React.Suspense fallback={<div>Loading...</div>}>
+        <ShiftTemplateDialog
+          open
+          onOpenChange={mockOnOpenChange}
+          onSuccess={mockOnSuccess}
+        />
+      </React.Suspense>
     )
 
-    // Find and click the shift type combobox
-    const comboboxes = screen.getAllByRole('combobox')
-    const shiftTypeButton = comboboxes[0]
-    expect(shiftTypeButton).toHaveTextContent('Select a shift type')
-    await userEvent.click(shiftTypeButton)
-    
-    // Select the early shift option
-    const earlyShiftOption = screen.getByRole('option', { name: 'Early Shift' })
-    await userEvent.click(earlyShiftOption)
+    // Wait for dialog to be fully mounted
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
 
-    // Find and click the duration combobox
-    const durationButton = comboboxes[1]
-    expect(durationButton).toHaveTextContent('Select duration')
-    await userEvent.click(durationButton)
-    
-    // Select the 4 hours option
-    const fourHoursOption = screen.getByRole('option', { name: '4 hours' })
-    await userEvent.click(fourHoursOption)
+    // Find and click the shift type combobox with retry
+    await waitFor(() => {
+      const comboboxes = screen.getAllByRole('combobox')
+      expect(comboboxes[0]).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
 
-    // Fill in the time inputs
+    const shiftTypeButton = screen.getAllByRole('combobox')[0]
+    await user.click(shiftTypeButton)
+    
+    // Wait for options to appear and select early shift
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'Early Shift' })).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
+    
+    await user.click(screen.getByRole('option', { name: 'Early Shift' }))
+
+    // Handle duration selection
+    const durationButton = screen.getAllByRole('combobox')[1]
+    await user.click(durationButton)
+    
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: '4 hours' })).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
+    
+    await user.click(screen.getByRole('option', { name: '4 hours' }))
+
+    // Fill in time inputs with proper waiting
     const startTimeInput = screen.getByLabelText(/start time/i)
     const endTimeInput = screen.getByLabelText(/end time/i)
-    await userEvent.type(startTimeInput, '07:00')
-    await userEvent.type(endTimeInput, '11:00')
+    
+    await user.clear(startTimeInput)
+    await user.type(startTimeInput, '07:00')
+    await user.clear(endTimeInput)
+    await user.type(endTimeInput, '11:00')
 
-    // Submit the form
+    // Submit form with waiting
     const submitButton = screen.getByRole('button', { name: /create/i })
-    await userEvent.click(submitButton)
+    await user.click(submitButton)
 
-    expect(mockFrom).toHaveBeenCalledWith('shifts')
-    expect(mockInsert).toHaveBeenCalledWith({
-      shift_type_id: '1',
-      duration_category: '4 hours',
-      duration_hours: 4,
-      start_time: '07:00',
-      end_time: '11:00',
-    })
-    expect(mockOnOpenChange).toHaveBeenCalledWith(false)
-    expect(mockOnSuccess).toHaveBeenCalled()
+    await waitFor(() => {
+      expect(mockFrom).toHaveBeenCalledWith('shifts')
+      expect(mockInsert).toHaveBeenCalledWith({
+        shift_type_id: '1',
+        duration_category: '4 hours',
+        duration_hours: 4,
+        start_time: '07:00',
+        end_time: '11:00',
+      })
+      expect(mockOnOpenChange).toHaveBeenCalledWith(false)
+      expect(mockOnSuccess).toHaveBeenCalled()
+    }, { timeout: TEST_TIMEOUT })
+
+    unmount()
   })
 
   it('handles form submission for updating a shift', async () => {
@@ -122,75 +176,94 @@ describe('ShiftTemplateDialog', () => {
       duration_hours: 4
     }
 
-    render(
-      <ShiftTemplateDialog
-        open
-        shift={existingShift}
-        onOpenChange={mockOnOpenChange}
-        onSuccess={mockOnSuccess}
-      />
+    const { unmount } = render(
+      <React.Suspense fallback={<div>Loading...</div>}>
+        <ShiftTemplateDialog
+          open
+          shift={existingShift}
+          onOpenChange={mockOnOpenChange}
+          onSuccess={mockOnSuccess}
+        />
+      </React.Suspense>
     )
 
-    // Find and click the shift type combobox
-    const comboboxes = screen.getAllByRole('combobox')
+    // Wait for dialog to be mounted
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
+
+    const comboboxes = await waitFor(() => screen.getAllByRole('combobox'), { timeout: TEST_TIMEOUT })
     const shiftTypeButton = comboboxes[0]
-    expect(shiftTypeButton).toHaveTextContent('Select a shift type')
-    await userEvent.click(shiftTypeButton)
+    await user.click(shiftTypeButton)
     
-    // Select the day shift option
-    const dayShiftOption = screen.getByRole('option', { name: 'Day Shift' })
-    await userEvent.click(dayShiftOption)
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'Day Shift' })).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
+    
+    await user.click(screen.getByRole('option', { name: 'Day Shift' }))
 
-    // Find and click the duration combobox
     const durationButton = comboboxes[1]
-    expect(durationButton).toHaveTextContent('Select duration')
-    await userEvent.click(durationButton)
+    await user.click(durationButton)
     
-    // Select the 10 hours option
-    const tenHoursOption = screen.getByRole('option', { name: '10 hours' })
-    await userEvent.click(tenHoursOption)
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: '10 hours' })).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
+    
+    await user.click(screen.getByRole('option', { name: '10 hours' }))
 
-    // Fill in the time inputs
     const startTimeInput = screen.getByLabelText(/start time/i)
     const endTimeInput = screen.getByLabelText(/end time/i)
-    await userEvent.clear(startTimeInput)
-    await userEvent.clear(endTimeInput)
-    await userEvent.type(startTimeInput, '09:00')
-    await userEvent.type(endTimeInput, '19:00')
+    
+    await user.clear(startTimeInput)
+    await user.type(startTimeInput, '09:00')
+    await user.clear(endTimeInput)
+    await user.type(endTimeInput, '19:00')
 
-    // Submit the form
     const submitButton = screen.getByRole('button', { name: /update/i })
-    await userEvent.click(submitButton)
+    await user.click(submitButton)
 
-    expect(mockFrom).toHaveBeenCalledWith('shifts')
-    expect(mockUpdate).toHaveBeenCalledWith({
-      shift_type_id: '2',
-      duration_category: '10 hours',
-      duration_hours: 10,
-      start_time: '09:00',
-      end_time: '19:00',
-    })
-    expect(mockEq).toHaveBeenCalledWith('id', '123')
-    expect(mockOnOpenChange).toHaveBeenCalledWith(false)
-    expect(mockOnSuccess).toHaveBeenCalled()
+    await waitFor(() => {
+      expect(mockFrom).toHaveBeenCalledWith('shifts')
+      expect(mockUpdate).toHaveBeenCalledWith({
+        shift_type_id: '2',
+        duration_category: '10 hours',
+        duration_hours: 10,
+        start_time: '09:00',
+        end_time: '19:00',
+      })
+      expect(mockEq).toHaveBeenCalledWith('id', '123')
+      expect(mockOnOpenChange).toHaveBeenCalledWith(false)
+      expect(mockOnSuccess).toHaveBeenCalled()
+    }, { timeout: TEST_TIMEOUT })
+
+    unmount()
   })
 
   it('validates required fields', async () => {
-    render(<ShiftTemplateDialog open onOpenChange={() => {}} />)
+    const { unmount } = render(
+      <React.Suspense fallback={<div>Loading...</div>}>
+        <ShiftTemplateDialog open onOpenChange={() => {}} />
+      </React.Suspense>
+    )
 
-    // Submit without filling required fields
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
+
     const submitButton = screen.getByRole('button', { name: /create/i })
-    await userEvent.click(submitButton)
+    await user.click(submitButton)
 
-    // Verify error messages
-    expect(screen.getByText(/shift type is required/i)).toBeInTheDocument()
-    expect(screen.getByText(/duration is required/i)).toBeInTheDocument()
-    expect(screen.getByText(/start time is required/i)).toBeInTheDocument()
-    expect(screen.getByText(/end time is required/i)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText(/shift type is required/i)).toBeInTheDocument()
+      expect(screen.getByText(/duration is required/i)).toBeInTheDocument()
+      expect(screen.getByText(/start time is required/i)).toBeInTheDocument()
+      expect(screen.getByText(/end time is required/i)).toBeInTheDocument()
+    }, { timeout: TEST_TIMEOUT })
 
-    // Verify no API calls were made
     expect(mockFrom).not.toHaveBeenCalledWith('shifts')
     expect(mockInsert).not.toHaveBeenCalled()
     expect(mockUpdate).not.toHaveBeenCalled()
+
+    unmount()
   })
 }) 
