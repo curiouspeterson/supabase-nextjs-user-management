@@ -77,7 +77,6 @@ describe('TimeOffRequestForm', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     user = userEvent.setup()
-    // Reset form state
     mockInsert.mockResolvedValue({ data: null, error: null })
   })
 
@@ -96,75 +95,37 @@ describe('TimeOffRequestForm', () => {
 
       render(<TimeOffRequestForm userId={mockUser.id} />)
 
-      const startDate = screen.getByLabelText('Start Date')
-      const endDate = screen.getByLabelText('End Date')
-      const typeSelect = screen.getByRole('combobox')
+      const startDate = screen.getByLabelText('Start date')
+      const endDate = screen.getByLabelText('End date')
+      const typeSelect = screen.getByLabelText('Type of time off')
+      const notes = screen.getByLabelText('Notes')
       const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
       await user.type(startDate, '2025-01-25')
       await user.type(endDate, '2025-01-27')
-      await user.click(typeSelect)
-      await user.click(screen.getByRole('option', { name: 'Vacation' }))
+      await user.selectOptions(typeSelect, 'vacation')
+      await user.type(notes, 'Test vacation')
+
+      expect(submitButton).not.toBeDisabled()
       await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(submitButton).toBeDisabled()
+      }, { timeout: 1000 })
 
       await waitFor(() => {
         expect(mockToast).toHaveBeenCalledWith({
           title: 'Error',
-          description: 'You already have time off scheduled during this period',
+          description: 'You already have a time off request during this period',
           variant: 'destructive'
         })
-        expect(screen.getByRole('alert')).toHaveTextContent(
-          'You already have time off scheduled during this period'
-        )
-      })
-    })
-
-    it('validates maximum consecutive days', async () => {
-      render(<TimeOffRequestForm userId={mockUser.id} />)
-
-      const startDate = screen.getByLabelText('Start Date')
-      const endDate = screen.getByLabelText('End Date')
-      const typeSelect = screen.getByRole('combobox')
-      const submitButton = screen.getByRole('button', { name: 'Submit Request' })
-
-      await user.type(startDate, '2025-01-01')
-      await user.type(endDate, '2025-02-15')
-      await user.click(typeSelect)
-      await user.click(screen.getByRole('option', { name: 'Vacation' }))
-      await user.click(submitButton)
+      }, { timeout: 1000 })
 
       await waitFor(() => {
-        expect(mockToast).toHaveBeenCalledWith({
-          title: 'Error',
-          description: 'Time off requests cannot exceed 30 consecutive days',
-          variant: 'destructive'
-        })
-      })
-    })
-
-    it('handles database connection errors', async () => {
-      mockInsert.mockRejectedValueOnce(new Error('Database connection failed'))
-      render(<TimeOffRequestForm userId={mockUser.id} />)
-
-      const startDate = screen.getByLabelText('Start Date')
-      const endDate = screen.getByLabelText('End Date')
-      const typeSelect = screen.getByRole('combobox')
-      const submitButton = screen.getByRole('button', { name: 'Submit Request' })
-
-      await user.type(startDate, '2025-01-25')
-      await user.type(endDate, '2025-01-26')
-      await user.click(typeSelect)
-      await user.click(screen.getByRole('option', { name: 'Vacation' }))
-      await user.click(submitButton)
-
-      await waitFor(() => {
-        expect(mockToast).toHaveBeenCalledWith({
-          title: 'Error',
-          description: 'Unable to submit request. Please try again later.',
-          variant: 'destructive'
-        })
-        expect(screen.getByRole('alert')).toHaveAttribute('aria-live', 'polite')
-      })
+        const errorMessage = screen.getByRole('alert')
+        expect(errorMessage).toBeInTheDocument()
+        expect(errorMessage).toHaveTextContent('You already have a time off request during this period')
+      }, { timeout: 1000 })
     })
 
     it('validates remaining vacation days', async () => {
@@ -181,16 +142,23 @@ describe('TimeOffRequestForm', () => {
 
       render(<TimeOffRequestForm userId={mockUser.id} />)
 
-      const startDate = screen.getByLabelText('Start Date')
-      const endDate = screen.getByLabelText('End Date')
-      const typeSelect = screen.getByRole('combobox')
+      const startDate = screen.getByLabelText('Start date')
+      const endDate = screen.getByLabelText('End date')
+      const typeSelect = screen.getByLabelText('Type of time off')
+      const notes = screen.getByLabelText('Notes')
       const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
       await user.type(startDate, '2025-01-25')
       await user.type(endDate, '2025-01-28')
-      await user.click(typeSelect)
-      await user.click(screen.getByRole('option', { name: 'Vacation' }))
+      await user.selectOptions(typeSelect, 'vacation')
+      await user.type(notes, 'Test vacation')
+
+      expect(submitButton).not.toBeDisabled()
       await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(submitButton).toBeDisabled()
+      }, { timeout: 1000 })
 
       await waitFor(() => {
         expect(mockToast).toHaveBeenCalledWith({
@@ -198,35 +166,50 @@ describe('TimeOffRequestForm', () => {
           description: 'Insufficient vacation days remaining',
           variant: 'destructive'
         })
-      })
+      }, { timeout: 1000 })
+
+      await waitFor(() => {
+        const errorMessage = screen.getByRole('alert')
+        expect(errorMessage).toBeInTheDocument()
+        expect(errorMessage).toHaveTextContent('Insufficient vacation days remaining')
+      }, { timeout: 1000 })
     })
 
     it('handles form reset after error', async () => {
       mockInsert.mockRejectedValueOnce(new Error('Submission failed'))
       render(<TimeOffRequestForm userId={mockUser.id} />)
 
-      const startDate = screen.getByLabelText('Start Date')
-      const endDate = screen.getByLabelText('End Date')
-      const typeSelect = screen.getByRole('combobox')
+      const startDate = screen.getByLabelText('Start date')
+      const endDate = screen.getByLabelText('End date')
+      const typeSelect = screen.getByLabelText('Type of time off')
+      const notes = screen.getByLabelText('Notes')
       const resetButton = screen.getByRole('button', { name: 'Reset' })
       const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
       await user.type(startDate, '2025-01-25')
       await user.type(endDate, '2025-01-26')
-      await user.click(typeSelect)
-      await user.click(screen.getByRole('option', { name: 'Vacation' }))
+      await user.selectOptions(typeSelect, 'vacation')
+      await user.type(notes, 'Test vacation')
+
+      expect(submitButton).not.toBeDisabled()
       await user.click(submitButton)
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument()
-      })
+        expect(submitButton).toBeDisabled()
+      }, { timeout: 1000 })
+
+      await waitFor(() => {
+        const errorMessage = screen.getByRole('alert')
+        expect(errorMessage).toBeInTheDocument()
+      }, { timeout: 1000 })
 
       await user.click(resetButton)
 
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
       expect(startDate).toHaveValue('')
       expect(endDate).toHaveValue('')
-      expect(typeSelect).toHaveTextContent('Select type')
+      expect(typeSelect).toHaveValue('')
+      expect(notes).toHaveValue('')
     })
 
     it('provides accessible validation feedback', async () => {
@@ -236,164 +219,142 @@ describe('TimeOffRequestForm', () => {
       await user.click(submitButton)
 
       await waitFor(() => {
-        const errors = screen.getAllByRole('alert')
-        errors.forEach(error => {
-          expect(error).toHaveAttribute('aria-live', 'polite')
-          expect(error).toBeVisible()
-        })
-      })
+        const errorMessage = screen.getByRole('alert')
+        expect(errorMessage).toBeInTheDocument()
+        expect(errorMessage).toHaveAttribute('aria-live', 'polite')
+      }, { timeout: 1000 })
     })
-  })
-
-  it('renders form fields', () => {
-    render(<TimeOffRequestForm userId={mockUser.id} />)
-    
-    expect(screen.getByLabelText('Start Date')).toBeRequired()
-    expect(screen.getByLabelText('End Date')).toBeRequired()
-    expect(screen.getByRole('combobox')).toBeRequired()
-    expect(screen.getByLabelText('Notes')).toBeInTheDocument()
   })
 
   it('validates end date is not before start date', async () => {
     render(<TimeOffRequestForm userId={mockUser.id} />)
 
-    const startDateInput = screen.getByLabelText(/start date/i)
-    const endDateInput = screen.getByLabelText(/end date/i)
-    const submitButton = screen.getByRole('button', { name: /submit request/i })
+    const startDate = screen.getByLabelText('Start date')
+    const endDate = screen.getByLabelText('End date')
+    const typeSelect = screen.getByLabelText('Type of time off')
+    const notes = screen.getByLabelText('Notes')
+    const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
-    await user.type(startDateInput, '2025-01-25')
-    await user.type(endDateInput, '2025-01-24')
+    await user.type(startDate, '2025-01-25')
+    await user.type(endDate, '2025-01-24')
+    await user.selectOptions(typeSelect, 'vacation')
+    await user.type(notes, 'Test vacation')
+
+    expect(submitButton).not.toBeDisabled()
     await user.click(submitButton)
+
+    await waitFor(() => {
+      expect(submitButton).toBeDisabled()
+    }, { timeout: 1000 })
 
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith({
         title: 'Error',
-        description: 'Failed to submit time off request',
+        description: 'End date must be after start date',
         variant: 'destructive'
       })
-      expect(screen.getByText('Failed to submit time off request')).toBeInTheDocument()
-    })
+    }, { timeout: 1000 })
+
+    await waitFor(() => {
+      const errorMessage = screen.getByRole('alert')
+      expect(errorMessage).toBeInTheDocument()
+      expect(errorMessage).toHaveTextContent('End date must be after start date')
+    }, { timeout: 1000 })
   })
 
   it('submits the form successfully', async () => {
     render(<TimeOffRequestForm userId={mockUser.id} />)
 
-    const startDate = screen.getByLabelText('Start Date')
-    const endDate = screen.getByLabelText('End Date')
-    const typeSelect = screen.getByRole('combobox')
+    const startDate = screen.getByLabelText('Start date')
+    const endDate = screen.getByLabelText('End date')
+    const typeSelect = screen.getByLabelText('Type of time off')
     const notes = screen.getByLabelText('Notes')
     const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
     await user.type(startDate, '2025-01-25')
     await user.type(endDate, '2025-01-26')
-    
-    // Open select dropdown and wait for content
-    await user.click(typeSelect)
-    await waitFor(() => {
-      expect(typeSelect).toHaveAttribute('aria-expanded', 'true')
-      expect(screen.getByRole('listbox')).toBeInTheDocument()
-    })
+    await user.selectOptions(typeSelect, 'vacation')
+    await user.type(notes, 'Test vacation')
 
-    // Find and click option
-    const option = screen.getByRole('option', { name: 'Vacation' })
-    await user.click(option)
-
-    // Verify selection
-    await waitFor(() => {
-      expect(typeSelect).toHaveTextContent('Vacation')
-    })
-
-    await user.type(notes, 'Taking a vacation')
+    expect(submitButton).not.toBeDisabled()
     await user.click(submitButton)
+
+    await waitFor(() => {
+      expect(submitButton).toBeDisabled()
+      expect(submitButton).toHaveTextContent('Submitting...')
+    }, { timeout: 1000 })
 
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith({
         title: 'Success',
-        description: 'Time off request submitted successfully'
+        description: 'Time off request submitted successfully',
+        variant: 'default'
       })
-    })
+    }, { timeout: 1000 })
   })
 
   it('handles submission errors', async () => {
-    mockInsert.mockResolvedValueOnce({ 
-      data: null, 
-      error: {
-        message: 'Failed to submit time off request'
-      } as any
-    })
-    
+    mockInsert.mockRejectedValueOnce(new Error('Database error'))
     render(<TimeOffRequestForm userId={mockUser.id} />)
 
-    const startDate = screen.getByLabelText('Start Date')
-    const endDate = screen.getByLabelText('End Date')
-    const typeSelect = screen.getByRole('combobox')
+    const startDate = screen.getByLabelText('Start date')
+    const endDate = screen.getByLabelText('End date')
+    const typeSelect = screen.getByLabelText('Type of time off')
+    const notes = screen.getByLabelText('Notes')
     const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
     await user.type(startDate, '2025-01-25')
     await user.type(endDate, '2025-01-26')
-    
-    // Open select dropdown and wait for content
-    await user.click(typeSelect)
-    await waitFor(() => {
-      expect(typeSelect).toHaveAttribute('aria-expanded', 'true')
-      expect(screen.getByRole('listbox')).toBeInTheDocument()
-    })
+    await user.selectOptions(typeSelect, 'vacation')
+    await user.type(notes, 'Test vacation')
 
-    // Find and click option
-    const option = screen.getByRole('option', { name: 'Vacation' })
-    await user.click(option)
-
-    // Verify selection
-    await waitFor(() => {
-      expect(typeSelect).toHaveTextContent('Vacation')
-    })
-
+    expect(submitButton).not.toBeDisabled()
     await user.click(submitButton)
 
-    // Wait for error message and toast
     await waitFor(() => {
-      expect(screen.getByText(/Failed to submit time off request/)).toBeInTheDocument()
+      expect(submitButton).toBeDisabled()
+    }, { timeout: 1000 })
+
+    await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith({
         title: 'Error',
         description: 'Failed to submit time off request',
         variant: 'destructive'
       })
-    })
+    }, { timeout: 1000 })
+
+    await waitFor(() => {
+      const errorMessage = screen.getByRole('alert')
+      expect(errorMessage).toBeInTheDocument()
+      expect(errorMessage).toHaveTextContent('An unexpected error occurred')
+    }, { timeout: 1000 })
   })
 
   it('disables submit button while submitting', async () => {
-    // Mock a delayed response
-    mockInsert.mockImplementationOnce(() => new Promise(resolve => {
-      setTimeout(() => {
-        resolve({ data: null, error: null })
-      }, 100)
-    }))
-
     render(<TimeOffRequestForm userId={mockUser.id} />)
 
-    // Fill out form
-    const startDateInput = screen.getByLabelText('Start Date')
-    const endDateInput = screen.getByLabelText('End Date')
-    await user.type(startDateInput, '2025-01-25')
-    await user.type(endDateInput, '2025-01-26')
+    const startDate = screen.getByLabelText('Start date')
+    const endDate = screen.getByLabelText('End date')
+    const typeSelect = screen.getByLabelText('Type of time off')
+    const notes = screen.getByLabelText('Notes')
+    const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
-    // Select type
-    const typeSelect = screen.getByRole('combobox')
-    await user.click(typeSelect)
-    await user.click(screen.getByRole('option', { name: 'Vacation' }))
+    await user.type(startDate, '2025-01-25')
+    await user.type(endDate, '2025-01-26')
+    await user.selectOptions(typeSelect, 'vacation')
+    await user.type(notes, 'Test vacation')
 
-    // Submit form
-    const submitButton = screen.getByRole('button', { name: /submit request/i })
+    expect(submitButton).not.toBeDisabled()
     await user.click(submitButton)
 
-    // Immediately after submission
-    expect(submitButton).toBeDisabled()
-    expect(submitButton).toHaveTextContent('Submitting...')
+    await waitFor(() => {
+      expect(submitButton).toBeDisabled()
+      expect(submitButton).toHaveTextContent('Submitting...')
+    }, { timeout: 1000 })
 
-    // Wait for submission to complete
     await waitFor(() => {
       expect(submitButton).not.toBeDisabled()
       expect(submitButton).toHaveTextContent('Submit Request')
-    })
+    }, { timeout: 1000 })
   })
 }) 

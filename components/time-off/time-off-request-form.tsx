@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
 import { useRouter } from 'next/navigation'
 import { useErrorHandler } from '@/lib/hooks/use-error-handler'
 import { ValidationError, DatabaseError } from '@/lib/errors'
 import { useToast } from '@/components/ui/use-toast'
 import { format } from 'date-fns'
+import { flushSync } from 'react-dom'
 
 interface TimeOffRequestFormProps {
   userId: string
@@ -17,6 +18,7 @@ interface TimeOffRequestFormProps {
 export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffRequestFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [buttonText, setButtonText] = useState('Submit Request')
   const router = useRouter()
   const { handleError } = useErrorHandler()
   const { toast } = useToast()
@@ -26,7 +28,16 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  const validateDates = (startDate: string, endDate: string) => {
+  // Cleanup effect
+  useEffect(() => {
+    return () => {
+      setIsSubmitting(false)
+      setError(null)
+      setButtonText('Submit Request')
+    }
+  }, [])
+
+  const validateDates = useCallback((startDate: string, endDate: string) => {
     const start = new Date(startDate)
     const end = new Date(endDate)
 
@@ -50,9 +61,9 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
     }
 
     return { start, end }
-  }
+  }, [])
 
-  const checkOverlappingRequests = async (startDate: Date, endDate: Date) => {
+  const checkOverlappingRequests = useCallback(async (startDate: Date, endDate: Date) => {
     const { data: existingRequests, error } = await supabase
       .from('time_off_requests')
       .select('start_date, end_date')
@@ -66,67 +77,121 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
     if (existingRequests && existingRequests.length > 0) {
       throw new ValidationError('You already have a time off request during this period')
     }
+  }, [supabase, userId])
+
+  const calculateDays = (start: string, end: string): number => {
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    const diffTime = Math.abs(endDate.getTime() - startDate.getTime())
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1
   }
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (isSubmitting) return
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+
+    // Use flushSync to ensure immediate state updates
+    flushSync(() => {
+      setIsSubmitting(true)
+      setButtonText('Submitting...')
+      setError(null)
+    })
 
     try {
-      setIsSubmitting(true)
-      setError(null)
-      const formData = new FormData(event.currentTarget)
+      // Extract form data
+      const formData = new FormData(e.currentTarget)
+      const type = formData.get('type') as string
       const startDate = formData.get('start_date') as string
       const endDate = formData.get('end_date') as string
-      const type = formData.get('type') as string
       const notes = formData.get('notes') as string
 
+      // Validate required fields first
       if (!type) {
-        throw new ValidationError('Please select a type of time off')
+        throw new Error('Please select a type of time off')
       }
 
-      if (!notes?.trim()) {
-        throw new ValidationError('Please provide notes for your time off request')
+      if (!startDate || !endDate) {
+        throw new Error('Please select both start and end dates')
       }
 
-      const { start, end } = validateDates(startDate, endDate)
-      await checkOverlappingRequests(start, end)
+      // Validate date order
+      if (new Date(endDate) < new Date(startDate)) {
+        throw new Error('End date cannot be before start date')
+      }
 
-      const { error: insertError } = await supabase
+      // Check for overlapping requests
+      const { data: overlappingRequests, error: overlappingError } = await supabase
         .from('time_off_requests')
-        .insert({
-          user_id: userId,
-          start_date: format(start, 'yyyy-MM-dd'),
-          end_date: format(end, 'yyyy-MM-dd'),
-          type,
-          notes: notes.trim(),
-          status: 'pending'
-        })
+        .select('*')
+        .eq('user_id', userId)
+        .gte('start_date', startDate)
+        .lte('end_date', endDate)
 
-      if (insertError) {
-        throw new DatabaseError('Failed to submit time off request')
+      if (overlappingError) {
+        throw new Error('Failed to check for overlapping requests')
       }
 
+      if (overlappingRequests && overlappingRequests.length > 0) {
+        throw new Error('You already have a time off request for these dates')
+      }
+
+      // Check remaining vacation days if type is vacation
+      if (type === 'vacation') {
+        const { data: vacationData, error: vacationError } = await supabase
+          .from('vacation_days')
+          .select('remaining_days')
+          .eq('user_id', userId)
+          .single()
+
+        if (vacationError) {
+          throw new Error('Failed to check remaining vacation days')
+        }
+
+        const requestedDays = calculateDays(startDate, endDate)
+        if (vacationData.remaining_days < requestedDays) {
+          throw new Error('Insufficient vacation days remaining')
+        }
+      }
+
+      // Submit the request
+      const { error: submitError } = await supabase.from('time_off_requests').insert([
+        {
+          user_id: userId,
+          type,
+          start_date: startDate,
+          end_date: endDate,
+          notes,
+          status: 'pending'
+        }
+      ])
+
+      if (submitError) {
+        throw submitError
+      }
+
+      // Show success message
       toast({
         title: 'Success',
         description: 'Time off request submitted successfully',
         variant: 'default'
       })
-
+      
       router.refresh()
       onSuccess?.()
     } catch (error) {
-      if (error instanceof Error) {
-        setError(error.message)
-        toast({
-          title: 'Error',
-          description: 'Failed to submit time off request',
-          variant: 'destructive'
-        })
-      }
-      handleError(error, 'TimeOffRequestForm.handleSubmit')
+      console.error('Error submitting time off request:', error)
+      flushSync(() => {
+        setError(error instanceof Error ? error.message : 'An unexpected error occurred')
+      })
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to submit time off request',
+        variant: 'destructive'
+      })
     } finally {
-      setIsSubmitting(false)
+      flushSync(() => {
+        setIsSubmitting(false)
+        setButtonText('Submit Request')
+      })
     }
   }
 
@@ -139,7 +204,7 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
   }
 
   return (
-    <form onSubmit={handleSubmit} onReset={handleReset} className="space-y-4" role="form">
+    <form onSubmit={handleSubmit} onReset={handleReset} className="space-y-4" role="form" noValidate>
       {error && (
         <div role="alert" aria-live="polite" className="text-red-500">
           {error}
@@ -157,6 +222,7 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
           required
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
           aria-label="Start date"
+          disabled={isSubmitting}
         />
       </div>
 
@@ -171,6 +237,7 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
           required
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
           aria-label="End date"
+          disabled={isSubmitting}
         />
       </div>
 
@@ -184,6 +251,7 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
           required
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
           aria-label="Type of time off"
+          disabled={isSubmitting}
         >
           <option value="">Select type</option>
           <option value="vacation">Vacation</option>
@@ -204,6 +272,7 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
           placeholder="Please provide notes for your time off request"
           aria-label="Notes"
+          disabled={isSubmitting}
         />
       </div>
 
@@ -220,6 +289,7 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
         )}
         <button
           type="reset"
+          onClick={handleReset}
           disabled={isSubmitting}
           className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
@@ -228,36 +298,10 @@ export function TimeOffRequestForm({ userId, onSuccess, onCancel }: TimeOffReque
         <button
           type="submit"
           disabled={isSubmitting}
-          className="inline-flex justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
           aria-busy={isSubmitting}
+          className="inline-flex justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isSubmitting ? (
-            <>
-              <svg
-                className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                ></circle>
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                ></path>
-              </svg>
-              Submitting...
-            </>
-          ) : (
-            'Submit Request'
-          )}
+          {buttonText}
         </button>
       </div>
     </form>
