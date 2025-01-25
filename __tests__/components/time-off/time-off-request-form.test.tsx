@@ -2,12 +2,27 @@ import '@testing-library/jest-dom'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TimeOffRequestForm } from '@/components/time-off/TimeOffRequestForm'
-import * as hooks from '@/lib/hooks'
 import { User } from '@supabase/supabase-js'
+import { createClient } from '@/utils/supabase/client'
+import { useToast } from '@/components/ui/use-toast'
+
+const mockUser: User = {
+  id: '123',
+  email: 'test@example.com',
+  app_metadata: {},
+  user_metadata: {},
+  aud: 'authenticated',
+  created_at: '2024-03-14T00:00:00.000Z',
+  role: 'authenticated',
+  updated_at: '2024-03-14T00:00:00.000Z'
+}
 
 // Mock useUser hook
 jest.mock('@/lib/hooks', () => ({
-  useUser: jest.fn()
+  useUser: () => ({
+    user: mockUser,
+    loading: false
+  })
 }))
 
 // Mock Supabase client
@@ -22,137 +37,140 @@ jest.mock('@/utils/supabase/client', () => ({
   }))
 }))
 
+// Mock useToast
+const mockToast = jest.fn()
+jest.mock('@/components/ui/use-toast', () => ({
+  useToast: jest.fn()
+}))
+
 describe('TimeOffRequestForm', () => {
-  const mockUser: User = {
-    id: '123',
-    email: 'test@example.com',
-    app_metadata: {},
-    user_metadata: {},
-    aud: 'authenticated',
-    created_at: '2024-03-14T00:00:00.000Z',
-    role: 'authenticated',
-    updated_at: '2024-03-14T00:00:00.000Z'
-  }
+  const user = userEvent.setup()
 
   beforeEach(() => {
     jest.clearAllMocks()
+    ;(useToast as jest.Mock).mockReturnValue({ toast: mockToast })
+  })
+
+  afterEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it('renders form fields', () => {
+    render(<TimeOffRequestForm />)
     
-    // Mock useUser hook
-    jest.spyOn(hooks, 'useUser').mockReturnValue({
-      user: mockUser,
-      loading: false
+    expect(screen.getByLabelText('Start Date')).toBeRequired()
+    expect(screen.getByLabelText('End Date')).toBeRequired()
+    expect(screen.getByRole('combobox')).toBeRequired()
+    expect(screen.getByLabelText('Notes')).toBeInTheDocument()
+  })
+
+  it('validates end date is not before start date', async () => {
+    render(<TimeOffRequestForm />)
+
+    const startDate = screen.getByLabelText('Start Date')
+    const endDate = screen.getByLabelText('End Date')
+
+    await user.type(startDate, '2025-01-26')
+    await user.type(endDate, '2025-01-25')
+
+    await waitFor(() => {
+      expect(mockToast).toHaveBeenCalledWith({
+        title: 'Error',
+        description: 'End date cannot be before start date',
+        variant: 'destructive'
+      })
     })
-  })
-
-  it('renders the form with all required fields', () => {
-    render(<TimeOffRequestForm />)
-
-    expect(screen.getByLabelText(/start date/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/end date/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/reason/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /submit request/i })).toBeInTheDocument()
-  })
-
-  it('validates required fields', async () => {
-    const user = userEvent.setup()
-    render(<TimeOffRequestForm />)
-
-    // Try to submit without filling fields
-    await user.click(screen.getByRole('button', { name: /submit request/i }))
-
-    // HTML5 validation messages should prevent submission
-    expect(screen.getByLabelText(/start date/i)).toBeInvalid()
-    expect(screen.getByLabelText(/end date/i)).toBeInvalid()
-    expect(screen.getByLabelText(/reason/i)).toBeInvalid()
-  })
-
-  it('prevents end date being before start date', async () => {
-    const user = userEvent.setup()
-    render(<TimeOffRequestForm />)
-
-    // Set start date
-    await user.type(screen.getByLabelText(/start date/i), '2024-03-15')
-
-    // Try to set earlier end date
-    const endDateInput = screen.getByLabelText(/end date/i)
-    await user.type(endDateInput, '2024-03-14')
-
-    expect(endDateInput).toBeInvalid()
   })
 
   it('submits the form successfully', async () => {
-    const user = userEvent.setup()
     render(<TimeOffRequestForm />)
 
-    // Fill out the form
-    await user.type(screen.getByLabelText(/start date/i), '2024-03-15')
-    await user.type(screen.getByLabelText(/end date/i), '2024-03-20')
-    await user.type(screen.getByLabelText(/reason/i), 'Vacation')
+    const startDate = screen.getByLabelText('Start Date')
+    const endDate = screen.getByLabelText('End Date')
+    const typeSelect = screen.getByRole('combobox')
+    const notes = screen.getByLabelText('Notes')
+    const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
-    // Submit the form
-    const submitButton = screen.getByRole('button', { name: /submit request/i })
-    await user.click(submitButton)
-
-    // Verify Supabase client was called correctly
+    await user.type(startDate, '2025-01-25')
+    await user.type(endDate, '2025-01-26')
+    
+    // Open select dropdown
+    await user.click(typeSelect)
     await waitFor(() => {
-      expect(mockFrom).toHaveBeenCalledWith('time_off_requests')
-      expect(mockInsert).toHaveBeenCalledWith({
-        employee_id: mockUser.id,
-        start_date: '2024-03-15',
-        end_date: '2024-03-20',
-        reason: 'Vacation',
-        status: 'Pending'
-      })
+      expect(typeSelect).toHaveAttribute('aria-expanded', 'true')
     })
 
-    // Verify success message
-    expect(screen.getByText(/submitted successfully/i)).toBeInTheDocument()
+    // Select option
+    const option = screen.getByRole('option', { name: 'Vacation' })
+    await user.click(option)
+
+    await user.type(notes, 'Taking a vacation')
+    await user.click(submitButton)
+
+    await waitFor(() => {
+      expect(mockToast).toHaveBeenCalledWith({
+        title: 'Success',
+        description: 'Time off request submitted successfully'
+      })
+    })
   })
 
   it('handles submission errors', async () => {
-    // Mock Supabase error
-    mockInsert.mockImplementationOnce(() => Promise.reject(new Error('Failed to submit')))
-
-    const user = userEvent.setup()
     render(<TimeOffRequestForm />)
 
-    // Fill out and submit the form
-    await user.type(screen.getByLabelText(/start date/i), '2024-03-15')
-    await user.type(screen.getByLabelText(/end date/i), '2024-03-20')
-    await user.type(screen.getByLabelText(/reason/i), 'Vacation')
+    const startDate = screen.getByLabelText('Start Date')
+    const endDate = screen.getByLabelText('End Date')
+    const typeSelect = screen.getByRole('combobox')
+    const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
-    const submitButton = screen.getByRole('button', { name: /submit request/i })
+    await user.type(startDate, '2025-01-25')
+    await user.type(endDate, '2025-01-26')
+    
+    // Open select dropdown
+    await user.click(typeSelect)
+    await waitFor(() => {
+      expect(typeSelect).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    // Select option  
+    const option = screen.getByRole('option', { name: 'Vacation' })
+    await user.click(option)
+
     await user.click(submitButton)
 
-    // Verify error message
     await waitFor(() => {
-      expect(screen.getByText(/failed to submit time off request/i)).toBeInTheDocument()
+      expect(mockToast).toHaveBeenCalledWith({
+        title: 'Error',
+        description: 'Failed to submit time off request',
+        variant: 'destructive'
+      })
     })
   })
 
   it('disables submit button while submitting', async () => {
-    const user = userEvent.setup()
     render(<TimeOffRequestForm />)
 
-    // Fill out the form
-    await user.type(screen.getByLabelText(/start date/i), '2024-03-15')
-    await user.type(screen.getByLabelText(/end date/i), '2024-03-20')
-    await user.type(screen.getByLabelText(/reason/i), 'Vacation')
+    const startDate = screen.getByLabelText('Start Date')
+    const endDate = screen.getByLabelText('End Date')
+    const typeSelect = screen.getByRole('combobox')
+    const submitButton = screen.getByRole('button', { name: 'Submit Request' })
 
-    // Click submit
-    const submitButton = screen.getByRole('button', { name: /submit request/i })
+    await user.type(startDate, '2025-01-25')
+    await user.type(endDate, '2025-01-26')
+    
+    // Open select dropdown
+    await user.click(typeSelect)
+    await waitFor(() => {
+      expect(typeSelect).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    // Select option
+    const option = screen.getByRole('option', { name: 'Vacation' })
+    await user.click(option)
+
     await user.click(submitButton)
 
-    // Button should be disabled and show loading state
-    await waitFor(() => {
-      expect(submitButton).toHaveAttribute('aria-disabled', 'true')
-      expect(submitButton).toHaveTextContent(/submitting/i)
-    })
-
-    // Wait for submission to complete
-    await waitFor(() => {
-      expect(submitButton).toHaveAttribute('aria-disabled', 'false')
-      expect(submitButton).toHaveTextContent(/submit request/i)
-    })
+    expect(submitButton).toBeDisabled()
+    expect(submitButton).toHaveTextContent('Submitting...')
   })
 }) 

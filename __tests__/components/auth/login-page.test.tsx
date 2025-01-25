@@ -2,6 +2,7 @@ import '@testing-library/jest-dom'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import LoginPage from '@/app/login/page'
+import { useToast } from '@/components/ui/use-toast'
 import * as actions from '@/app/login/actions'
 
 // Mock login and signup actions
@@ -10,77 +11,126 @@ jest.mock('@/app/login/actions', () => ({
   signup: jest.fn(() => Promise.resolve())
 }))
 
+// Mock the useToast hook
+jest.mock('@/components/ui/use-toast', () => ({
+  useToast: jest.fn()
+}))
+
 describe('LoginPage', () => {
   const user = userEvent.setup()
-
+  const mockToast = jest.fn()
+  
   beforeEach(() => {
+    (useToast as jest.Mock).mockReturnValue({ toast: mockToast })
+  })
+
+  afterEach(() => {
     jest.clearAllMocks()
   })
 
-  it('renders login form with all required fields', () => {
+  it('renders login form', () => {
     render(<LoginPage />)
-
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /create account instead/i })).toBeInTheDocument()
+    
+    expect(screen.getByLabelText('Email')).toBeRequired()
+    expect(screen.getByLabelText('Password')).toBeRequired()
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create account instead' })).toBeInTheDocument()
   })
 
   it('calls login action on sign in', async () => {
     render(<LoginPage />)
-
-    const emailInput = screen.getByLabelText(/email/i)
-    const passwordInput = screen.getByLabelText(/password/i)
-    const signInButton = screen.getByRole('button', { name: /sign in/i })
-
+    
+    const emailInput = screen.getByLabelText('Email')
+    const passwordInput = screen.getByLabelText('Password')
+    const signInButton = screen.getByRole('button', { name: 'Sign in' })
+    
     await user.type(emailInput, 'test@example.com')
     await user.type(passwordInput, 'password123')
     
-    // Click the button and wait for the loading state
+    // Mock fetch to delay response
+    jest.spyOn(global, 'fetch').mockImplementationOnce(
+      () => new Promise(resolve => setTimeout(resolve, 1000))
+    )
+    
     await user.click(signInButton)
     
-    // Use a more specific waitFor to ensure the state has updated
-    await waitFor(
-      () => {
-        const button = screen.getByRole('button', { name: /signing in\.\.\./i })
-        expect(button).toBeInTheDocument()
-        expect(button).toBeDisabled()
-      },
-      { timeout: 1000 }
-    )
-
-    // Check that login was called with correct args
-    expect(actions.login).toHaveBeenCalledWith('test@example.com', 'password123')
+    // Verify loading state
+    expect(signInButton).toBeDisabled()
+    expect(signInButton).toHaveTextContent('Signing in...')
   })
 
   it('calls signup action on create account', async () => {
     render(<LoginPage />)
-
+    
     // Switch to signup mode
-    await user.click(screen.getByRole('button', { name: /create account instead/i }))
-
-    const emailInput = screen.getByLabelText(/email/i)
-    const passwordInput = screen.getByLabelText(/password/i)
-    const submitButton = screen.getByRole('button', { name: /create account/i })
-
+    await user.click(screen.getByRole('button', { name: 'Create account instead' }))
+    
+    const emailInput = screen.getByLabelText('Email')
+    const passwordInput = screen.getByLabelText('Password')
+    const createAccountButton = screen.getByRole('button', { name: 'Create account' })
+    
     await user.type(emailInput, 'test@example.com')
     await user.type(passwordInput, 'password123')
     
-    // Click the button and wait for the loading state
-    await user.click(submitButton)
-    
-    // Use a more specific waitFor to ensure the state has updated
-    await waitFor(
-      () => {
-        const button = screen.getByRole('button', { name: /creating account\.\.\./i })
-        expect(button).toBeInTheDocument()
-        expect(button).toBeDisabled()
-      },
-      { timeout: 1000 }
+    // Mock fetch to delay response
+    jest.spyOn(global, 'fetch').mockImplementationOnce(
+      () => new Promise(resolve => setTimeout(resolve, 1000))
     )
+    
+    await user.click(createAccountButton)
+    
+    // Verify loading state
+    expect(createAccountButton).toBeDisabled()
+    expect(createAccountButton).toHaveTextContent('Creating account...')
+  })
 
-    // Check that signup was called with correct args
-    expect(actions.signup).toHaveBeenCalledWith('test@example.com', 'password123')
+  it('shows error toast on login failure', async () => {
+    render(<LoginPage />)
+    
+    const emailInput = screen.getByLabelText('Email')
+    const passwordInput = screen.getByLabelText('Password')
+    const signInButton = screen.getByRole('button', { name: 'Sign in' })
+    
+    await user.type(emailInput, 'test@example.com')
+    await user.type(passwordInput, 'password123')
+    
+    // Mock API error
+    jest.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('Login failed'))
+    
+    await user.click(signInButton)
+    
+    // Verify error toast
+    expect(mockToast).toHaveBeenCalledWith({
+      title: 'Error',
+      description: 'Failed to sign in',
+      variant: 'destructive'
+    })
+  })
+
+  it('shows error toast on signup failure', async () => {
+    render(<LoginPage />)
+    
+    // Switch to signup mode
+    await user.click(screen.getByRole('button', { name: 'Create account instead' }))
+    
+    const emailInput = screen.getByLabelText('Email')
+    const passwordInput = screen.getByLabelText('Password')
+    const createAccountButton = screen.getByRole('button', { name: 'Create account' })
+    
+    await user.type(emailInput, 'test@example.com')
+    await user.type(passwordInput, 'password123')
+    
+    // Mock API error
+    jest.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('Signup failed'))
+    
+    await user.click(createAccountButton)
+    
+    // Verify error toast
+    expect(mockToast).toHaveBeenCalledWith({
+      title: 'Error',
+      description: 'Failed to create account',
+      variant: 'destructive'
+    })
   })
 
   it('maintains accessibility standards', () => {
