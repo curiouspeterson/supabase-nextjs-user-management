@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/ui/use-toast'
 import { signup, login } from './actions'
+import { createClient } from '@/utils/supabase/client'
 
 export default function LoginPage({
   searchParams
@@ -17,6 +18,17 @@ export default function LoginPage({
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
+  const supabase = createClient()
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        router.replace('/shifts')
+      }
+    }
+    checkAuth()
+  }, [router, supabase])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -27,7 +39,6 @@ export default function LoginPage({
       if (isSignUp) {
         if (password.length < 8) {
           setError('Password must be at least 8 characters')
-          setIsLoading(false)
           return
         }
         // Handle sign up
@@ -39,15 +50,34 @@ export default function LoginPage({
         })
       } else {
         // Handle sign in
-        await login(email, password, searchParams.redirect_url)
-        // No need for toast on successful login as we'll redirect
+        const { error: loginError, success } = await login(email, password, searchParams.redirect_url)
+        if (loginError) {
+          setError(loginError)
+          toast({
+            title: 'Error',
+            description: loginError,
+            variant: 'destructive'
+          })
+          return
+        }
+
+        if (success) {
+          // Successful login, navigate to shifts page
+          router.replace('/shifts')
+          toast({
+            title: 'Success',
+            description: 'Logged in successfully',
+            variant: 'default'
+          })
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Auth error:', error)
-      setError(error instanceof Error ? error.message : 'Authentication failed')
+      const message = error instanceof Error ? error.message : 'Authentication failed'
+      setError(message)
       toast({
         title: 'Error',
-        description: error instanceof Error ? error.message : 'Authentication failed',
+        description: message,
         variant: 'destructive'
       })
     } finally {

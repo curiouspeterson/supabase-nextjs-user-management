@@ -11,7 +11,11 @@ alter table public.employee_patterns enable row level security;
 alter table public.daily_coverage enable row level security;
 
 -- Drop ALL existing policies
-drop policy if exists "employee_base_access" on public.employees;
+drop policy if exists "employees_access" on public.employees;
+drop policy if exists "employee_self_select" on public.employees;
+drop policy if exists "employee_self_insert" on public.employees;
+drop policy if exists "employee_self_update" on public.employees;
+drop policy if exists "employee_manager_access" on public.employees;
 drop policy if exists "profile_access" on public.profiles;
 drop policy if exists "shift_types_access" on public.shift_types;
 drop policy if exists "shifts_access" on public.shifts;
@@ -22,56 +26,18 @@ drop policy if exists "pattern_access" on public.shift_patterns;
 drop policy if exists "employee_pattern_access" on public.employee_patterns;
 drop policy if exists "coverage_access" on public.daily_coverage;
 
--- Create role check function
-create or replace function auth.check_role(required_roles text[])
-returns boolean
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  -- During signup/initial auth, allow self-access
-  if auth.uid() = current_setting('request.jwt.claims')::json->>'sub' then
-    return true;
-  end if;
-  
-  -- Check role from JWT
-  return (
-    select (current_setting('request.jwt.claims')::json->>'role') = any(required_roles)
-  );
-end;
-$$;
-
--- Employee policies split by operation
-create policy "employees_self_read"
+-- Simple employee access policy that avoids recursion
+create policy "employees_base_access"
 on public.employees
-for select
+for all 
 to authenticated
-using (auth.uid() = id);
-
-create policy "employees_admin_read"
-on public.employees
-for select
-to authenticated
-using (auth.check_role(array['Manager', 'Admin', 'Supervisor']));
-
-create policy "employees_self_insert"
-on public.employees
-for insert
-to authenticated
-with check (auth.uid() = id);
-
-create policy "employees_self_update"
-on public.employees
-for update
-to authenticated
-using (auth.uid() = id);
-
-create policy "employees_admin_write"
-on public.employees
-for all
-to authenticated
-using (auth.check_role(array['Manager', 'Admin']));
+using (
+  -- Users can always access their own record
+  auth.uid() = id
+  OR 
+  -- Managers can access all records (checked via JWT claim)
+  coalesce(current_setting('request.jwt.claims', true)::json->>'role', '') = 'Manager'
+);
 
 -- Profile policies
 create policy "profiles_self_access"
@@ -89,9 +55,9 @@ using (true);
 
 create policy "shift_types_write"
 on public.shift_types
-for insert
+for all
 to authenticated
-with check (auth.check_role(array['Manager', 'Admin']));
+using (coalesce(current_setting('request.jwt.claims', true)::json->>'role', '') = 'Manager');
 
 create policy "shifts_read"
 on public.shifts
@@ -103,7 +69,7 @@ create policy "shifts_write"
 on public.shifts
 for all
 to authenticated
-using (auth.check_role(array['Manager', 'Admin']));
+using (coalesce(current_setting('request.jwt.claims', true)::json->>'role', '') = 'Manager');
 
 -- Schedule policies
 create policy "schedules_self_read"
@@ -116,7 +82,7 @@ create policy "schedules_admin_access"
 on public.schedules
 for all
 to authenticated
-using (auth.check_role(array['Manager', 'Admin']));
+using (coalesce(current_setting('request.jwt.claims', true)::json->>'role', '') = 'Manager');
 
 -- Time off request policies
 create policy "time_off_self_read"
@@ -129,7 +95,7 @@ create policy "time_off_admin_access"
 on public.time_off_requests
 for all
 to authenticated
-using (auth.check_role(array['Manager', 'Admin']));
+using (coalesce(current_setting('request.jwt.claims', true)::json->>'role', '') = 'Manager');
 
 -- Staffing requirements
 create policy "staffing_read"
@@ -142,7 +108,7 @@ create policy "staffing_write"
 on public.staffing_requirements
 for all
 to authenticated
-using (auth.check_role(array['Manager', 'Admin']));
+using (coalesce(current_setting('request.jwt.claims', true)::json->>'role', '') = 'Manager');
 
 -- Pattern management
 create policy "patterns_read"
@@ -155,7 +121,7 @@ create policy "patterns_write"
 on public.shift_patterns
 for all
 to authenticated
-using (auth.check_role(array['Manager', 'Admin']));
+using (coalesce(current_setting('request.jwt.claims', true)::json->>'role', '') = 'Manager');
 
 create policy "employee_patterns_self_read"
 on public.employee_patterns
@@ -167,7 +133,7 @@ create policy "employee_patterns_admin_access"
 on public.employee_patterns
 for all
 to authenticated
-using (auth.check_role(array['Manager', 'Admin']));
+using (coalesce(current_setting('request.jwt.claims', true)::json->>'role', '') = 'Manager');
 
 -- Coverage management
 create policy "coverage_read"
@@ -180,4 +146,4 @@ create policy "coverage_write"
 on public.daily_coverage
 for all
 to authenticated
-using (auth.check_role(array['Manager', 'Admin'])); 
+using (coalesce(current_setting('request.jwt.claims', true)::json->>'role', '') = 'Manager'); 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/utils/supabase/client'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { PlusCircle, Loader2 } from 'lucide-react'
 import {
@@ -14,6 +15,8 @@ import {
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ShiftTemplateDialog } from '@/components/shifts/shift-template-dialog'
+import { signOut } from '../login/actions'
+import { useToast } from '@/components/ui/use-toast'
 
 interface Shift {
   id: string
@@ -38,6 +41,57 @@ export default function ShiftsPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selectedShift, setSelectedShift] = useState<Shift | undefined>()
   const supabase = createClient()
+  const router = useRouter()
+  const { toast } = useToast()
+
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+          router.replace('/login')
+          return
+        }
+        setLoading(false)
+      } catch (error) {
+        console.error('Session check error:', error)
+        router.replace('/login')
+      }
+    }
+
+    checkSession()
+  }, [router, supabase.auth])
+
+  const handleSignOut = async () => {
+    try {
+      const { error } = await signOut()
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error,
+          variant: 'destructive'
+        })
+        return
+      }
+
+      // Clear client-side state
+      router.refresh()
+      router.replace('/login')
+      
+      toast({
+        title: 'Success',
+        description: 'Signed out successfully',
+        variant: 'default'
+      })
+    } catch (error) {
+      console.error('Sign out error:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to sign out',
+        variant: 'destructive'
+      })
+    }
+  }
 
   const fetchShiftTypes = useCallback(async () => {
     try {
@@ -109,84 +163,97 @@ export default function ShiftsPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold">Shift Templates</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage your shift templates and schedules
-          </p>
+    <div className="min-h-screen p-4">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-2xl font-bold">Shifts</h1>
+          <button
+            onClick={handleSignOut}
+            className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+          >
+            Sign Out
+          </button>
         </div>
-        <Button
-          onClick={() => {
-            setSelectedShift(undefined)
-            setDialogOpen(true)
-          }}
-          disabled={loading}
-        >
-          <PlusCircle className="mr-2 h-4 w-4" />
-          New Shift Template
-        </Button>
-      </div>
-
-      {shiftTypes.map((shiftType) => (
-        <div key={shiftType.id} className="space-y-4">
-          <h2 className="text-xl font-semibold">{shiftType.name}</h2>
-          {shiftType.description && (
-            <p className="text-sm text-muted-foreground">{shiftType.description}</p>
-          )}
-          
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {shiftType.shifts.map((shift) => (
-              <Card key={shift.id}>
-                <CardHeader>
-                  <CardTitle>
-                    {shift.duration_category}
-                  </CardTitle>
-                  <CardDescription>
-                    {formatTime(shift.start_time)} - {formatTime(shift.end_time)}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">
-                      {shift.duration_hours} hours
-                    </Badge>
-                  </div>
-                </CardContent>
-                <CardFooter className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedShift(shift)
-                      setDialogOpen(true)
-                    }}
-                    disabled={loading}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => handleDelete(shift.id)}
-                    disabled={loading}
-                  >
-                    Delete
-                  </Button>
-                </CardFooter>
-              </Card>
-            ))}
+        <div className="p-6 max-w-7xl mx-auto space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold">Shift Templates</h1>
+              <p className="text-sm text-muted-foreground">
+                Manage your shift templates and schedules
+              </p>
+            </div>
+            <Button
+              onClick={() => {
+                setSelectedShift(undefined)
+                setDialogOpen(true)
+              }}
+              disabled={loading}
+            >
+              <PlusCircle className="mr-2 h-4 w-4" />
+              New Shift Template
+            </Button>
           </div>
-        </div>
-      ))}
 
-      <ShiftTemplateDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        shift={selectedShift}
-        onSuccess={fetchShiftTypes}
-      />
+          {shiftTypes.map((shiftType) => (
+            <div key={shiftType.id} className="space-y-4">
+              <h2 className="text-xl font-semibold">{shiftType.name}</h2>
+              {shiftType.description && (
+                <p className="text-sm text-muted-foreground">{shiftType.description}</p>
+              )}
+              
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {shiftType.shifts.map((shift) => (
+                  <Card key={shift.id}>
+                    <CardHeader>
+                      <CardTitle>
+                        {shift.duration_category}
+                      </CardTitle>
+                      <CardDescription>
+                        {formatTime(shift.start_time)} - {formatTime(shift.end_time)}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">
+                          {shift.duration_hours} hours
+                        </Badge>
+                      </div>
+                    </CardContent>
+                    <CardFooter className="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedShift(shift)
+                          setDialogOpen(true)
+                        }}
+                        disabled={loading}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleDelete(shift.id)}
+                        disabled={loading}
+                      >
+                        Delete
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <ShiftTemplateDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            shift={selectedShift}
+            onSuccess={fetchShiftTypes}
+          />
+        </div>
+      </div>
     </div>
   )
 } 

@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
-export function createClient() {
+export const createClient = () => {
   const cookieStore = cookies()
 
   return createServerClient(
@@ -9,20 +9,24 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return cookieStore.getAll()
+        get(name: string) {
+          return cookieStore.get(name)?.value
         },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set({
-              name,
-              value,
-              ...options,
-              path: options?.path ?? '/'
-            })
-          })
-        }
-      }
+        set(name: string, value: string, options: any) {
+          try {
+            cookieStore.set(name, value, options)
+          } catch (error) {
+            // Handle cookie errors in development
+          }
+        },
+        remove(name: string, options: any) {
+          try {
+            cookieStore.set(name, '', { ...options, maxAge: 0 })
+          } catch (error) {
+            // Handle cookie errors in development
+          }
+        },
+      },
     }
   )
 }
@@ -36,17 +40,29 @@ export function createServiceClient() {
     {
       cookies: {
         getAll() {
-          return cookieStore.getAll()
+          try {
+            return cookieStore.getAll().map(cookie => ({
+              name: cookie.name,
+              value: cookie.value
+            }))
+          } catch (e) {
+            console.error('Error parsing cookies:', e)
+            return []
+          }
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set({
-              name,
-              value,
-              ...options,
-              path: options?.path ?? '/'
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set({
+                name,
+                value,
+                ...options,
+                path: options?.path ?? '/'
+              })
             })
-          })
+          } catch (e) {
+            console.error('Error setting cookies:', e)
+          }
         }
       }
     }

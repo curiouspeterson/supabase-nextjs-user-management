@@ -9,52 +9,55 @@ export async function login(
   email: string,
   password: string,
   redirectUrl?: string
-): Promise<void> {
+): Promise<{ error: string | null; success: boolean }> {
   const supabase = createClient()
 
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
-    if (error) {
-      throw error
+    if (signInError) {
+      return { error: signInError.message, success: false }
     }
 
-    if (!data?.session) {
-      throw new Error('No session data returned after sign in')
-    }
-
-    // Verify session is active
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-    if (sessionError || !session) {
-      throw new Error('Failed to verify session')
+    if (!signInData.session) {
+      return { error: 'No session established', success: false }
     }
 
     // Get user role
     const { data: employee, error: employeeError } = await supabase
       .from('employees')
       .select('employee_role')
-      .eq('id', session.user.id)
+      .eq('id', signInData.session.user.id)
       .single()
 
     if (employeeError) {
       console.error('Error fetching employee role:', employeeError)
+      return { error: 'Error fetching user role', success: false }
     }
 
-    // Update user metadata with role
+    // Update user metadata with role if found
     if (employee?.employee_role) {
-      await supabase.auth.updateUser({
+      const { error: updateError } = await supabase.auth.updateUser({
         data: { role: employee.employee_role }
       })
+
+      if (updateError) {
+        console.error('Error updating user role:', updateError)
+        return { error: 'Error updating user role', success: false }
+      }
     }
 
     revalidatePath('/', 'layout')
-    redirect(redirectUrl || '/shifts')
+    return { error: null, success: true }
   } catch (error) {
     console.error('Login error:', error)
-    throw error
+    return { 
+      error: error instanceof Error ? error.message : 'Authentication failed',
+      success: false 
+    }
   }
 }
 
@@ -125,5 +128,27 @@ export async function signup(
   } catch (error) {
     console.error('Signup error:', error)
     throw error
+  }
+}
+
+export async function signOut(): Promise<{ error: string | null }> {
+  const supabase = createClient()
+  
+  try {
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      return { error: error.message }
+    }
+
+    // Clear all cached data
+    revalidatePath('/', 'layout')
+    revalidatePath('/shifts')
+    
+    return { error: null }
+  } catch (error) {
+    console.error('Sign out error:', error)
+    return { 
+      error: error instanceof Error ? error.message : 'Sign out failed'
+    }
   }
 }
