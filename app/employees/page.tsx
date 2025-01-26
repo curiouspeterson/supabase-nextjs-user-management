@@ -58,7 +58,7 @@ export default function EmployeesPage() {
           user_role,
           weekly_hours_scheduled,
           default_shift_type_id,
-          profiles:profiles!inner (
+          profiles:profiles!left (
             full_name,
             avatar_url,
             updated_at
@@ -93,6 +93,7 @@ export default function EmployeesPage() {
       setEmployees(employeesWithEmail)
     } catch (err) {
       setError('An error occurred while loading the page')
+      console.error('Error in fetchData:', err)
     } finally {
       setLoading(false)
     }

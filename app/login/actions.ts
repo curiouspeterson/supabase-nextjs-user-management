@@ -64,11 +64,12 @@ export async function login(
 export async function signup(
   email: string,
   password: string
-): Promise<void> {
+): Promise<{ error: string | null; success: boolean }> {
   const supabase = createClient()
   const adminClient = createAdminClient()
 
   try {
+    // Step 1: Create auth user
     const { data: authData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
@@ -77,20 +78,22 @@ export async function signup(
         data: {
           username: email.split('@')[0],
           full_name: email.split('@')[0],
-          role: 'Employee'
+          user_role: 'Employee'
         }
       }
     })
 
     if (signUpError) {
-      throw signUpError
+      console.error('Signup error:', signUpError)
+      return { error: signUpError.message, success: false }
     }
 
     if (!authData.user) {
-      throw new Error('No user data returned after signup')
+      console.error('No user data returned after signup')
+      return { error: 'Failed to create user account', success: false }
     }
 
-    // Create profile record
+    // Step 2: Create profile record
     const { error: profileError } = await adminClient
       .from('profiles')
       .upsert([{
@@ -98,15 +101,18 @@ export async function signup(
         username: email.split('@')[0],
         full_name: email.split('@')[0],
         updated_at: new Date().toISOString()
-      }])
+      }], { 
+        onConflict: 'id'
+      })
 
     if (profileError) {
       console.error('Profile creation error:', profileError)
+      // Cleanup: Delete auth user if profile creation fails
       await adminClient.auth.admin.deleteUser(authData.user.id)
-      throw profileError
+      return { error: 'Failed to create user profile', success: false }
     }
 
-    // Create employee record
+    // Step 3: Create employee record
     const { error: employeeError } = await adminClient
       .from('employees')
       .upsert([{
@@ -115,19 +121,25 @@ export async function signup(
         user_role: 'Employee',
         weekly_hours_scheduled: 40,
         updated_at: new Date().toISOString()
-      }])
+      }], {
+        onConflict: 'id'
+      })
 
     if (employeeError) {
       console.error('Employee creation error:', employeeError)
+      // Cleanup: Delete auth user and profile if employee creation fails
       await adminClient.auth.admin.deleteUser(authData.user.id)
-      throw employeeError
+      return { error: 'Failed to create employee record', success: false }
     }
 
     revalidatePath('/', 'layout')
-    redirect('/shifts')
+    return { error: null, success: true }
   } catch (error) {
-    console.error('Signup error:', error)
-    throw error
+    console.error('Signup process error:', error)
+    return { 
+      error: error instanceof Error ? error.message : 'Failed to complete signup process',
+      success: false 
+    }
   }
 }
 

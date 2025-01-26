@@ -67,9 +67,9 @@ export function Navigation({ className }: NavigationProps) {
         return
       }
 
-      // First check user metadata for role
-      if (user.user_metadata?.role) {
-        setUserRole(user.user_metadata.role)
+      // First check user metadata for user_role
+      if (user.user_metadata?.user_role) {
+        setUserRole(user.user_metadata.user_role)
         setIsLoading(false)
         return
       }

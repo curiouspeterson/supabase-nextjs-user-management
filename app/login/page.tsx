@@ -39,15 +39,28 @@ export default function LoginPage({
       if (isSignUp) {
         if (password.length < 8) {
           setError('Password must be at least 8 characters')
+          setIsLoading(false)
           return
         }
         // Handle sign up
-        await signup(email, password)
-        toast({
-          title: 'Success',
-          description: 'Check your email to confirm your account',
-          variant: 'default'
-        })
+        const { error: signupError, success } = await signup(email, password)
+        if (signupError) {
+          setError(signupError)
+          toast({
+            title: 'Error',
+            description: signupError,
+            variant: 'destructive'
+          })
+          return
+        }
+
+        if (success) {
+          toast({
+            title: 'Success',
+            description: 'Check your email to confirm your account',
+            variant: 'default'
+          })
+        }
       } else {
         // Handle sign in
         const { error: loginError, success } = await login(email, password, searchParams.redirect_url)

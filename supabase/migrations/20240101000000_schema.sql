@@ -13,6 +13,19 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
+-- Fix auth.users string columns to prevent NULL values
+ALTER TABLE auth.users 
+    ALTER COLUMN confirmation_token SET DEFAULT '',
+    ALTER COLUMN email_change SET DEFAULT '',
+    ALTER COLUMN recovery_token SET DEFAULT '',
+    ALTER COLUMN email_change_token_new SET DEFAULT '';
+
+UPDATE auth.users SET 
+    confirmation_token = COALESCE(confirmation_token, ''),
+    email_change = COALESCE(email_change, ''),
+    recovery_token = COALESCE(recovery_token, ''),
+    email_change_token_new = COALESCE(email_change_token_new, '');
+
 -- Create base tables
 CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "id" uuid NOT NULL,
