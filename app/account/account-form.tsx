@@ -5,7 +5,7 @@ import { User } from '@supabase/supabase-js'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/ui/use-toast'
-import Avatar from './avatar'
+import { Avatar } from '@/components/avatar'
 
 interface Profile {
   id: string
@@ -182,7 +182,6 @@ export default function AccountForm({ user }: { user: User | null }) {
               <>
                 <div className="flex justify-center py-4">
                   <Avatar
-                    uid={user?.id ?? null}
                     url={avatarUrl}
                     size={150}
                     onUpload={handleAvatarUpload}

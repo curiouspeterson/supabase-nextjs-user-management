@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, FormEvent } from 'react'
+import { useState, FormEvent, useRef } from 'react'
+import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,6 +13,11 @@ import { useErrorHandler } from '@/lib/hooks/use-error-handler'
 import { ValidationError, DatabaseError } from '@/lib/errors'
 import { useToast } from '@/components/ui/use-toast'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { cn } from '@/lib/utils'
+
+interface TimeOffRequestFormProps {
+  userId?: string
+}
 
 interface TimeOffRequest {
   start_date: string
@@ -29,7 +35,7 @@ interface FormErrors {
   general?: string
 }
 
-export default function TimeOffRequestForm() {
+export default function TimeOffRequestForm({ userId }: TimeOffRequestFormProps) {
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errors, setErrors] = useState<FormErrors>({})
@@ -41,6 +47,7 @@ export default function TimeOffRequestForm() {
   const { user } = useUser()
   const { handleError } = useErrorHandler()
   const supabase = createClient()
+  const formRef = useRef<HTMLFormElement>(null)
 
   const validateRequest = (request: Partial<TimeOffRequest>): FormErrors => {
     const errors: FormErrors = {}
@@ -84,7 +91,7 @@ export default function TimeOffRequestForm() {
     const { data: vacationData, error } = await supabase
       .from('vacation_days')
       .select('total_days, used_days')
-      .eq('user_id', user?.id)
+      .eq('user_id', userId || user?.id)
       .single()
 
     if (error) {
@@ -97,14 +104,15 @@ export default function TimeOffRequestForm() {
   }
 
   const checkOverlappingRequests = async (start_date: string, end_date: string) => {
-    if (!user?.id) {
+    const currentUserId = userId || user?.id
+    if (!currentUserId) {
       throw new ValidationError('User not found')
     }
 
     const { data: existingRequests, error } = await supabase
       .from('time_off_requests')
       .select('start_date, end_date')
-      .eq('user_id', user.id)
+      .eq('user_id', currentUserId)
       .or(`start_date.gte.${start_date},end_date.lte.${end_date}`)
 
     if (error) {
@@ -118,6 +126,8 @@ export default function TimeOffRequestForm() {
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+
+    // Set submitting state immediately
     setIsSubmitting(true)
     setErrors({})
 
@@ -125,14 +135,15 @@ export default function TimeOffRequestForm() {
       // Validate form data
       const validationErrors = validateRequest(formData)
       if (Object.keys(validationErrors).length > 0) {
-        setErrors(validationErrors)
         const firstError = Object.values(validationErrors)[0]
+        setErrors(validationErrors)
+        setIsSubmitting(false)
         toast({
           title: 'Error',
           description: firstError,
           variant: 'destructive'
         })
-        throw new ValidationError(firstError || 'Validation failed')
+        return
       }
 
       // Check vacation days if applicable
@@ -151,7 +162,7 @@ export default function TimeOffRequestForm() {
         .insert([
           {
             ...formData,
-            user_id: user?.id,
+            user_id: userId || user?.id,
             status: 'pending'
           }
         ])
@@ -168,6 +179,7 @@ export default function TimeOffRequestForm() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to submit time off request'
       setErrors(prev => ({ ...prev, general: message }))
+      setIsSubmitting(false)
       toast({
         title: 'Error',
         description: message,
@@ -175,6 +187,7 @@ export default function TimeOffRequestForm() {
       })
       handleError(err, 'TimeOffRequestForm.handleSubmit')
     } finally {
+      // Always reset submitting state
       setIsSubmitting(false)
     }
   }
@@ -186,14 +199,13 @@ export default function TimeOffRequestForm() {
     })
     setErrors({})
     setIsSelectOpen(false)
-    const form = document.querySelector('form') as HTMLFormElement
-    if (form) {
-      form.reset()
+    if (formRef.current) {
+      formRef.current.reset()
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} onReset={handleReset} className="space-y-4" role="form">
+    <form ref={formRef} onSubmit={handleSubmit} onReset={handleReset} className="space-y-4" role="form">
       {Object.entries(errors).map(([key, message]) => (
         message && (
           <Alert key={key} variant="destructive" role="alert" aria-live="polite">
@@ -301,14 +313,20 @@ export default function TimeOffRequestForm() {
         />
       </div>
       <div className="flex justify-end space-x-3">
-        <Button type="reset">
+        <Button type="reset" disabled={isSubmitting}>
           Reset
         </Button>
         <Button 
           type="submit" 
           disabled={isSubmitting}
           aria-busy={isSubmitting}
-          className="inline-flex justify-center"
+          aria-disabled={isSubmitting}
+          data-state={isSubmitting ? 'submitting' : 'idle'}
+          className={cn(
+            "inline-flex justify-center",
+            isSubmitting && "pointer-events-none opacity-50"
+          )}
+          variant="default"
         >
           {isSubmitting ? 'Submitting...' : 'Submit Request'}
         </Button>

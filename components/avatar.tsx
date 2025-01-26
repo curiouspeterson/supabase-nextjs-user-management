@@ -5,7 +5,7 @@ import { useToast } from '@/components/ui/use-toast'
 import Image from 'next/image'
 
 export interface AvatarProps {
-  url?: string
+  url?: string | null
   size?: number
   onUpload?: (url: string) => Promise<void>
 }
@@ -40,13 +40,16 @@ export function Avatar({ url, size = 150, onUpload }: AvatarProps) {
       }
 
       const file = event.target.files[0]
+      
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        throw new Error('Please upload an image file')
+      }
+
+      // Validate file size (5MB limit)
       const fileSize = file.size / 1024 / 1024 // size in MB
       if (fileSize > 5) {
         throw new Error('File size must be less than 5MB')
-      }
-
-      if (!file.type.startsWith('image/')) {
-        throw new Error('File must be an image')
       }
 
       setUploading(true)
@@ -69,9 +72,10 @@ export function Avatar({ url, size = 150, onUpload }: AvatarProps) {
     }
   }
 
+  // Cleanup object URL on unmount
   useEffect(() => {
     return () => {
-      if (avatarUrl) {
+      if (avatarUrl && avatarUrl.startsWith('blob:')) {
         URL.revokeObjectURL(avatarUrl)
       }
     }
