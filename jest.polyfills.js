@@ -36,9 +36,64 @@ class MockFile extends MockBlob {
 }
 
 // Mock Headers
-class MockHeaders extends Map {
+class MockHeaders {
+  constructor(init) {
+    this._headers = new Map()
+    if (init) {
+      if (typeof init === 'object') {
+        Object.entries(init).forEach(([key, value]) => {
+          this.append(key, value)
+        })
+      }
+    }
+  }
+
   append(key, value) {
-    this.set(key, value)
+    const normalizedKey = key.toLowerCase()
+    const current = this._headers.get(normalizedKey)
+    if (current) {
+      this._headers.set(normalizedKey, `${current}, ${value}`)
+    } else {
+      this._headers.set(normalizedKey, value)
+    }
+  }
+
+  delete(key) {
+    this._headers.delete(key.toLowerCase())
+  }
+
+  get(key) {
+    return this._headers.get(key.toLowerCase()) || null
+  }
+
+  has(key) {
+    return this._headers.has(key.toLowerCase())
+  }
+
+  set(key, value) {
+    this._headers.set(key.toLowerCase(), value)
+  }
+
+  forEach(callback, thisArg) {
+    this._headers.forEach((value, key) => {
+      callback.call(thisArg, value, key, this)
+    })
+  }
+
+  *entries() {
+    yield* this._headers.entries()
+  }
+
+  *keys() {
+    yield* this._headers.keys()
+  }
+
+  *values() {
+    yield* this._headers.values()
+  }
+
+  [Symbol.iterator]() {
+    return this.entries()
   }
 }
 
@@ -87,27 +142,21 @@ class MockResponse {
     this.status = init.status || 200
     this.statusText = init.statusText || ''
     this.headers = new MockHeaders(init.headers)
-    this._bodyInit = body
+    this.ok = this.status >= 200 && this.status < 300
+    this.type = 'basic'
+    this.url = ''
   }
 
-  get ok() {
-    return this.status >= 200 && this.status < 300
+  async json() {
+    return typeof this.body === 'string' ? JSON.parse(this.body) : this.body
   }
 
-  json() {
-    return Promise.resolve(JSON.parse(this._bodyInit))
-  }
-
-  text() {
-    return Promise.resolve(this._bodyInit)
-  }
-
-  blob() {
-    return Promise.resolve(new MockBlob([this._bodyInit]))
+  async text() {
+    return typeof this.body === 'string' ? this.body : JSON.stringify(this.body)
   }
 
   clone() {
-    return new MockResponse(this._bodyInit, {
+    return new MockResponse(this.body, {
       status: this.status,
       statusText: this.statusText,
       headers: this.headers
@@ -190,4 +239,54 @@ Object.defineProperties(global, {
       }
     }
   }
-}) 
+})
+
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: jest.fn().mockImplementation(query => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: jest.fn(),
+    removeListener: jest.fn(),
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+    dispatchEvent: jest.fn(),
+  })),
+})
+
+Object.defineProperty(window, 'ResizeObserver', {
+  writable: true,
+  value: jest.fn().mockImplementation(() => ({
+    observe: jest.fn(),
+    unobserve: jest.fn(),
+    disconnect: jest.fn(),
+  })),
+})
+
+window.requestAnimationFrame = jest.fn().mockImplementation(cb => setTimeout(cb, 0))
+window.cancelAnimationFrame = jest.fn().mockImplementation(id => clearTimeout(id))
+
+// Mock URL.createObjectURL
+Object.defineProperty(window.URL, 'createObjectURL', {
+  writable: true,
+  value: jest.fn().mockImplementation(() => 'mock-url'),
+})
+
+// Mock localStorage
+const localStorageMock = {
+  getItem: jest.fn(),
+  setItem: jest.fn(),
+  removeItem: jest.fn(),
+  clear: jest.fn(),
+}
+Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+
+// Mock sessionStorage
+const sessionStorageMock = {
+  getItem: jest.fn(),
+  setItem: jest.fn(),
+  removeItem: jest.fn(),
+  clear: jest.fn(),
+}
+Object.defineProperty(window, 'sessionStorage', { value: sessionStorageMock }) 

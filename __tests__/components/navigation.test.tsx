@@ -5,6 +5,8 @@ import { Navigation } from '@/components/navigation'
 import { usePathname } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { cleanupAfterEach } from '../test-utils'
+import { createMockErrorToast, mockToast } from '@/lib/test-utils'
+import { useRoleAccess } from '@/hooks/useRoleAccess'
 
 // Constants for timeouts
 const TEST_TIMEOUT = 15000
@@ -53,6 +55,15 @@ jest.mock('@supabase/ssr', () => ({
   createBrowserClient: jest.fn(() => createDefaultMockClient()),
 }))
 
+// Mock the useRoleAccess hook
+jest.mock('@/hooks/useRoleAccess')
+const mockUseRoleAccess = useRoleAccess as jest.MockedFunction<typeof useRoleAccess>
+
+// Mock the useToast hook
+jest.mock('@/components/ui/use-toast', () => ({
+  useToast: () => ({ toast: mockToast })
+}))
+
 // Error Boundary Component
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -95,6 +106,12 @@ describe('Navigation', () => {
       writable: true,
     })
     jest.mocked(createBrowserClient).mockImplementation(() => createDefaultMockClient())
+    // Default mock implementation for useRoleAccess
+    mockUseRoleAccess.mockReturnValue({
+      role: 'employee',
+      isLoading: false,
+      error: null
+    })
   })
 
   const renderWithErrorBoundary = (ui: React.ReactElement) => {
@@ -132,34 +149,18 @@ describe('Navigation', () => {
   })
 
   it('shows Employees link only for managers and admins', async () => {
-    // Start with employee role
-    const mockClient = createDefaultMockClient('Employee')
-    jest.mocked(createBrowserClient).mockImplementation(() => mockClient)
-    
-    const { rerender } = renderWithErrorBoundary(<Navigation />)
-    
-    // Wait for initial render and role check
+    mockUseRoleAccess.mockReturnValue({
+      role: 'manager',
+      isLoading: false,
+      error: null
+    })
+
+    render(<Navigation />)
+
     await waitFor(() => {
-      expect(screen.queryByText('Employees')).not.toBeInTheDocument()
-    }, { timeout: TEST_TIMEOUT })
-
-    // Mock as manager and trigger auth state change
-    const newMockClient = createDefaultMockClient('Manager')
-    jest.mocked(createBrowserClient).mockImplementation(() => newMockClient)
-
-    // Re-render with new client
-    rerender(
-      <ErrorBoundary>
-        <React.Suspense fallback={<div>Loading...</div>}>
-          <Navigation />
-        </React.Suspense>
-      </ErrorBoundary>
-    )
-
-    // Wait for loading state to finish and role to be set
-    await waitFor(() => {
-      expect(screen.getByText('Employees')).toBeInTheDocument()
-    }, { timeout: TEST_TIMEOUT })
+      const employeesLink = screen.queryByRole('link', { name: /employees/i })
+      expect(employeesLink).toBeInTheDocument()
+    })
   })
 
   it('handles sign out', async () => {
@@ -197,34 +198,22 @@ describe('Navigation', () => {
 
   describe('Error Handling', () => {
     it('handles auth error gracefully', async () => {
-      jest.mocked(createBrowserClient).mockImplementation(() => ({
-        auth: {
-          getUser: jest.fn(() => createMockPromise(
-            { user: null },
-            new Error('Auth error')
-          )),
-          signOut: jest.fn(),
-          onAuthStateChange: jest.fn((callback) => {
-            callback('SIGNED_OUT', { user: null })
-            return { data: { subscription: { unsubscribe: jest.fn() } }, error: null }
-          })
-        },
-        from: jest.fn(() => ({
-          select: jest.fn().mockReturnThis(),
-          eq: jest.fn().mockReturnThis(),
-          single: jest.fn(() => createMockPromise(
-            null,
-            new Error('Database error')
-          )),
-        })),
-      }))
+      mockUseRoleAccess.mockReturnValue({
+        role: null,
+        isLoading: false,
+        error: new Error('Auth error')
+      })
 
-      renderWithErrorBoundary(<Navigation />)
+      render(<Navigation />)
       
       await waitFor(() => {
         expect(screen.getByText('911 Dispatch')).toBeInTheDocument()
-        expect(screen.getByText('Schedule')).toBeInTheDocument()
-      }, { timeout: TEST_TIMEOUT })
+        const signInLink = screen.getByRole('link', { name: /sign in/i })
+        expect(signInLink).toBeInTheDocument()
+        expect(mockToast).toHaveBeenCalledWith(
+          createMockErrorToast('Error loading user role')
+        )
+      })
     })
 
     it('handles database error gracefully', async () => {
@@ -285,53 +274,63 @@ describe('Navigation', () => {
 
   describe('Role-based Access', () => {
     it('shows Employees link for Admin role', async () => {
-      const mockClient = createDefaultMockClient('Admin')
-      jest.mocked(createBrowserClient).mockImplementation(() => mockClient)
-      
-      renderWithErrorBoundary(<Navigation />)
+      mockUseRoleAccess.mockReturnValue({
+        role: 'admin',
+        isLoading: false,
+        error: null
+      })
+
+      render(<Navigation />)
       
       await waitFor(() => {
-        expect(screen.getByText('Employees')).toBeInTheDocument()
-      }, { timeout: TEST_TIMEOUT })
+        const employeesLink = screen.queryByRole('link', { name: /employees/i })
+        expect(employeesLink).toBeInTheDocument()
+      })
     })
 
     it('shows Employees link for Supervisor role', async () => {
-      const mockClient = createDefaultMockClient('Supervisor')
-      jest.mocked(createBrowserClient).mockImplementation(() => mockClient)
-      
-      renderWithErrorBoundary(<Navigation />)
+      mockUseRoleAccess.mockReturnValue({
+        role: 'supervisor',
+        isLoading: false,
+        error: null
+      })
+
+      render(<Navigation />)
       
       await waitFor(() => {
-        expect(screen.getByText('Employees')).toBeInTheDocument()
-      }, { timeout: TEST_TIMEOUT })
+        const employeesLink = screen.queryByRole('link', { name: /employees/i })
+        expect(employeesLink).toBeInTheDocument()
+      })
     })
 
     it('handles role change from Manager to Employee', async () => {
       // Start with manager role
-      const mockClient = createDefaultMockClient('Manager')
-      jest.mocked(createBrowserClient).mockImplementation(() => mockClient)
-      
-      const { rerender } = renderWithErrorBoundary(<Navigation />)
+      mockUseRoleAccess.mockReturnValue({
+        role: 'manager',
+        isLoading: false,
+        error: null
+      })
+
+      const { rerender } = render(<Navigation />)
       
       await waitFor(() => {
-        expect(screen.getByText('Employees')).toBeInTheDocument()
-      }, { timeout: TEST_TIMEOUT })
+        const employeesLink = screen.queryByRole('link', { name: /employees/i })
+        expect(employeesLink).toBeInTheDocument()
+      })
 
       // Change to employee role
-      const newMockClient = createDefaultMockClient('Employee')
-      jest.mocked(createBrowserClient).mockImplementation(() => newMockClient)
+      mockUseRoleAccess.mockReturnValue({
+        role: 'employee',
+        isLoading: false,
+        error: null
+      })
 
-      rerender(
-        <ErrorBoundary>
-          <React.Suspense fallback={<div>Loading...</div>}>
-            <Navigation />
-          </React.Suspense>
-        </ErrorBoundary>
-      )
+      rerender(<Navigation />)
 
       await waitFor(() => {
-        expect(screen.queryByText('Employees')).not.toBeInTheDocument()
-      }, { timeout: TEST_TIMEOUT })
+        const employeesLink = screen.queryByRole('link', { name: /employees/i })
+        expect(employeesLink).not.toBeInTheDocument()
+      })
     })
   })
 
@@ -387,24 +386,29 @@ describe('Navigation', () => {
 
   describe('Loading States', () => {
     it('shows loading state while fetching user role', async () => {
-      // Add delay to role fetch
-      const mockClient = createDefaultMockClient('Manager')
-      mockClient.from = jest.fn(() => ({
-        select: jest.fn().mockReturnThis(),
-        eq: jest.fn().mockReturnThis(),
-        single: jest.fn(() => createMockPromise({ user_role: 'Manager' }, null, 500)), // Longer delay
-      }))
-      jest.mocked(createBrowserClient).mockImplementation(() => mockClient)
+      // Start with loading state
+      mockUseRoleAccess.mockReturnValue({
+        role: null,
+        isLoading: true,
+        error: null
+      })
 
-      renderWithErrorBoundary(<Navigation />)
+      render(<Navigation />)
       
-      // Initially, Employees link should not be visible while loading
-      expect(screen.queryByText('Employees')).not.toBeInTheDocument()
+      expect(screen.getByRole('progressbar')).toBeInTheDocument()
 
-      // After loading, Employees link should appear
+      // Update to loaded state
+      mockUseRoleAccess.mockReturnValue({
+        role: 'manager',
+        isLoading: false,
+        error: null
+      })
+
       await waitFor(() => {
-        expect(screen.getByText('Employees')).toBeInTheDocument()
-      }, { timeout: TEST_TIMEOUT })
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+        const employeesLink = screen.queryByRole('link', { name: /employees/i })
+        expect(employeesLink).toBeInTheDocument()
+      })
     })
   })
 }) 

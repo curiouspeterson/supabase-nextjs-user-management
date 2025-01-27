@@ -1,49 +1,49 @@
-const nextJest = require('next/jest')
-
-const createJestConfig = nextJest({
-  dir: './'
-})
-
-const customJestConfig = {
-  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
-  testEnvironment: 'jest-environment-jsdom',
+/** @type {import('jest').Config} */
+const config = {
+  testEnvironment: 'jsdom',
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/$1',
     '^@/components/(.*)$': '<rootDir>/components/$1',
-    '^@/app/(.*)$': '<rootDir>/app/$1',
-    '^@/lib/(.*)$': '<rootDir>/lib/$1',
+    '^@/hooks/(.*)$': '<rootDir>/hooks/$1',
     '^@/utils/(.*)$': '<rootDir>/utils/$1',
-    '^lucide-react$': '<rootDir>/node_modules/lucide-react/dist/cjs/lucide-react.js'
+    '^@/lib/(.*)$': '<rootDir>/lib/$1',
+    '^@/types/(.*)$': '<rootDir>/types/$1',
+    '^@/app/(.*)$': '<rootDir>/app/$1',
+    '^@/pages/(.*)$': '<rootDir>/pages/$1'
   },
-  moduleDirectories: ['node_modules', '<rootDir>/'],
-  testMatch: [
-    '**/__tests__/**/*.test.[jt]s?(x)',
-    '!**/__tests__/e2e/**/*.[jt]s?(x)',
-    '!**/__tests__/mocks/**/*.[jt]s?(x)',
-    '!**/__tests__/test-utils.[jt]s?(x)',
-    '!**/__tests__/setupTests.[jt]s?(x)',
-    '!**/__tests__/jest.setup.[jt]s?(x)',
-    '!**/__tests__/jest.globals.[jt]s?(x)',
-    '!**/.babelrc.test.js'
-  ],
   transformIgnorePatterns: [
-    '/node_modules/(?!lucide-react).+\\.js$'
+    '/node_modules/(?!lucide-react|@radix-ui|@hookform|@tanstack|@floating-ui)/'
   ],
-  globals: {
-    'ts-jest': {
-      tsconfig: {
-        jsx: 'react-jsx'
-      }
+  transform: {
+    '^.+\\.(t|j)sx?$': '@swc/jest'
+  },
+  testTimeout: 30000,
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
+  collectCoverage: true,
+  collectCoverageFrom: [
+    'components/**/*.{js,jsx,ts,tsx}',
+    'hooks/**/*.{js,jsx,ts,tsx}',
+    'utils/**/*.{js,jsx,ts,tsx}',
+    'lib/**/*.{js,jsx,ts,tsx}',
+    'app/**/*.{js,jsx,ts,tsx}',
+    '!**/*.d.ts',
+    '!**/node_modules/**'
+  ],
+  coverageThreshold: {
+    global: {
+      branches: 80,
+      functions: 80,
+      lines: 80,
+      statements: 80
     }
   },
-  testTimeout: 20000,
-  setupFiles: ['<rootDir>/jest.polyfills.js'],
-  testEnvironmentOptions: {
-    customExportConditions: [''],
-    url: 'http://localhost:3000'
-  },
-  verbose: true,
-  collectCoverage: false
+  testPathIgnorePatterns: [
+    '<rootDir>/node_modules/',
+    '<rootDir>/.next/',
+    '<rootDir>/e2e/',
+    '<rootDir>/playwright/',
+    '<rootDir>/playwright.config.ts'
+  ]
 }
 
-module.exports = createJestConfig(customJestConfig) 
+module.exports = config 

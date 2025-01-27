@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { PostgrestQueryBuilder } from '@supabase/postgrest-js'
 import 'whatwg-fetch'
 import { NextRequest } from 'next/server'
+import { mockToast, createMockPromise, createDefaultMockClient, TEST_BASE_URL } from '@/lib/test-utils'
 
 export const BASE_URL = 'http://localhost:3000'
 
@@ -13,9 +14,9 @@ const originalFetch = global.fetch
 global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   let url = input
   if (typeof input === 'string' && !input.startsWith('http')) {
-    url = `${BASE_URL}${input}`
+    url = `${TEST_BASE_URL}${input}`
   } else if (input instanceof Request && !input.url.startsWith('http')) {
-    url = new Request(`${BASE_URL}${input.url}`, input)
+    url = new Request(`${TEST_BASE_URL}${input.url}`, input)
   }
   return originalFetch(url, init)
 }
@@ -228,7 +229,7 @@ type NextRequestInit = {
 }
 
 export function createTestRequest(path: string, options: Partial<SafeRequestInit> = {}) {
-  const url = new URL(`http://localhost:3000${path}`)
+  const url = new URL(`${TEST_BASE_URL}${path}`)
   const safeOptions = { ...options }
   if (safeOptions.signal === null) {
     delete safeOptions.signal
@@ -336,4 +337,36 @@ export function mockSupabaseAuthHelpers() {
     createBrowserSupabaseClient: jest.fn(),
     createMiddlewareSupabaseClient: jest.fn(),
   }
-} 
+}
+
+describe('Test Utilities', () => {
+  describe('mockToast', () => {
+    it('should be a mock function', () => {
+      expect(typeof mockToast).toBe('function')
+      expect(jest.isMockFunction(mockToast)).toBe(true)
+    })
+  })
+
+  describe('createMockPromise', () => {
+    it('should resolve with provided data', async () => {
+      const data = { test: 'data' }
+      const promise = createMockPromise(data)
+      await expect(promise).resolves.toEqual(data)
+    })
+
+    it('should reject with provided error', async () => {
+      const error = new Error('test error')
+      const promise = createMockPromise(null, error)
+      await expect(promise).rejects.toEqual(error)
+    })
+  })
+
+  describe('createDefaultMockClient', () => {
+    it('should return a mock client with auth methods', () => {
+      const mockClient = createDefaultMockClient()
+      expect(mockClient.auth).toBeDefined()
+      expect(mockClient.auth.getUser).toBeDefined()
+      expect(jest.isMockFunction(mockClient.auth.getUser)).toBe(true)
+    })
+  })
+}) 
