@@ -1,6 +1,7 @@
 import type { Toast } from '@/types/toast'
 import type { SupabaseClient, User, Session } from '@supabase/supabase-js'
 import { ErrorSeverity, ErrorCategory, AppError } from './error-analytics'
+import { Employee, Shift, Schedule } from '@/services/scheduler/types'
 
 /**
  * Mock function for toast notifications
@@ -240,4 +241,223 @@ export const createMockEmployee = (overrides = {}) => ({
 /**
  * Base URL for testing environment
  */
-export const TEST_BASE_URL = 'http://localhost:3000' 
+export const TEST_BASE_URL = 'http://localhost:3000'
+
+export const mockClient = () => {
+  const mockFrom = jest.fn().mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    insert: jest.fn().mockReturnThis(),
+    update: jest.fn().mockReturnThis(),
+    upsert: jest.fn().mockReturnThis(),
+    delete: jest.fn().mockReturnThis(),
+    eq: jest.fn().mockReturnThis(),
+    neq: jest.fn().mockReturnThis(),
+    gt: jest.fn().mockReturnThis(),
+    gte: jest.fn().mockReturnThis(),
+    lt: jest.fn().mockReturnThis(),
+    lte: jest.fn().mockReturnThis(),
+    like: jest.fn().mockReturnThis(),
+    ilike: jest.fn().mockReturnThis(),
+    is: jest.fn().mockReturnThis(),
+    in: jest.fn().mockReturnThis(),
+    contains: jest.fn().mockReturnThis(),
+    containedBy: jest.fn().mockReturnThis(),
+    range: jest.fn().mockReturnThis(),
+    textSearch: jest.fn().mockReturnThis(),
+    match: jest.fn().mockReturnThis(),
+    not: jest.fn().mockReturnThis(),
+    or: jest.fn().mockReturnThis(),
+    filter: jest.fn().mockReturnThis(),
+    order: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    offset: jest.fn().mockReturnThis(),
+    single: jest.fn().mockReturnThis(),
+    maybeSingle: jest.fn().mockReturnThis(),
+    csv: jest.fn().mockReturnThis()
+  });
+
+  const mockRpc = jest.fn().mockResolvedValue({ data: null, error: null });
+  const mockStorage = {
+    from: jest.fn().mockReturnValue({
+      upload: jest.fn().mockResolvedValue({ data: null, error: null }),
+      download: jest.fn().mockResolvedValue({ data: null, error: null }),
+      remove: jest.fn().mockResolvedValue({ data: null, error: null }),
+      list: jest.fn().mockResolvedValue({ data: null, error: null }),
+      createSignedUrl: jest.fn().mockResolvedValue({ data: null, error: null }),
+      getPublicUrl: jest.fn().mockReturnValue({ publicUrl: 'test-url' })
+    })
+  };
+
+  const mockAuth = {
+    getSession: jest.fn().mockResolvedValue({ data: { session: null }, error: null }),
+    getUser: jest.fn().mockResolvedValue({ data: { user: null }, error: null }),
+    signUp: jest.fn().mockResolvedValue({ data: null, error: null }),
+    signIn: jest.fn().mockResolvedValue({ data: null, error: null }),
+    signOut: jest.fn().mockResolvedValue({ error: null }),
+    onAuthStateChange: jest.fn().mockReturnValue({ data: { subscription: { unsubscribe: jest.fn() } }, error: null }),
+    resetPasswordForEmail: jest.fn().mockResolvedValue({ data: null, error: null }),
+    updateUser: jest.fn().mockResolvedValue({ data: null, error: null })
+  };
+
+  return {
+    from: mockFrom,
+    rpc: mockRpc,
+    storage: mockStorage,
+    auth: mockAuth
+  } as unknown as jest.Mocked<SupabaseClient>;
+};
+
+export const mockAuthUser = (overrides = {}) => ({
+  id: 'test-user-id',
+  email: 'test@example.com',
+  role: 'authenticated',
+  aud: 'authenticated',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  ...overrides
+});
+
+export const mockEmployee = (overrides?: Partial<Employee>): Employee => ({
+  id: 'test-employee-1',
+  first_name: 'John',
+  last_name: 'Doe',
+  email: 'john.doe@example.com',
+  employee_role: 'Dispatcher',
+  allow_overtime: false,
+  max_weekly_hours: 40,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  ...overrides
+});
+
+export const mockShift = (overrides?: Partial<Shift>): Shift => ({
+  id: 'test-shift-1',
+  name: 'Day Shift',
+  start_time: '07:00:00',
+  end_time: '17:00:00',
+  duration_hours: 10,
+  is_overnight: false,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  ...overrides
+});
+
+export const mockSchedule = (overrides?: Partial<Schedule>): Schedule => ({
+  id: 'test-schedule-1',
+  employee_id: 'test-employee-1',
+  shift_id: 'test-shift-1',
+  date: '2025-01-01',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  ...overrides
+});
+
+export const mockStaffingRequirement = (overrides = {}) => ({
+  id: 'test-requirement-id',
+  period_name: 'Day Shift',
+  start_time: '07:00:00',
+  end_time: '19:00:00',
+  minimum_employees: 2,
+  shift_supervisor_required: true,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  ...overrides
+});
+
+export const mockShiftPattern = (overrides = {}) => ({
+  id: 'test-pattern-id',
+  name: '4x10 Standard',
+  pattern_type: '4x10',
+  days_on: 4,
+  days_off: 3,
+  shift_duration: 10,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  ...overrides
+});
+
+export const mockEmployeePattern = (overrides = {}) => ({
+  id: 'test-employee-pattern-id',
+  employee_id: 'test-employee-id',
+  pattern_id: 'test-pattern-id',
+  start_date: new Date().toISOString().split('T')[0],
+  end_date: null,
+  rotation_start_date: new Date().toISOString().split('T')[0],
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  ...overrides
+});
+
+export const mockShiftPreference = (overrides = {}) => ({
+  id: 'test-preference-id',
+  employee_id: 'test-employee-id',
+  shift_type_id: 'test-shift-type-id',
+  preference_level: 1,
+  effective_date: new Date().toISOString().split('T')[0],
+  expiry_date: null,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  ...overrides
+});
+
+// Mock for react-dnd HTML5Backend
+jest.mock('react-dnd-html5-backend', () => ({
+  HTML5Backend: {}
+}));
+
+// Mock for date-fns functions
+jest.mock('date-fns', () => ({
+  ...jest.requireActual('date-fns'),
+  startOfToday: () => new Date('2025-01-01T00:00:00.000Z'),
+  addDays: (date: Date, amount: number) => {
+    const result = new Date(date);
+    result.setDate(result.getDate() + amount);
+    return result;
+  },
+  addWeeks: (date: Date, amount: number) => {
+    const result = new Date(date);
+    result.setDate(result.getDate() + (amount * 7));
+    return result;
+  },
+  addMonths: (date: Date, amount: number) => {
+    const result = new Date(date);
+    result.setMonth(result.getMonth() + amount);
+    return result;
+  }
+}));
+
+// Setup for testing drag and drop functionality
+export const mockDndHooks = () => {
+  const useDrag = jest.fn(() => [
+    { isDragging: false },
+    jest.fn(),
+    jest.fn()
+  ]);
+
+  const useDrop = jest.fn(() => [
+    { isOver: false, canDrop: true },
+    jest.fn()
+  ]);
+
+  return { useDrag, useDrop };
+};
+
+// Mock for testing coverage calculations
+export const mockCoverageData = (overrides?: any) => ({
+  date: '2025-01-01',
+  periods: {
+    '07:00:00-19:00:00': {
+      required: 2,
+      actual: 1,
+      supervisors: 0,
+      overtime: 0
+    },
+    '19:00:00-07:00:00': {
+      required: 2,
+      actual: 2,
+      supervisors: 1,
+      overtime: 0
+    }
+  },
+  ...overrides
+}); 

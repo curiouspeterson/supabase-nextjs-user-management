@@ -289,13 +289,287 @@ const mockFetch = jest.fn((input: string | URL | Request, init?: RequestInit) =>
 })
 
 // Mock ResizeObserver
-class ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+class MockResizeObserver {
+  observe = jest.fn()
+  disconnect = jest.fn()
+  unobserve = jest.fn()
 }
 
-window.ResizeObserver = ResizeObserver 
+global.ResizeObserver = MockResizeObserver as any;
+
+// Mock IntersectionObserver
+class MockIntersectionObserver {
+  observe = jest.fn()
+  disconnect = jest.fn()
+  unobserve = jest.fn()
+}
+
+global.IntersectionObserver = MockIntersectionObserver as any;
+
+// Mock window.matchMedia
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: jest.fn().mockImplementation(query => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: jest.fn(),
+    removeListener: jest.fn(),
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+    dispatchEvent: jest.fn(),
+  })),
+});
+
+// Mock next/navigation
+jest.mock('next/navigation', () => ({
+  useRouter() {
+    return {
+      push: jest.fn(),
+      replace: jest.fn(),
+      prefetch: jest.fn(),
+      back: jest.fn(),
+      forward: jest.fn(),
+    };
+  },
+  usePathname() {
+    return '/';
+  },
+  useSearchParams() {
+    return new URLSearchParams();
+  },
+}));
+
+// Mock next/image
+jest.mock('next/image', () => ({
+  __esModule: true,
+  default: function Image({ src, alt, ...props }: any) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={src} alt={alt} {...props} />;
+  },
+}));
+
+// Mock console methods to ignore certain warnings
+const originalConsole = { ...console };
+const ignoredMessages = [
+  'Not implemented: HTMLFormElement.prototype.requestSubmit',
+  'Warning: An update to',
+  'inside a test was not wrapped in act',
+  'Error submitting time off request:',
+  'Invalid prop',
+  'componentWillReceiveProps',
+];
+
+beforeAll(() => {
+  global.console = {
+    ...console,
+    error: jest.fn((...args) => {
+      if (typeof args[0] === 'string' && ignoredMessages.some(msg => args[0].includes(msg))) {
+        return;
+      }
+      originalConsole.error.call(console, ...args);
+    }),
+    warn: jest.fn((...args) => {
+      if (typeof args[0] === 'string' && ignoredMessages.some(msg => args[0].includes(msg))) {
+        return;
+      }
+      originalConsole.warn.call(console, ...args);
+    }),
+    log: jest.fn(),
+  };
+});
+
+afterAll(() => {
+  global.console = originalConsole;
+});
+
+// Mock file with native Blob
+class MockFile extends Blob {
+  name: string;
+  lastModified: number;
+  webkitRelativePath: string;
+
+  constructor(parts: BlobPart[], name: string, options?: FilePropertyBag) {
+    super(parts, options);
+    this.name = name;
+    this.lastModified = options?.lastModified || Date.now();
+    this.webkitRelativePath = '';
+  }
+}
+
+// Mock Headers
+class MockHeaders {
+  private headers: Map<string, string>;
+
+  constructor(init?: HeadersInit) {
+    this.headers = new Map();
+    if (init) {
+      if (Array.isArray(init)) {
+        init.forEach(([key, value]) => this.append(key, value));
+      } else if (init instanceof Headers || init instanceof MockHeaders) {
+        Array.from(init.entries()).forEach(([key, value]) => this.append(key, value));
+      } else {
+        Object.entries(init).forEach(([key, value]) => this.append(key, value));
+      }
+    }
+  }
+
+  append(name: string, value: string): void {
+    this.headers.set(name.toLowerCase(), value);
+  }
+
+  delete(name: string): void {
+    this.headers.delete(name.toLowerCase());
+  }
+
+  get(name: string): string | null {
+    return this.headers.get(name.toLowerCase()) || null;
+  }
+
+  has(name: string): boolean {
+    return this.headers.has(name.toLowerCase());
+  }
+
+  set(name: string, value: string): void {
+    this.headers.set(name.toLowerCase(), value);
+  }
+
+  getSetCookie(): string[] {
+    return [];
+  }
+
+  forEach(callbackfn: (value: string, key: string, parent: Headers) => void, thisArg?: any): void {
+    this.headers.forEach((value, key) => callbackfn.call(thisArg, value, key, this as unknown as Headers));
+  }
+
+  entries(): IterableIterator<[string, string]> {
+    return this.headers.entries();
+  }
+
+  keys(): IterableIterator<string> {
+    return this.headers.keys();
+  }
+
+  values(): IterableIterator<string> {
+    return this.headers.values();
+  }
+
+  [Symbol.iterator](): IterableIterator<[string, string]> {
+    return this.entries();
+  }
+}
+
+// Mock FormData
+class MockFormData {
+  private data: Map<string, FormDataEntryValue[]> = new Map();
+
+  append(name: string, value: string | Blob, fileName?: string): void {
+    const values = this.data.get(name) || [];
+    if (value instanceof Blob && fileName) {
+      const file = new File([value], fileName, { type: value.type });
+      values.push(file);
+    } else {
+      values.push(value as string);
+    }
+    this.data.set(name, values);
+  }
+
+  set(name: string, value: string | Blob, fileName?: string): void {
+    if (value instanceof Blob && fileName) {
+      const file = new File([value], fileName, { type: value.type });
+      this.data.set(name, [file]);
+    } else {
+      this.data.set(name, [value as string]);
+    }
+  }
+
+  get(name: string): FormDataEntryValue | null {
+    const values = this.data.get(name);
+    if (!values || values.length === 0) {
+      return null;
+    }
+    return values[0];
+  }
+
+  getAll(name: string): FormDataEntryValue[] {
+    return this.data.get(name) || [];
+  }
+
+  has(name: string): boolean {
+    return this.data.has(name);
+  }
+
+  delete(name: string): void {
+    this.data.delete(name);
+  }
+
+  *entries(): IterableIterator<[string, FormDataEntryValue]> {
+    for (const [key, values] of this.data.entries()) {
+      for (const value of values) {
+        yield [key, value];
+      }
+    }
+  }
+
+  *keys(): IterableIterator<string> {
+    yield* this.data.keys();
+  }
+
+  *values(): IterableIterator<FormDataEntryValue> {
+    for (const values of this.data.values()) {
+      yield* values;
+    }
+  }
+
+  forEach(callbackfn: (value: FormDataEntryValue, key: string, parent: FormData) => void): void {
+    for (const [key, values] of this.data.entries()) {
+      for (const value of values) {
+        callbackfn(value, key, this as unknown as FormData);
+      }
+    }
+  }
+
+  [Symbol.iterator](): IterableIterator<[string, FormDataEntryValue]> {
+    return this.entries();
+  }
+}
+
+// Set up global mocks
+global.FormData = MockFormData as any;
+global.Headers = MockHeaders as any;
+global.File = MockFile as any;
+
+// Mock HTMLFormElement.prototype.elements to support form data extraction
+Object.defineProperty(HTMLFormElement.prototype, 'elements', {
+  get() {
+    return Array.from(this.querySelectorAll('input, select, textarea')).reduce<Record<string, HTMLElement>>((acc, element) => {
+      if (element instanceof HTMLElement && element.hasAttribute('name')) {
+        acc[element.getAttribute('name')!] = element;
+      }
+      return acc;
+    }, {});
+  }
+});
+
+// Mock console methods
+const originalConsole = { ...console }
+beforeAll(() => {
+  global.console = {
+    ...console,
+    error: jest.fn(),
+    warn: jest.fn(),
+    log: jest.fn()
+  }
+})
+
+afterAll(() => {
+  global.console = originalConsole
+})
+
+// Start MSW server
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+afterEach(() => server.resetHandlers())
+afterAll(() => server.close())
 
 // Mock data
 const mockProfile = {
@@ -415,351 +689,4 @@ beforeEach(() => {
   mockSupabaseUpsert.mockClear()
   mockSupabaseSignOut.mockClear()
   ;(global.alert as jest.Mock).mockClear()
-})
-
-// Start MSW server
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
-afterEach(() => server.resetHandlers())
-afterAll(() => server.close())
-
-// Mock console methods to ignore certain warnings
-const originalError = console.error
-const originalWarn = console.warn
-const ignoredMessages = [
-  'Not implemented: HTMLFormElement.prototype.requestSubmit',
-  'Warning: An update to',
-  'inside a test was not wrapped in act',
-  'Error submitting time off request:',
-  'Invalid prop',
-  'componentWillReceiveProps'
-]
-
-console.error = (...args: any[]) => {
-  if (typeof args[0] === 'string' && ignoredMessages.some(msg => args[0].includes(msg))) {
-    return
-  }
-  originalError.call(console, ...args)
-}
-
-console.warn = (...args: any[]) => {
-  if (typeof args[0] === 'string' && ignoredMessages.some(msg => args[0].includes(msg))) {
-    return
-  }
-  originalWarn.call(console, ...args)
-}
-
-// Mock window.URL
-const mockCreateObjectURL = jest.fn()
-const mockRevokeObjectURL = jest.fn()
-
-Object.defineProperty(window, 'URL', {
-  value: {
-    createObjectURL: mockCreateObjectURL,
-    revokeObjectURL: mockRevokeObjectURL
-  },
-  writable: true
-})
-
-// Mock window.ReadableStream
-class MockReadableStream {
-  constructor(source?: any) {}
-  getReader() {
-    return {
-      read: () => Promise.resolve({ done: true, value: undefined }),
-      releaseLock: () => {}
-    }
-  }
-}
-
-if (!('ReadableStream' in window)) {
-  Object.defineProperty(window, 'ReadableStream', {
-    value: MockReadableStream,
-    writable: true,
-    configurable: true
-  })
-}
-
-// Mock TextEncoder/TextDecoder
-if (!('TextEncoder' in window)) {
-  Object.defineProperty(window, 'TextEncoder', {
-    value: TextEncoder,
-    writable: true,
-    configurable: true
-  })
-}
-
-if (!('TextDecoder' in window)) {
-  Object.defineProperty(window, 'TextDecoder', {
-    value: TextDecoder,
-    writable: true,
-    configurable: true
-  })
-}
-
-// Mock fetch-related globals
-if (!('Headers' in window)) {
-  Object.defineProperty(window, 'Headers', {
-    value: Headers,
-    writable: true,
-    configurable: true
-  })
-}
-
-if (!('Request' in window)) {
-  Object.defineProperty(window, 'Request', {
-    value: Request,
-    writable: true,
-    configurable: true
-  })
-}
-
-if (!('Response' in window)) {
-  Object.defineProperty(window, 'Response', {
-    value: Response,
-    writable: true,
-    configurable: true
-  })
-}
-
-if (!('FormData' in window)) {
-  Object.defineProperty(window, 'FormData', {
-    value: FormData,
-    writable: true,
-    configurable: true
-  })
-}
-
-if (!('fetch' in window)) {
-  Object.defineProperty(window, 'fetch', {
-    value: fetch,
-    writable: true,
-    configurable: true
-  })
-}
-
-// Mock console methods
-const originalConsole = { ...console }
-beforeAll(() => {
-  global.console = {
-    ...console,
-    error: jest.fn(),
-    warn: jest.fn(),
-    log: jest.fn()
-  }
-})
-
-afterAll(() => {
-  global.console = originalConsole
-})
-
-// Mock IntersectionObserver
-class MockIntersectionObserver {
-  observe = jest.fn()
-  disconnect = jest.fn()
-  unobserve = jest.fn()
-}
-
-Object.defineProperty(window, 'IntersectionObserver', {
-  value: MockIntersectionObserver,
-  writable: true
-})
-
-// Mock ResizeObserver
-class MockResizeObserver {
-  observe = jest.fn()
-  disconnect = jest.fn()
-  unobserve = jest.fn()
-}
-
-Object.defineProperty(window, 'ResizeObserver', {
-  value: MockResizeObserver,
-  writable: true
-})
-
-// Mock file with native Blob
-class MockFile extends Blob {
-  name: string;
-  lastModified: number;
-  webkitRelativePath: string;
-
-  constructor(parts: BlobPart[], name: string, options?: FilePropertyBag) {
-    super(parts, options);
-    this.name = name;
-    this.lastModified = options?.lastModified || Date.now();
-    this.webkitRelativePath = '';
-  }
-}
-
-// Mock Headers
-class MockHeaders {
-  private headers: Map<string, string>;
-
-  constructor(init?: HeadersInit) {
-    this.headers = new Map();
-    if (init) {
-      if (Array.isArray(init)) {
-        init.forEach(([key, value]) => this.append(key, value));
-      } else if (init instanceof Headers || init instanceof MockHeaders) {
-        Array.from(init.entries()).forEach(([key, value]) => this.append(key, value));
-      } else {
-        Object.entries(init).forEach(([key, value]) => this.append(key, value));
-      }
-    }
-  }
-
-  append(name: string, value: string): void {
-    this.headers.set(name.toLowerCase(), value);
-  }
-
-  delete(name: string): void {
-    this.headers.delete(name.toLowerCase());
-  }
-
-  get(name: string): string | null {
-    return this.headers.get(name.toLowerCase()) || null;
-  }
-
-  has(name: string): boolean {
-    return this.headers.has(name.toLowerCase());
-  }
-
-  set(name: string, value: string): void {
-    this.headers.set(name.toLowerCase(), value);
-  }
-
-  getSetCookie(): string[] {
-    return [];
-  }
-
-  forEach(callbackfn: (value: string, key: string, parent: Headers) => void, thisArg?: any): void {
-    this.headers.forEach((value, key) => callbackfn.call(thisArg, value, key, this as unknown as Headers));
-  }
-
-  entries(): IterableIterator<[string, string]> {
-    return this.headers.entries();
-  }
-
-  keys(): IterableIterator<string> {
-    return this.headers.keys();
-  }
-
-  values(): IterableIterator<string> {
-    return this.headers.values();
-  }
-
-  [Symbol.iterator](): IterableIterator<[string, string]> {
-    return this.entries();
-  }
-}
-
-// Mock FormData
-class MockFormData {
-  private data: Map<string, FormDataEntryValue[]> = new Map();
-
-  append(name: string, value: string | Blob, fileName?: string): void {
-    const values = this.data.get(name) || [];
-    if (value instanceof Blob && fileName) {
-      const file = new File([value], fileName, { type: value.type });
-      values.push(file);
-    } else {
-      values.push(value as string);
-    }
-    this.data.set(name, values);
-  }
-
-  set(name: string, value: string | Blob, fileName?: string): void {
-    if (value instanceof Blob && fileName) {
-      const file = new File([value], fileName, { type: value.type });
-      this.data.set(name, [file]);
-    } else {
-      this.data.set(name, [value as string]);
-    }
-  }
-
-  get(name: string): FormDataEntryValue | null {
-    const values = this.data.get(name);
-    if (!values || values.length === 0) {
-      // Check if there's a checkbox input with this name
-      const form = document.querySelector('form');
-      if (form) {
-        const checkbox = form.querySelector(`input[type="checkbox"][name="${name}"]`) as HTMLInputElement;
-        if (checkbox && checkbox.checked) {
-          return checkbox.value;
-        }
-      }
-      return null;
-    }
-    return values[0];
-  }
-
-  getAll(name: string): FormDataEntryValue[] {
-    return this.data.get(name) || [];
-  }
-
-  has(name: string): boolean {
-    return this.data.has(name);
-  }
-
-  delete(name: string): void {
-    this.data.delete(name);
-  }
-
-  *entries(): IterableIterator<[string, FormDataEntryValue]> {
-    for (const [key, values] of this.data.entries()) {
-      for (const value of values) {
-        yield [key, value];
-      }
-    }
-  }
-
-  *keys(): IterableIterator<string> {
-    yield* this.data.keys();
-  }
-
-  *values(): IterableIterator<FormDataEntryValue> {
-    for (const values of this.data.values()) {
-      yield* values;
-    }
-  }
-
-  forEach(callbackfn: (value: FormDataEntryValue, key: string, parent: FormData) => void): void {
-    for (const [key, values] of this.data.entries()) {
-      for (const value of values) {
-        callbackfn(value, key, this as unknown as FormData);
-      }
-    }
-  }
-
-  [Symbol.iterator](): IterableIterator<[string, FormDataEntryValue]> {
-    return this.entries();
-  }
-}
-
-// Mock FormData constructor
-global.FormData = MockFormData as any;
-
-// Mock HTMLFormElement.prototype.elements to support form data extraction
-Object.defineProperty(HTMLFormElement.prototype, 'elements', {
-  get() {
-    return Array.from(this.querySelectorAll('input, select, textarea')).reduce<Record<string, HTMLElement>>((acc, element) => {
-      if (element instanceof HTMLElement && element.hasAttribute('name')) {
-        acc[element.getAttribute('name')!] = element;
-      }
-      return acc;
-    }, {});
-  }
-});
-
-// Mock Next.js Image component
-jest.mock('next/image', () => ({
-  __esModule: true,
-  default: function Image({ src, alt, width, height, ...props }: Partial<ImageProps>) {
-    return React.createElement('img', {
-      src,
-      alt,
-      width,
-      height,
-      ...props
-    })
-  }
-})) 
+}) 
