@@ -9,8 +9,12 @@ import { createClient } from '@/utils/supabase/client'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { Employee, EmployeeRole } from '@/services/scheduler/types'
+import { useRouter } from 'next/navigation'
+import { useMutation } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { AppError } from '@/lib/types/error'
 
 const employeeSchema = z.object({
   full_name: z.string().min(1, 'Full name is required'),
@@ -62,7 +66,32 @@ const mapLegacyRole = (role: string): EmployeeRole => {
   }
 }
 
+// Password generation utilities
+function generateSecurePassword(length = 16): string {
+  const lowercase = 'abcdefghijklmnopqrstuvwxyz'
+  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  const numbers = '0123456789'
+  const symbols = '!@#$%^&*()_+-=[]{}|;:,.<>?';
+  const all = lowercase + uppercase + numbers + symbols;
+  
+  let password = '';
+  // Ensure at least one of each type
+  password += lowercase[Math.floor(Math.random() * lowercase.length)];
+  password += uppercase[Math.floor(Math.random() * uppercase.length)];
+  password += numbers[Math.floor(Math.random() * numbers.length)];
+  password += symbols[Math.floor(Math.random() * symbols.length)];
+  
+  // Fill the rest randomly
+  for (let i = password.length; i < length; i++) {
+    password += all[Math.floor(Math.random() * all.length)];
+  }
+  
+  // Shuffle the password
+  return password.split('').sort(() => Math.random() - 0.5).join('');
+}
+
 export function EmployeeDialog({ isOpen, onClose, employee, onEmployeeUpdated }: EmployeeDialogProps) {
+  const router = useRouter()
   const {
     register,
     handleSubmit,
@@ -92,74 +121,128 @@ export function EmployeeDialog({ isOpen, onClose, employee, onEmployeeUpdated }:
     }
   }, [employee, setValue, reset])
 
-  const onSubmit = async (values: EmployeeFormValues) => {
-    try {
-      const client = createClient()
+  const supabase = createClient()
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    emailDomain: '',
+  })
 
-      if (employee) {
-        // Update existing employee
-        const { error } = await client.from('employees').update({
-          employee_role: mapRoleToDatabase(values.employee_role),
-          weekly_hours_scheduled: values.weekly_hours_scheduled,
-          default_shift_type_id: values.default_shift_type_id,
-          user_role: mapUserRole(values.employee_role),
-        }).eq('id', employee.id)
+  const createEmployeeMutation = useMutation({
+    mutationFn: async (data: typeof formData) => {
+      try {
+        // Generate secure password
+        const temporaryPassword = generateSecurePassword()
 
-        if (error) {
-          throw error
+        // Get email template
+        const { data: template, error: templateError } = await supabase
+          .rpc('get_email_template', {
+            p_type: 'EMPLOYEE_INVITATION'
+          })
+
+        if (templateError) {
+          throw new AppError('Failed to get email template', 500)
         }
 
-        // Update profile
-        const { error: profileError } = await client.from('profiles').update({
-          full_name: values.full_name,
-          username: values.username,
-        }).eq('id', employee.id)
-
-        if (profileError) {
-          throw profileError
-        }
-      } else {
-        // Create new employee
-        const { data: userData, error: userError } = await client.auth.signUp({
-          email: `${values.username}@example.com`,
-          password: 'tempPassword123!',
+        // Create user in auth
+        const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
+          email: `${data.email}@${data.emailDomain}`,
+          password: temporaryPassword,
+          email_confirm: true,
         })
 
-        if (userError || !userData.user) {
-          throw userError || new Error('Failed to create user')
+        if (authError) {
+          throw new AppError('Failed to create user account', 500)
         }
 
-        // Create profile
-        const { error: profileError } = await client.from('profiles').insert({
-          id: userData.user.id,
-          full_name: values.full_name,
-          username: values.username,
-        })
-
-        if (profileError) {
-          throw profileError
-        }
-
-        // Create employee
-        const { error: employeeError } = await client.from('employees').insert({
-          id: userData.user.id,
-          employee_role: mapRoleToDatabase(values.employee_role),
-          weekly_hours_scheduled: values.weekly_hours_scheduled,
-          default_shift_type_id: values.default_shift_type_id,
-          user_role: mapUserRole(values.employee_role),
-        })
+        // Create employee record
+        const { error: employeeError } = await supabase
+          .from('employees')
+          .insert({
+            id: authUser.id,
+            first_name: data.firstName,
+            last_name: data.lastName,
+            email: `${data.email}@${data.emailDomain}`,
+            employee_role: 'EMPLOYEE',
+          })
 
         if (employeeError) {
-          throw employeeError
+          // Cleanup auth user if employee creation fails
+          await supabase.auth.admin.deleteUser(authUser.id)
+          throw new AppError('Failed to create employee record', 500)
         }
-      }
 
-      onEmployeeUpdated()
+        // Log email
+        const { data: emailLog, error: logError } = await supabase
+          .rpc('log_email', {
+            p_template_id: template.id,
+            p_template_version: template.version,
+            p_recipient_email: `${data.email}@${data.emailDomain}`,
+            p_recipient_name: `${data.firstName} ${data.lastName}`,
+            p_subject: template.subject,
+            p_metadata: {
+              employee_id: authUser.id,
+              password_generated_at: new Date().toISOString(),
+            },
+          })
+
+        if (logError) {
+          console.error('Failed to log email:', logError)
+        }
+
+        // Send welcome email
+        const response = await fetch('/api/email/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            template: template.id,
+            recipient: {
+              email: `${data.email}@${data.emailDomain}`,
+              name: `${data.firstName} ${data.lastName}`,
+            },
+            variables: {
+              company_name: process.env.NEXT_PUBLIC_COMPANY_NAME || 'Our Company',
+              employee_name: `${data.firstName} ${data.lastName}`,
+              email: `${data.email}@${data.emailDomain}`,
+              password: temporaryPassword,
+            },
+            logId: emailLog,
+          }),
+        })
+
+        if (!response.ok) {
+          console.error('Failed to send email:', await response.text())
+        }
+
+        return { success: true }
+      } catch (error) {
+        console.error('Error creating employee:', error)
+        throw error
+      }
+    },
+    onError: (error) => {
+      toast.error('Failed to create employee', {
+        description: error instanceof AppError ? error.message : 'An unexpected error occurred',
+      })
+    },
+    onSuccess: () => {
+      toast.success('Employee created successfully')
       onClose()
-    } catch (error) {
-      console.error('Error saving employee:', error)
-      // Handle error (show toast, etc.)
-    }
+      router.refresh()
+      setFormData({
+        firstName: '',
+        lastName: '',
+        email: '',
+        emailDomain: '',
+      })
+    },
+  })
+
+  const onSubmit = (values: EmployeeFormValues) => {
+    createEmployeeMutation.mutate(formData)
   }
 
   return (
@@ -232,7 +315,7 @@ export function EmployeeDialog({ isOpen, onClose, employee, onEmployeeUpdated }:
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : employee ? 'Save Changes' : 'Add Employee'}
+              {isSubmitting ? 'Creating...' : employee ? 'Save Changes' : 'Add Employee'}
             </Button>
           </div>
         </form>

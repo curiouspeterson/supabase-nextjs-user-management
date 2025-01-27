@@ -40,6 +40,14 @@ const AlertDialogContent = React.forwardRef<
         className
       )}
       {...props}
+      role="alertdialog"
+      aria-modal="true"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          props.onEscapeKeyDown?.(e)
+        }
+      }}
     />
   </AlertDialogPortal>
 ))
@@ -89,10 +97,11 @@ const AlertDialogDescription = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Description>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Description>
 >(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Description
+  <div
     ref={ref}
     className={cn("text-sm text-muted-foreground", className)}
     {...props}
+    role="alert"
   />
 ))
 AlertDialogDescription.displayName = AlertDialogPrimitive.Description.displayName
@@ -105,6 +114,7 @@ const AlertDialogAction = React.forwardRef<
     ref={ref}
     className={cn(buttonVariants(), className)}
     {...props}
+    aria-label={props['aria-label'] || 'Confirm action'}
   />
 ))
 AlertDialogAction.displayName = "AlertDialogAction"
@@ -117,6 +127,7 @@ const AlertDialogCancel = React.forwardRef<
     ref={ref}
     className={cn(buttonVariants({ variant: "outline" }), className)}
     {...props}
+    aria-label={props['aria-label'] || 'Cancel action'}
   />
 ))
 AlertDialogCancel.displayName = "AlertDialogCancel"

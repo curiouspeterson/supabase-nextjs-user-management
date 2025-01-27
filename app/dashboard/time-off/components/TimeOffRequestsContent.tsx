@@ -4,6 +4,7 @@ import { createClient } from '@/utils/supabase/client'
 import { formatDistanceToNow } from 'date-fns'
 import type { Database } from '@/types/supabase'
 import { useEffect, useState } from 'react'
+import { toast } from '@/components/ui/use-toast'
 
 type TimeOffRequestRow = Database['public']['Tables']['time_off_requests']['Row']
 
@@ -56,13 +57,18 @@ export function TimeOffRequestsContent() {
         setRequests(transformedRequests)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred while fetching requests')
+        toast({
+          title: 'Error',
+          description: 'Failed to fetch time off requests',
+          variant: 'destructive',
+        })
       } finally {
         setLoading(false)
       }
     }
 
     fetchRequests()
-  }, [])
+  }, [toast])
 
   if (loading) {
     return <div>Loading...</div>

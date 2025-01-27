@@ -1,9 +1,14 @@
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
+import { TimeOffRequest } from '@/lib/types/time-off'
+import { redirect } from 'next/navigation'
+import TimeOffList from '@/components/TimeOffList'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { Suspense } from 'react'
+import { TimeOffSkeleton } from '@/components/skeletons/TimeOffSkeleton'
 import { Metadata } from 'next'
-import { TimeOffRequestsContent } from './components/TimeOffRequestsContent'
-import { TimeOffRequestsLoading } from './components/TimeOffRequestsLoading'
-import { TimeOffRequestsError } from '@/components/time-off-error'
-import { ErrorBoundary } from '@/components/error-boundary'
+
+export const dynamic = 'force-dynamic'
 
 // Define metadata for the page
 export const metadata: Metadata = {
@@ -11,15 +16,58 @@ export const metadata: Metadata = {
   description: 'Manage employee time off requests and approvals',
 }
 
-export default function TimeOffPage() {
+async function getTimeOffData() {
+  try {
+    const supabase = createServerComponentClient({ cookies })
+    
+    // Get current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (userError) throw userError
+    if (!user) return redirect('/login')
+
+    // Get time off requests with proper access control
+    const { data: requests, error: requestError } = await supabase
+      .rpc('get_time_off_requests')
+      .returns<TimeOffRequest[]>()
+
+    if (requestError) {
+      console.error('Error fetching time off requests:', requestError)
+      throw new Error('Failed to fetch time off requests')
+    }
+
+    return {
+      requests: requests || [],
+      user
+    }
+  } catch (error) {
+    console.error('Error in getTimeOffData:', error)
+    throw error
+  }
+}
+
+export default async function TimeOffPage() {
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-8">Time Off Requests</h1>
-      <ErrorBoundary fallback={TimeOffRequestsError}>
-        <Suspense fallback={<TimeOffRequestsLoading />}>
-          <TimeOffRequestsContent />
-        </Suspense>
-      </ErrorBoundary>
+    <ErrorBoundary fallback={<div>Error loading time off requests</div>}>
+      <Suspense fallback={<TimeOffSkeleton />}>
+        <TimeOffContent />
+      </Suspense>
+    </ErrorBoundary>
+  )
+}
+
+async function TimeOffContent() {
+  const { requests, user } = await getTimeOffData()
+
+  return (
+    <div className="flex-1 flex flex-col gap-4 p-4">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Time Off Requests</h1>
+      </div>
+      
+      <TimeOffList 
+        requests={requests}
+        currentUserId={user.id}
+      />
     </div>
   )
 } 

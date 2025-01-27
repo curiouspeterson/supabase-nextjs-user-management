@@ -64,6 +64,18 @@ export function TimeOffRequestDialog({
     },
   })
 
+  // Reset form when dialog opens
+  React.useEffect(() => {
+    if (open) {
+      form.reset({
+        start_date: '',
+        end_date: '',
+        type: TimeOffType.VACATION,
+        notes: '',
+      })
+    }
+  }, [open, form])
+
   async function onSubmit(data: TimeOffFormValues) {
     try {
       setIsLoading(true)

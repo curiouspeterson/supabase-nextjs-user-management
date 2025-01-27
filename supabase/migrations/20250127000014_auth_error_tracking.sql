@@ -1,11 +1,16 @@
 -- Auth Error Tracking Migration
 BEGIN;
 
+-- Drop existing objects if they exist
+DROP TABLE IF EXISTS public.auth_errors CASCADE;
+DROP FUNCTION IF EXISTS public.log_auth_error CASCADE;
+DROP FUNCTION IF EXISTS public.get_auth_error_history CASCADE;
+
 -- Add auth errors table
-CREATE TABLE IF NOT EXISTS public.auth_errors (
+CREATE TABLE public.auth_errors (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES auth.users(id),
-    action TEXT NOT NULL,
+    action_type TEXT NOT NULL,
     error_code TEXT NOT NULL,
     error_message TEXT,
     error_details JSONB DEFAULT '{}'::JSONB,
@@ -15,14 +20,9 @@ CREATE TABLE IF NOT EXISTS public.auth_errors (
 );
 
 -- Create indexes
-CREATE INDEX IF NOT EXISTS idx_auth_errors_user 
-ON public.auth_errors(user_id);
-
-CREATE INDEX IF NOT EXISTS idx_auth_errors_action 
-ON public.auth_errors(action);
-
-CREATE INDEX IF NOT EXISTS idx_auth_errors_created 
-ON public.auth_errors(created_at);
+CREATE INDEX idx_auth_errors_user ON public.auth_errors(user_id);
+CREATE INDEX idx_auth_errors_action ON public.auth_errors(action_type);
+CREATE INDEX idx_auth_errors_created ON public.auth_errors(created_at);
 
 -- Function to log auth error
 CREATE OR REPLACE FUNCTION public.log_auth_error(
@@ -43,7 +43,7 @@ DECLARE
 BEGIN
     INSERT INTO public.auth_errors (
         user_id,
-        action,
+        action_type,
         error_code,
         error_message,
         error_details,
@@ -75,7 +75,7 @@ CREATE OR REPLACE FUNCTION public.get_auth_error_history(
 RETURNS TABLE (
     error_id UUID,
     user_id UUID,
-    action TEXT,
+    action_type TEXT,
     error_code TEXT,
     error_message TEXT,
     error_details JSONB,
@@ -90,14 +90,14 @@ BEGIN
     SELECT 
         ae.id as error_id,
         ae.user_id,
-        ae.action,
+        ae.action_type,
         ae.error_code,
         ae.error_message,
         ae.error_details,
         ae.created_at
     FROM public.auth_errors ae
     WHERE (p_user_id IS NULL OR ae.user_id = p_user_id)
-    AND (p_action IS NULL OR ae.action = p_action)
+    AND (p_action IS NULL OR ae.action_type = p_action)
     AND ae.created_at BETWEEN p_start_time AND p_end_time
     ORDER BY ae.created_at DESC;
 END;
