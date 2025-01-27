@@ -45,19 +45,27 @@ export class DatabaseError extends ApiError {
   }
 }
 
-export class NetworkError extends AppError {
-  constructor(message: string = 'Network connection error', code: string = 'NETWORK_ERROR') {
-    super(
-      message,
-      code,
-      503,
-      true,
-      ErrorSeverity.HIGH,
-      ErrorCategory.NETWORK,
-      {},
-      ErrorRecoveryStrategy.RETRY
-    )
+export class NetworkError extends Error {
+  endpoint: string
+  attempts: number
+  metrics: any
+  cause?: unknown
+
+  constructor(
+    message: string,
+    details: {
+      endpoint: string
+      attempts: number
+      metrics: any
+      cause?: unknown
+    }
+  ) {
+    super(message)
     this.name = 'NetworkError'
+    this.endpoint = details.endpoint
+    this.attempts = details.attempts
+    this.metrics = details.metrics
+    this.cause = details.cause
   }
 }
 

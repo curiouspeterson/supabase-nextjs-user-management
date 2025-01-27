@@ -2,23 +2,50 @@
  * Utility functions for date and time operations in the scheduling system
  */
 
-/**
- * Parse a time string in HH:mm format to milliseconds since midnight
- */
-export function parseTimeToMs(time: string): number {
-  const [hours, minutes] = time.split(':').map(Number);
-  return (hours * 60 + minutes) * 60 * 1000;
+import { format, getISOWeek, parseISO, isValid, addDays } from 'date-fns';
+import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
+
+export class TimeFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeFormatError';
+  }
 }
 
 /**
- * Format milliseconds since midnight to HH:mm format
+ * Validates time string format (HH:mm)
  */
-export function formatMsToTime(ms: number): string {
-  const totalMinutes = Math.floor(ms / (60 * 1000));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
+const isValidTimeFormat = (time: string): boolean => {
+  const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+  return timeRegex.test(time);
+};
+
+/**
+ * Converts time string to milliseconds
+ * @throws {TimeFormatError} If time string is invalid
+ */
+export const parseTimeToMs = (time: string): number => {
+  if (!isValidTimeFormat(time)) {
+    throw new TimeFormatError(`Invalid time format: ${time}. Expected format: HH:mm`);
+  }
+
+  const [hours, minutes] = time.split(':').map(Number);
+  return (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
+};
+
+/**
+ * Formats milliseconds to time string
+ * @throws {TimeFormatError} If milliseconds value is invalid
+ */
+export const formatMsToTime = (ms: number): string => {
+  if (ms < 0 || ms >= 24 * 60 * 60 * 1000) {
+    throw new TimeFormatError(`Invalid milliseconds value: ${ms}`);
+  }
+
+  const hours = Math.floor(ms / (60 * 60 * 1000));
+  const minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-}
+};
 
 /**
  * Calculate the number of hours between two dates
@@ -94,30 +121,52 @@ export function doTimeRangesOverlap(
 }
 
 /**
- * Check if a date is within a date range (inclusive)
+ * Checks if a date is within a given range, considering timezone
  */
-export function isDateInRange(date: Date, start: Date, end: Date): boolean {
-  const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const normalizedStart = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const normalizedEnd = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+export const isDateInRange = (
+  date: Date,
+  startDate: Date,
+  endDate: Date,
+  timezone: string = 'UTC'
+): boolean => {
+  const zonedDate = utcToZonedTime(date, timezone);
+  const zonedStart = utcToZonedTime(startDate, timezone);
+  const zonedEnd = utcToZonedTime(endDate, timezone);
   
-  return normalizedDate >= normalizedStart && normalizedDate <= normalizedEnd;
-}
+  return zonedDate >= zonedStart && zonedDate <= zonedEnd;
+};
 
 /**
- * Get the next date with the specified time
+ * Gets the next date with a specific time, considering timezone
  */
-export function getNextDateWithTime(date: Date, time: string): Date {
-  const [hours, minutes] = time.split(':').map(Number);
-  const result = new Date(date);
-  result.setHours(hours, minutes, 0, 0);
-  
-  if (result < date) {
-    result.setDate(result.getDate() + 1);
+export const getNextDateWithTime = (
+  time: string,
+  timezone: string = 'UTC'
+): Date => {
+  if (!isValidTimeFormat(time)) {
+    throw new TimeFormatError(`Invalid time format: ${time}. Expected format: HH:mm`);
   }
+
+  const [hours, minutes] = time.split(':').map(Number);
+  const now = new Date();
+  const zonedNow = utcToZonedTime(now, timezone);
   
-  return result;
-}
+  let nextDate = new Date(
+    zonedNow.getFullYear(),
+    zonedNow.getMonth(),
+    zonedNow.getDate(),
+    hours,
+    minutes,
+    0,
+    0
+  );
+
+  if (nextDate <= zonedNow) {
+    nextDate = addDays(nextDate, 1);
+  }
+
+  return zonedTimeToUtc(nextDate, timezone);
+};
 
 /**
  * Calculate consecutive working days for an employee
@@ -171,12 +220,33 @@ export function isWeekend(date: Date): boolean {
 }
 
 /**
- * Get the week number for a date (1-53)
+ * Gets ISO week number for a given date
  */
-export function getWeekNumber(date: Date): number {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
-  const yearStart = new Date(d.getFullYear(), 0, 1);
-  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-} 
+export const getWeekNumber = (date: Date, timezone: string = 'UTC'): number => {
+  const zonedDate = utcToZonedTime(date, timezone);
+  return getISOWeek(zonedDate);
+};
+
+/**
+ * Validates and parses an ISO date string
+ * @throws {Error} If date string is invalid
+ */
+export const parseAndValidateDate = (dateStr: string): Date => {
+  const date = parseISO(dateStr);
+  if (!isValid(date)) {
+    throw new Error(`Invalid date string: ${dateStr}`);
+  }
+  return date;
+};
+
+/**
+ * Formats a date to ISO string with timezone consideration
+ */
+export const formatDateWithZone = (
+  date: Date,
+  timezone: string = 'UTC',
+  formatStr: string = "yyyy-MM-dd'T'HH:mm:ssXXX"
+): string => {
+  const zonedDate = utcToZonedTime(date, timezone);
+  return format(zonedDate, formatStr);
+}; 

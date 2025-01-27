@@ -12,77 +12,288 @@ import {
   getConsecutiveWorkingDays,
   groupDatesByWeek
 } from './date-utils';
+import { parseTimeToMs, formatMsToTime } from './date-utils';
+import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
+import { addDays, differenceInHours, isAfter, isBefore } from 'date-fns';
 
+// Error codes for validation
+export enum ValidationErrorCode {
+  INSUFFICIENT_REST = 'INSUFFICIENT_REST',
+  PATTERN_MISMATCH = 'PATTERN_MISMATCH',
+  OVERTIME_VIOLATION = 'OVERTIME_VIOLATION',
+  CONSECUTIVE_DAYS = 'CONSECUTIVE_DAYS',
+  INVALID_SHIFT_TIME = 'INVALID_SHIFT_TIME',
+  SHIFT_OVERLAP = 'SHIFT_OVERLAP',
+  INSUFFICIENT_STAFF = 'INSUFFICIENT_STAFF',
+  SUPERVISOR_REQUIRED = 'SUPERVISOR_REQUIRED'
+}
+
+// Structured validation error
+export interface ValidationError {
+  code: ValidationErrorCode;
+  message: string;
+  details?: Record<string, any>;
+}
+
+// Validation result type
 export interface ValidationResult {
   isValid: boolean;
-  errors: string[];
-  warnings: string[];
+  errors: ValidationError[];
+  warnings: ValidationError[];
 }
 
 /**
- * Validate rest hours between shifts for an employee
+ * Calculate rest hours between shifts, properly handling overnight shifts
+ */
+export function calculateRestHours(
+  currentShift: Shift,
+  nextShift: Shift,
+  timezone: string = 'UTC'
+): number {
+  const currentDate = utcToZonedTime(currentShift.date, timezone);
+  const nextDate = utcToZonedTime(nextShift.date, timezone);
+  
+  // Convert times to full datetime
+  let currentEnd = new Date(currentDate);
+  let nextStart = new Date(nextDate);
+  
+  const [currentEndHours, currentEndMinutes] = currentShift.endTime.split(':').map(Number);
+  const [nextStartHours, nextStartMinutes] = nextShift.startTime.split(':').map(Number);
+  
+  currentEnd.setHours(currentEndHours, currentEndMinutes, 0, 0);
+  nextStart.setHours(nextStartHours, nextStartMinutes, 0, 0);
+  
+  // Handle overnight shifts
+  if (currentEndHours > nextStartHours || 
+     (currentEndHours === nextStartHours && currentEndMinutes > nextStartMinutes)) {
+    currentEnd = addDays(currentEnd, 1);
+  }
+  
+  // Calculate hours between shifts
+  const restHours = differenceInHours(nextStart, currentEnd);
+  return Math.max(0, restHours);
+}
+
+/**
+ * Validate rest hours between shifts
  */
 export function validateRestHours(
-  assignments: ScheduleAssignment[],
   shifts: Shift[],
-  minimumRestHours: number
+  minRestHours: number,
+  timezone: string = 'UTC'
 ): ValidationResult {
   const result: ValidationResult = {
     isValid: true,
     errors: [],
     warnings: []
   };
+  
+  const sortedShifts = [...shifts].sort((a, b) => 
+    new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+  
+  for (let i = 0; i < sortedShifts.length - 1; i++) {
+    const currentShift = sortedShifts[i];
+    const nextShift = sortedShifts[i + 1];
+    
+    const restHours = calculateRestHours(currentShift, nextShift, timezone);
+    
+    if (restHours < minRestHours) {
+      result.isValid = false;
+      result.errors.push({
+        code: ValidationErrorCode.INSUFFICIENT_REST,
+        message: `Insufficient rest period (${restHours} hours) between shifts`,
+        details: {
+          currentShift,
+          nextShift,
+          actualRestHours: restHours,
+          requiredRestHours: minRestHours
+        }
+      });
+    } else if (restHours < minRestHours + 2) {
+      result.warnings.push({
+        code: ValidationErrorCode.INSUFFICIENT_REST,
+        message: `Rest period (${restHours} hours) is close to minimum requirement`,
+        details: {
+          currentShift,
+          nextShift,
+          actualRestHours: restHours,
+          requiredRestHours: minRestHours
+        }
+      });
+    }
+  }
+  
+  return result;
+}
 
-  // Group assignments by employee
-  const assignmentsByEmployee = assignments.reduce((acc, curr) => {
-    acc[curr.employeeId] = acc[curr.employeeId] || [];
-    acc[curr.employeeId].push(curr);
+/**
+ * Validate pattern compliance
+ */
+export function validatePatternCompliance(
+  shifts: Shift[],
+  pattern: ShiftPattern,
+  timezone: string = 'UTC'
+): ValidationResult {
+  const result: ValidationResult = {
+    isValid: true,
+    errors: [],
+    warnings: []
+  };
+  
+  // Sort shifts by date
+  const sortedShifts = [...shifts].sort((a, b) => 
+    new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+  
+  // Group shifts by day
+  const shiftsByDay = sortedShifts.reduce((acc, shift) => {
+    const date = new Date(shift.date).toISOString().split('T')[0];
+    acc[date] = acc[date] || [];
+    acc[date].push(shift);
     return acc;
-  }, {} as Record<string, ScheduleAssignment[]>);
+  }, {} as Record<string, Shift[]>);
+  
+  // Check pattern sequence
+  let patternIndex = 0;
+  const dates = Object.keys(shiftsByDay).sort();
+  
+  for (const date of dates) {
+    const dayShifts = shiftsByDay[date];
+    const expectedPattern = pattern.pattern[patternIndex];
+    
+    // Check if day's shifts match pattern
+    const matchesPattern = dayShifts.some(shift => {
+      const shiftSpan = `${shift.startTime}-${shift.endTime}`;
+      return expectedPattern.includes(shiftSpan);
+    });
+    
+    if (!matchesPattern) {
+      result.isValid = false;
+      result.errors.push({
+        code: ValidationErrorCode.PATTERN_MISMATCH,
+        message: `Shifts on ${date} do not match expected pattern`,
+        details: {
+          date,
+          shifts: dayShifts,
+          expectedPattern,
+          patternIndex
+        }
+      });
+    }
+    
+    patternIndex = (patternIndex + 1) % pattern.pattern.length;
+  }
+  
+  // Check consecutive days
+  let consecutiveDays = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const currentDate = new Date(dates[i]);
+    const prevDate = new Date(dates[i - 1]);
+    
+    if (differenceInHours(currentDate, prevDate) <= 24) {
+      consecutiveDays++;
+      
+      if (consecutiveDays > pattern.maxConsecutiveDays) {
+        result.isValid = false;
+        result.errors.push({
+          code: ValidationErrorCode.CONSECUTIVE_DAYS,
+          message: `Maximum consecutive days exceeded`,
+          details: {
+            consecutiveDays,
+            maxAllowed: pattern.maxConsecutiveDays,
+            startDate: dates[i - consecutiveDays + 1],
+            endDate: dates[i]
+          }
+        });
+      }
+    } else {
+      consecutiveDays = 1;
+    }
+  }
+  
+  return result;
+}
 
-  // Check each employee's assignments
-  Object.entries(assignmentsByEmployee).forEach(([employeeId, employeeAssignments]) => {
-    const sortedAssignments = employeeAssignments.sort(
-      (a, b) => a.date.getTime() - b.date.getTime()
+/**
+ * Validate shift overlaps
+ */
+export function validateShiftOverlaps(
+  shifts: Shift[],
+  timezone: string = 'UTC'
+): ValidationResult {
+  const result: ValidationResult = {
+    isValid: true,
+    errors: [],
+    warnings: []
+  };
+  
+  // Group shifts by employee
+  const shiftsByEmployee = shifts.reduce((acc, shift) => {
+    acc[shift.employeeId] = acc[shift.employeeId] || [];
+    acc[shift.employeeId].push(shift);
+    return acc;
+  }, {} as Record<string, Shift[]>);
+  
+  // Check overlaps for each employee
+  for (const [employeeId, employeeShifts] of Object.entries(shiftsByEmployee)) {
+    const sortedShifts = [...employeeShifts].sort((a, b) => 
+      new Date(a.date).getTime() - new Date(b.date).getTime()
     );
-
-    for (let i = 1; i < sortedAssignments.length; i++) {
-      const prevAssignment = sortedAssignments[i - 1];
-      const currAssignment = sortedAssignments[i];
-      
-      const prevShift = shifts.find(s => s.id === prevAssignment.shiftId);
-      const currShift = shifts.find(s => s.id === currAssignment.shiftId);
-      
-      if (prevShift && currShift) {
-        const prevEnd = new Date(prevAssignment.date);
-        prevEnd.setHours(
-          parseInt(prevShift.endTime.split(':')[0]),
-          parseInt(prevShift.endTime.split(':')[1])
-        );
-
-        const currStart = new Date(currAssignment.date);
-        currStart.setHours(
-          parseInt(currShift.startTime.split(':')[0]),
-          parseInt(currShift.startTime.split(':')[1])
-        );
-
-        const restHours = getHoursBetween(prevEnd, currStart);
+    
+    for (let i = 0; i < sortedShifts.length - 1; i++) {
+      for (let j = i + 1; j < sortedShifts.length; j++) {
+        const shift1 = sortedShifts[i];
+        const shift2 = sortedShifts[j];
         
-        if (restHours < minimumRestHours) {
+        if (doTimeRangesOverlap(
+          shift1.startTime,
+          shift1.endTime,
+          shift2.startTime,
+          shift2.endTime
+        )) {
           result.isValid = false;
-          result.errors.push(
-            `Employee ${employeeId} has insufficient rest between shifts: ${restHours} hours (minimum: ${minimumRestHours})`
-          );
-        } else if (restHours < minimumRestHours + 2) {
-          result.warnings.push(
-            `Employee ${employeeId} has minimal rest between shifts: ${restHours} hours`
-          );
+          result.errors.push({
+            code: ValidationErrorCode.SHIFT_OVERLAP,
+            message: `Overlapping shifts detected for employee`,
+            details: {
+              employeeId,
+              shift1,
+              shift2
+            }
+          });
         }
       }
     }
-  });
-
+  }
+  
   return result;
+}
+
+/**
+ * Comprehensive shift validation
+ */
+export function validateShifts(
+  shifts: Shift[],
+  pattern: ShiftPattern,
+  timezone: string = 'UTC'
+): ValidationResult {
+  const results: ValidationResult[] = [
+    validateRestHours(shifts, pattern.minRestHours, timezone),
+    validatePatternCompliance(shifts, pattern, timezone),
+    validateShiftOverlaps(shifts, timezone)
+  ];
+  
+  // Combine all validation results
+  return results.reduce((acc, result) => ({
+    isValid: acc.isValid && result.isValid,
+    errors: [...acc.errors, ...result.errors],
+    warnings: [...acc.warnings, ...result.warnings]
+  }), {
+    isValid: true,
+    errors: [],
+    warnings: []
+  });
 }
 
 /**
@@ -90,7 +301,8 @@ export function validateRestHours(
  */
 export function validateConsecutiveDays(
   assignments: ScheduleAssignment[],
-  maximumConsecutiveDays: number
+  maximumConsecutiveDays: number,
+  timezone: string = 'UTC'
 ): ValidationResult {
   const result: ValidationResult = {
     isValid: true,
@@ -107,18 +319,32 @@ export function validateConsecutiveDays(
 
   // Check each employee's assignments
   Object.entries(assignmentsByEmployee).forEach(([employeeId, employeeAssignments]) => {
-    const dates = employeeAssignments.map(a => a.date);
+    const dates = employeeAssignments.map(a => utcToZonedTime(a.date, timezone));
     const consecutiveDays = getConsecutiveWorkingDays(dates);
     
     if (consecutiveDays > maximumConsecutiveDays) {
       result.isValid = false;
-      result.errors.push(
-        `Employee ${employeeId} has ${consecutiveDays} consecutive working days (maximum: ${maximumConsecutiveDays})`
-      );
+      result.errors.push({
+        code: ValidationErrorCode.CONSECUTIVE_DAYS,
+        message: `Employee has exceeded maximum consecutive working days`,
+        details: {
+          employeeId,
+          consecutiveDays,
+          maximumConsecutiveDays,
+          dates: dates.map(d => d.toISOString())
+        }
+      });
     } else if (consecutiveDays === maximumConsecutiveDays) {
-      result.warnings.push(
-        `Employee ${employeeId} is working ${consecutiveDays} consecutive days`
-      );
+      result.warnings.push({
+        code: ValidationErrorCode.CONSECUTIVE_DAYS,
+        message: `Employee is at maximum consecutive working days`,
+        details: {
+          employeeId,
+          consecutiveDays,
+          maximumConsecutiveDays,
+          dates: dates.map(d => d.toISOString())
+        }
+      });
     }
   });
 
@@ -132,7 +358,8 @@ export function validateStaffingRequirements(
   assignments: ScheduleAssignment[],
   employees: Employee[],
   shifts: Shift[],
-  staffingRequirements: StaffingRequirement[]
+  staffingRequirements: StaffingRequirement[],
+  timezone: string = 'UTC'
 ): ValidationResult {
   const result: ValidationResult = {
     isValid: true,
@@ -142,7 +369,7 @@ export function validateStaffingRequirements(
 
   // Group assignments by date
   const assignmentsByDate = assignments.reduce((acc, curr) => {
-    const dateKey = curr.date.toISOString().split('T')[0];
+    const dateKey = utcToZonedTime(curr.date, timezone).toISOString().split('T')[0];
     acc[dateKey] = acc[dateKey] || [];
     acc[dateKey].push(curr);
     return acc;
@@ -167,7 +394,7 @@ export function validateStaffingRequirements(
             shift.endTime
           )) {
             totalEmployees++;
-            if (employee.employeeRole === 'Shift Supervisor') {
+            if (employee.employeeRole === 'SUPERVISOR') {
               supervisorPresent = true;
             }
           }
@@ -177,18 +404,37 @@ export function validateStaffingRequirements(
       // Check minimum staffing
       if (totalEmployees < requirement.minimumEmployees) {
         result.isValid = false;
-        result.errors.push(
-          `Insufficient staffing on ${dateStr} during ${requirement.periodName}: ` +
-          `${totalEmployees} employees (minimum: ${requirement.minimumEmployees})`
-        );
+        result.errors.push({
+          code: ValidationErrorCode.INSUFFICIENT_STAFF,
+          message: `Insufficient staffing during required period`,
+          details: {
+            date: dateStr,
+            period: {
+              start: requirement.startTime,
+              end: requirement.endTime,
+              name: requirement.periodName
+            },
+            actualCount: totalEmployees,
+            requiredCount: requirement.minimumEmployees
+          }
+        });
       }
 
       // Check supervisor requirement
       if (requirement.shiftSupervisorRequired && !supervisorPresent) {
         result.isValid = false;
-        result.errors.push(
-          `No supervisor present on ${dateStr} during ${requirement.periodName}`
-        );
+        result.errors.push({
+          code: ValidationErrorCode.SUPERVISOR_REQUIRED,
+          message: `No supervisor present during required period`,
+          details: {
+            date: dateStr,
+            period: {
+              start: requirement.startTime,
+              end: requirement.endTime,
+              name: requirement.periodName
+            }
+          }
+        });
       }
     });
   });
@@ -202,7 +448,8 @@ export function validateStaffingRequirements(
 export function validateWeeklyHours(
   assignments: ScheduleAssignment[],
   employees: Employee[],
-  shifts: Shift[]
+  shifts: Shift[],
+  timezone: string = 'UTC'
 ): ValidationResult {
   const result: ValidationResult = {
     isValid: true,
@@ -210,7 +457,7 @@ export function validateWeeklyHours(
     warnings: []
   };
 
-  // Group assignments by employee and week
+  // Group assignments by employee
   const assignmentsByEmployee = assignments.reduce((acc, curr) => {
     acc[curr.employeeId] = acc[curr.employeeId] || [];
     acc[curr.employeeId].push(curr);
@@ -222,14 +469,17 @@ export function validateWeeklyHours(
     const employee = employees.find(e => e.id === employeeId);
     if (!employee) return;
 
-    const weeklyAssignments = groupDatesByWeek(employeeAssignments.map(a => a.date));
+    const weeklyAssignments = groupDatesByWeek(
+      employeeAssignments.map(a => utcToZonedTime(a.date, timezone))
+    );
     
     Object.entries(weeklyAssignments).forEach(([weekStart, weekDates]) => {
       let totalHours = 0;
       
       weekDates.forEach(date => {
         const assignment = employeeAssignments.find(
-          a => a.date.toISOString().split('T')[0] === date.toISOString().split('T')[0]
+          a => utcToZonedTime(a.date, timezone).toISOString().split('T')[0] === 
+             date.toISOString().split('T')[0]
         );
         if (assignment) {
           const shift = shifts.find(s => s.id === assignment.shiftId);
@@ -241,15 +491,29 @@ export function validateWeeklyHours(
 
       if (totalHours > employee.weeklyHoursScheduled) {
         result.isValid = false;
-        result.errors.push(
-          `Employee ${employeeId} is scheduled for ${totalHours} hours in week of ${weekStart} ` +
-          `(maximum: ${employee.weeklyHoursScheduled})`
-        );
+        result.errors.push({
+          code: ValidationErrorCode.OVERTIME_VIOLATION,
+          message: `Employee exceeds scheduled weekly hours`,
+          details: {
+            employeeId,
+            weekStart,
+            totalHours,
+            scheduledHours: employee.weeklyHoursScheduled,
+            dates: weekDates.map(d => d.toISOString())
+          }
+        });
       } else if (totalHours < employee.weeklyHoursScheduled) {
-        result.warnings.push(
-          `Employee ${employeeId} is scheduled for ${totalHours} hours in week of ${weekStart} ` +
-          `(target: ${employee.weeklyHoursScheduled})`
-        );
+        result.warnings.push({
+          code: ValidationErrorCode.OVERTIME_VIOLATION,
+          message: `Employee is under scheduled weekly hours`,
+          details: {
+            employeeId,
+            weekStart,
+            totalHours,
+            scheduledHours: employee.weeklyHoursScheduled,
+            dates: weekDates.map(d => d.toISOString())
+          }
+        });
       }
     });
   });
@@ -271,25 +535,25 @@ export function validatePatternCompliance(
     errors: [],
     warnings: []
   };
-
+  
   // Group assignments by employee
   const assignmentsByEmployee = assignments.reduce((acc, curr) => {
     acc[curr.employeeId] = acc[curr.employeeId] || [];
     acc[curr.employeeId].push(curr);
     return acc;
   }, {} as Record<string, ScheduleAssignment[]>);
-
+    
   // Check each employee's pattern compliance
   Object.entries(assignmentsByEmployee).forEach(([employeeId, employeeAssignments]) => {
     const employeePattern = employeePatterns.find(ep => ep.employeeId === employeeId);
     if (!employeePattern) return;
-
+  
     const pattern = patterns.find(p => p.id === employeePattern.patternId);
     if (!pattern) return;
-
+    
     // Group assignments by week
     const weeklyAssignments = groupDatesByWeek(employeeAssignments.map(a => a.date));
-
+      
     Object.entries(weeklyAssignments).forEach(([weekStart, weekDates]) => {
       // Check number of working days
       if (weekDates.length !== pattern.daysOn) {
@@ -318,7 +582,7 @@ export function validatePatternCompliance(
       });
     });
   });
-
+  
   return result;
 }
 
@@ -346,13 +610,19 @@ export function validateSchedule(
   patterns: ShiftPattern[],
   shifts: Shift[],
   staffingRequirements: StaffingRequirement[],
-  options: { minimumRestHours: number; maximumConsecutiveDays: number }
+  options: {
+    minimumRestHours: number;
+    maximumConsecutiveDays: number;
+    timezone?: string;
+  }
 ): ValidationResult {
+  const timezone = options.timezone || 'UTC';
+  
   return combineValidationResults(
-    validateRestHours(assignments, shifts, options.minimumRestHours),
-    validateConsecutiveDays(assignments, options.maximumConsecutiveDays),
-    validateStaffingRequirements(assignments, employees, shifts, staffingRequirements),
-    validateWeeklyHours(assignments, employees, shifts),
-    validatePatternCompliance(assignments, employeePatterns, patterns, shifts)
+    validateRestHours(shifts, options.minimumRestHours, timezone),
+    validateConsecutiveDays(assignments, options.maximumConsecutiveDays, timezone),
+    validateStaffingRequirements(assignments, employees, shifts, staffingRequirements, timezone),
+    validateWeeklyHours(assignments, employees, shifts, timezone),
+    validateShifts(shifts, patterns[0], timezone)
   );
 } 
