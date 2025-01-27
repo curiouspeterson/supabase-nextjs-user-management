@@ -1,164 +1,114 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '@/utils/supabase/client'
-import { Database } from '@/app/database.types'
-import { DayOfWeek, formatDate, getWeekStart, startOfWeek } from '@/utils/schedule'
-import { SupabaseClient } from '@supabase/supabase-js'
-import { useUser } from '@/lib/hooks'
+import React, { useState } from 'react'
+import { addDays, format, startOfWeek } from 'date-fns'
+import { DndProvider } from 'react-dnd'
+import { HTML5Backend } from 'react-dnd-html5-backend'
+import type { 
+  Schedule, 
+  Employee, 
+  Shift,
+  CoverageReport 
+} from '@/services/scheduler/types'
+import TimeSlot from './TimeSlot'
+import CoverageIndicator from './CoverageIndicator'
+import ScheduleControls from './ScheduleControls'
 
-type WeeklyScheduleProps = {
-  isManager?: boolean
+interface WeeklyScheduleProps {
+  schedules: Schedule[]
+  employees: Employee[]
+  shifts: Shift[]
+  coverage: CoverageReport[]
+  onAssignShift?: (employeeId: string, shiftId: string, date: Date) => Promise<void>
+  onRemoveShift?: (scheduleId: string) => Promise<void>
 }
 
-type ScheduleWithDetails = Database['public']['Tables']['schedules']['Row'] & {
-  shifts: Array<Database['public']['Tables']['shifts']['Row'] & {
-    shift_types: Database['public']['Tables']['shift_types']['Row']
-  }>,
-  employees: Database['public']['Tables']['employees']['Row'] & {
-    profiles: Database['public']['Tables']['profiles']['Row']
-  }
-}
-
-const DAYS_OF_WEEK: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as DayOfWeek[]
-
-export default function WeeklySchedule({ isManager = false }: WeeklyScheduleProps) {
-  const [schedules, setSchedules] = useState<ScheduleWithDetails[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [currentWeek, setCurrentWeek] = useState(startOfWeek(new Date()))
-  const { user } = useUser()
-
-  const fetchSchedules = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const supabase = createClient() as SupabaseClient<Database>
-      let query = supabase
-        .from('schedules')
-        .select(`
-          *,
-          shifts!inner(
-            *,
-            shift_types(*)
-          ),
-          employees!inner(
-            *,
-            profiles(*)
-          )
-        `)
-        .eq('week_start_date', formatDate(currentWeek))
-
-      if (!isManager && user?.id) {
-        query = query.eq('employee_id', user.id)
-      }
-
-      const { data, error } = await query
-
-      if (error) throw error
-
-      const typedData = (data || []) as unknown as ScheduleWithDetails[]
-      setSchedules(typedData)
-    } catch (error: any) {
-      console.error('Error fetching schedules:', error)
-      setError(error?.message || 'Failed to load schedules')
-    } finally {
-      setLoading(false)
-    }
-  }, [currentWeek, isManager, user?.id])
-
-  useEffect(() => {
-    fetchSchedules()
-  }, [fetchSchedules])
-
-  const formatTime = (time: string) => {
-    return new Date(`2000-01-01T${time}`).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    })
-  }
-
-  if (loading) return <div>Loading...</div>
-  if (error) return <div>Error: {error}</div>
+export default function WeeklySchedule({
+  schedules,
+  employees,
+  shifts,
+  coverage,
+  onAssignShift,
+  onRemoveShift
+}: WeeklyScheduleProps) {
+  const [currentDate, setCurrentDate] = useState(new Date())
+  const weekStart = startOfWeek(currentDate)
+  
+  // Generate array of dates for the week
+  const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
+  
+  // Generate array of hours for the day
+  const hours = Array.from({ length: 24 }, (_, i) => i)
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <button
-          onClick={() => {
-            const newDate = new Date(currentWeek)
-            newDate.setDate(newDate.getDate() - 7)
-            setCurrentWeek(startOfWeek(newDate))
-          }}
-          className="text-sm text-gray-600 hover:text-gray-900"
-        >
-          Previous Week
-        </button>
-        <span className="text-lg font-semibold">
-          Week of {formatDate(currentWeek)}
-        </span>
-        <button
-          onClick={() => {
-            const newDate = new Date(currentWeek)
-            newDate.setDate(newDate.getDate() + 7)
-            setCurrentWeek(startOfWeek(newDate))
-          }}
-          className="text-sm text-gray-600 hover:text-gray-900"
-        >
-          Next Week
-        </button>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Day
-              </th>
-              {isManager && (
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Employee
-                </th>
-              )}
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Shift Type
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Time
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Duration
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {schedules.map((schedule) => (
-              <tr key={schedule.id}>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {schedule.day_of_week}
-                </td>
-                {isManager && (
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {schedule.employees.profiles.full_name}
-                  </td>
-                )}
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {schedule.shifts[0].shift_types.name}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {formatTime(schedule.shifts[0].start_time)} -{' '}
-                  {formatTime(schedule.shifts[0].end_time)}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {schedule.shifts[0].duration_category}
-                </td>
-              </tr>
+    <DndProvider backend={HTML5Backend}>
+      <div className="flex flex-col w-full">
+        <ScheduleControls
+          currentDate={currentDate}
+          onDateChange={setCurrentDate}
+        />
+        
+        <div className="grid grid-cols-8 gap-1 mt-4">
+          {/* Time column */}
+          <div className="col-span-1">
+            <div className="h-12"></div> {/* Header spacer */}
+            {hours.map(hour => (
+              <div key={hour} className="h-16 flex items-center justify-end pr-2 text-sm text-gray-600">
+                {format(new Date().setHours(hour), 'ha')}
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+
+          {/* Day columns */}
+          {weekDates.map(date => (
+            <div key={date.toISOString()} className="col-span-1">
+              {/* Day header */}
+              <div className="h-12 flex flex-col items-center justify-center border-b">
+                <div className="text-sm font-medium">
+                  {format(date, 'EEE')}
+                </div>
+                <div className="text-xs text-gray-600">
+                  {format(date, 'MMM d')}
+                </div>
+              </div>
+
+              {/* Time slots */}
+              {hours.map(hour => (
+                <TimeSlot
+                  key={`${date.toISOString()}-${hour}`}
+                  date={date}
+                  hour={hour}
+                  schedules={schedules.filter(s => s.date === format(date, 'yyyy-MM-dd'))}
+                  shifts={shifts}
+                  employees={employees}
+                  isEditable={!!onAssignShift}
+                  onAssignShift={onAssignShift}
+                />
+              ))}
+
+              {/* Coverage indicators */}
+              <div className="mt-2">
+                {coverage
+                  .find(c => c.date === format(date, 'yyyy-MM-dd'))
+                  ?.periods && Object.entries(coverage
+                    .find(c => c.date === format(date, 'yyyy-MM-dd'))!
+                    .periods
+                  ).map(([periodId, data]) => (
+                    <CoverageIndicator
+                      key={`${date.toISOString()}-${periodId}`}
+                      date={date}
+                      period={periodId}
+                      required={data.required}
+                      actual={data.actual}
+                      supervisors={data.supervisors}
+                    />
+                  ))
+                }
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+    </DndProvider>
   )
 } 

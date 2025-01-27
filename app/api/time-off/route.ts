@@ -1,12 +1,17 @@
-import { NextResponse } from 'next/server'
-import { createClient } from '@/utils/supabase/server'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
+import { NextResponse } from 'next/server'
+
+export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
   try {
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const supabase = createRouteHandlerClient({ cookies })
     
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
     if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
@@ -19,29 +24,32 @@ export async function POST(request: Request) {
 
     const { data, error } = await supabase
       .from('time_off_requests')
-      .insert([
-        {
-          user_id: user.id,
-          start_date: startDate,
-          end_date: endDate,
-          reason,
-          status: 'pending'
-        }
-      ])
+      .insert({
+        employee_id: user.id,
+        start_date: startDate,
+        end_date: endDate,
+        type: 'vacation', // or get from request body if multiple types are supported
+        notes: reason,
+        status: 'Pending',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
       .select()
       .single()
 
     if (error) {
+      console.error('Error creating time off request:', error)
       return NextResponse.json(
-        { error: error.message },
-        { status: 400 }
+        { error: 'Failed to create time off request' },
+        { status: 500 }
       )
     }
 
     return NextResponse.json(data)
   } catch (error) {
+    console.error('Error in time off request:', error)
     return NextResponse.json(
-      { error: 'Internal Server Error' },
+      { error: 'Internal server error' },
       { status: 500 }
     )
   }
@@ -49,7 +57,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const supabase = createClient()
+    const supabase = createRouteHandlerClient({ cookies })
     const { data: { user } } = await supabase.auth.getUser()
     
     if (!user) {
@@ -90,7 +98,7 @@ export async function GET(request: Request) {
 
 export async function PUT(request: Request) {
   try {
-    const supabase = createClient()
+    const supabase = createRouteHandlerClient({ cookies })
     const { data: { user } } = await supabase.auth.getUser()
     
     if (!user) {
@@ -128,7 +136,7 @@ export async function PUT(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const supabase = createClient()
+    const supabase = createRouteHandlerClient({ cookies })
     const { data: { user } } = await supabase.auth.getUser()
     
     if (!user) {

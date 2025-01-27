@@ -1,9 +1,23 @@
-import React from 'react';
-import { useDrag, DragSourceMonitor } from 'react-dnd';
-import { format } from 'date-fns';
-import { ShiftBlockProps } from './types';
+'use client';
 
-export function ShiftBlock({
+import React from 'react';
+import { useDrag } from 'react-dnd';
+import { format } from 'date-fns';
+import type { 
+  Schedule, 
+  Employee, 
+  Shift 
+} from '@/services/scheduler/types';
+
+interface ShiftBlockProps {
+  schedule: Schedule;
+  shift: Shift;
+  employee: Employee;
+  isEditable: boolean;
+  onRemove?: () => Promise<void>;
+}
+
+export default function ShiftBlock({
   schedule,
   shift,
   employee,
@@ -12,38 +26,37 @@ export function ShiftBlock({
 }: ShiftBlockProps) {
   const [{ isDragging }, drag] = useDrag({
     type: 'SHIFT',
-    item: {
+    item: { 
       type: 'SHIFT',
-      id: schedule.id,
+      scheduleId: schedule.id,
       shiftId: shift.id,
-      employeeId: employee.id,
-      sourceDate: new Date(schedule.date)
+      employeeId: employee.id
     },
-    canDrag: () => isEditable === true,
-    collect: (monitor: DragSourceMonitor) => ({
+    canDrag: () => isEditable,
+    collect: (monitor) => ({
       isDragging: monitor.isDragging()
     })
   });
 
-  // Calculate shift duration for styling
+  // Calculate duration for styling
   const startHour = parseInt(shift.start_time.split(':')[0]);
   const endHour = parseInt(shift.end_time.split(':')[0]);
   const duration = endHour > startHour ? endHour - startHour : (24 - startHour) + endHour;
-
-  // Determine background color based on shift type and employee role
+  
+  // Determine background color based on role and duration
   const getBgColor = () => {
     if (employee.employee_role === 'Shift Supervisor') {
-      return 'bg-purple-100 border-purple-300';
+      return 'bg-purple-100 border-purple-200';
     }
     switch (shift.duration_category) {
       case '12 hours':
-        return 'bg-blue-100 border-blue-300';
+        return 'bg-blue-100 border-blue-200';
       case '10 hours':
-        return 'bg-green-100 border-green-300';
-      case '4 hours':
-        return 'bg-yellow-100 border-yellow-300';
+        return 'bg-green-100 border-green-200';
+      case '8 hours':
+        return 'bg-yellow-100 border-yellow-200';
       default:
-        return 'bg-gray-100 border-gray-300';
+        return 'bg-gray-100 border-gray-200';
     }
   };
 
@@ -51,44 +64,37 @@ export function ShiftBlock({
     <div
       ref={drag}
       className={`
+        relative p-2 rounded-md border
         ${getBgColor()}
-        rounded-md border p-1 cursor-pointer
         ${isDragging ? 'opacity-50' : 'opacity-100'}
-        ${isEditable ? 'hover:shadow-md transition-shadow' : ''}
-        relative group
+        ${isEditable ? 'cursor-move' : ''}
+        transition-all duration-200
       `}
       style={{
-        height: `${Math.min(duration * 4, 16)}rem`
+        height: `${Math.max(duration * 4, 4)}rem`
       }}
     >
-      {/* Employee info */}
-      <div className="text-xs font-medium truncate">
-        {employee.employee_role === 'Shift Supervisor' && (
-          <span className="mr-1 text-purple-600">👑</span>
-        )}
-        {employee.user_role}
+      {/* Employee name */}
+      <div className="text-sm font-medium truncate">
+        {employee.employee_role}
       </div>
 
-      {/* Shift time */}
+      {/* Shift times */}
       <div className="text-xs text-gray-600">
-        {format(new Date(`2000-01-01T${shift.start_time}`), 'ha')} -
-        {format(new Date(`2000-01-01T${shift.end_time}`), 'ha')}
+        {format(new Date(`2000-01-01T${shift.start_time}`), 'h:mma')} -
+        {format(new Date(`2000-01-01T${shift.end_time}`), 'h:mma')}
       </div>
 
       {/* Duration badge */}
-      <div className="absolute bottom-1 right-1 text-xs px-1 rounded bg-white/50">
-        {shift.duration_hours}h
+      <div className="absolute bottom-2 right-2 text-xs px-2 py-1 rounded-full bg-white bg-opacity-50">
+        {shift.duration_category}
       </div>
 
       {/* Remove button */}
       {isEditable && onRemove && (
         <button
-          onClick={e => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          className="absolute -top-1 -right-1 hidden group-hover:flex h-5 w-5 items-center justify-center
-                     bg-red-500 text-white rounded-full text-xs hover:bg-red-600"
+          onClick={onRemove}
+          className="absolute top-1 right-1 text-gray-400 hover:text-red-500"
         >
           ×
         </button>

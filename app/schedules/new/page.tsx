@@ -6,6 +6,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { scheduleService } from '@/services/scheduleService'
 import { Employee } from '@/utils/scheduling/types'
 import { format } from 'date-fns'
+import { toast } from '@/components/ui/use-toast'
 
 interface FormData {
   employeeId: string
@@ -32,6 +33,32 @@ export default function NewSchedulePage() {
   const [saving, setSaving] = useState(false)
 
   // Fetch employees and shifts
+  useEffect(() => {
+    async function loadEmployees() {
+      try {
+        setLoading(true);
+        const { data, error } = await supabase
+          .from('employees')
+          .select('*')
+          .order('full_name');
+
+        if (error) throw error;
+        setEmployees(data || []);
+      } catch (error) {
+        console.error('Error loading employees:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load employees',
+          variant: 'destructive',
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadEmployees();
+  }, [supabase]);
+
   useEffect(() => {
     const fetchData = async () => {
       try {

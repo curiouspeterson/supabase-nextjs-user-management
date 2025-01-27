@@ -1,15 +1,13 @@
 import { GET } from '@/app/api/scheduler/health/route';
 import { SchedulerMonitor } from '@/services/scheduler/monitor';
+import { NextResponse } from 'next/server';
 
-// Mock SchedulerMonitor
+// Mock the SchedulerMonitor class
 jest.mock('@/services/scheduler/monitor');
 
 describe('Health Check API', () => {
-  let mockMonitor: jest.Mocked<SchedulerMonitor>;
-
   beforeEach(() => {
-    mockMonitor = new SchedulerMonitor() as jest.Mocked<SchedulerMonitor>;
-    (SchedulerMonitor as jest.Mock).mockImplementation(() => mockMonitor);
+    jest.clearAllMocks();
   });
 
   it('should return 200 for healthy status', async () => {
@@ -20,15 +18,18 @@ describe('Health Check API', () => {
         overtime_violations: 0,
         pattern_errors: 0,
         schedule_generation_time: 60,
-        last_run_status: 'success'
+        last_run_status: 'success',
+        error_message: null
       },
-      coverage: {},
+      coverage: [],
       alerts: []
     };
 
-    mockMonitor.checkHealth.mockResolvedValue(mockHealth);
+    (SchedulerMonitor as jest.Mock).mockImplementation(() => ({
+      checkHealth: jest.fn().mockResolvedValue(mockHealth)
+    }));
 
-    const response = await GET(new Request('http://localhost/api/scheduler/health'));
+    const response = await GET();
     const data = await response.json();
 
     expect(response.status).toBe(200);
@@ -40,18 +41,21 @@ describe('Health Check API', () => {
       status: 'degraded',
       metrics: {
         coverage_deficit: 1,
-        overtime_violations: 0,
-        pattern_errors: 0,
-        schedule_generation_time: 200,
-        last_run_status: 'success'
+        overtime_violations: 2,
+        pattern_errors: 1,
+        schedule_generation_time: 120,
+        last_run_status: 'success',
+        error_message: null
       },
-      coverage: {},
-      alerts: ['WARNING: Coverage deficit detected']
+      coverage: [],
+      alerts: ['Warning: Coverage deficit detected']
     };
 
-    mockMonitor.checkHealth.mockResolvedValue(mockHealth);
+    (SchedulerMonitor as jest.Mock).mockImplementation(() => ({
+      checkHealth: jest.fn().mockResolvedValue(mockHealth)
+    }));
 
-    const response = await GET(new Request('http://localhost/api/scheduler/health'));
+    const response = await GET();
     const data = await response.json();
 
     expect(response.status).toBe(429);
@@ -63,18 +67,21 @@ describe('Health Check API', () => {
       status: 'critical',
       metrics: {
         coverage_deficit: 3,
-        overtime_violations: 2,
-        pattern_errors: 1,
-        schedule_generation_time: 400,
-        last_run_status: 'failure'
+        overtime_violations: 5,
+        pattern_errors: 2,
+        schedule_generation_time: 300,
+        last_run_status: 'error',
+        error_message: 'Critical error detected'
       },
-      coverage: {},
-      alerts: ['CRITICAL: Multiple coverage deficits detected']
+      coverage: [],
+      alerts: ['Critical: Multiple violations detected']
     };
 
-    mockMonitor.checkHealth.mockResolvedValue(mockHealth);
+    (SchedulerMonitor as jest.Mock).mockImplementation(() => ({
+      checkHealth: jest.fn().mockResolvedValue(mockHealth)
+    }));
 
-    const response = await GET(new Request('http://localhost/api/scheduler/health'));
+    const response = await GET();
     const data = await response.json();
 
     expect(response.status).toBe(500);
@@ -82,16 +89,26 @@ describe('Health Check API', () => {
   });
 
   it('should handle errors gracefully', async () => {
-    const testError = new Error('Test error');
-    mockMonitor.checkHealth.mockRejectedValue(testError);
+    (SchedulerMonitor as jest.Mock).mockImplementation(() => ({
+      checkHealth: jest.fn().mockRejectedValue(new Error('Test error'))
+    }));
 
-    const response = await GET(new Request('http://localhost/api/scheduler/health'));
+    const response = await GET();
     const data = await response.json();
 
     expect(response.status).toBe(500);
     expect(data).toEqual({
       status: 'critical',
-      error: 'Test error'
+      metrics: {
+        coverage_deficit: 0,
+        overtime_violations: 0,
+        pattern_errors: 0,
+        schedule_generation_time: 0,
+        last_run_status: 'error',
+        error_message: 'Health check failed'
+      },
+      coverage: [],
+      alerts: ['Health check system error']
     });
   });
 }); 

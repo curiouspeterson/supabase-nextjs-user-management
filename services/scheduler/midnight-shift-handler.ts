@@ -1,168 +1,166 @@
+'use client';
+
+import { addDays, differenceInHours, parseISO } from 'date-fns';
+import type { Shift, Schedule, CoverageReport } from './types';
 import { createClient } from '@/utils/supabase/server';
-import { Shift, Schedule, CoverageReport } from './types';
+
+export interface ShiftSegment {
+  date: string;
+  hours: number;
+}
 
 export class MidnightShiftHandler {
   private supabase = createClient();
 
+  constructor() {}
+
   /**
-   * Split a shift that crosses midnight into daily segments
+   * Splits a shift that crosses midnight into segments for each day
    */
-  public splitShiftAcrossDays(shift: Shift, date: Date): { date: Date; hours: number }[] {
-    const segments: { date: Date; hours: number }[] = [];
-    
-    const shiftStart = new Date(`${date.toISOString().split('T')[0]}T${shift.start_time}`);
-    const shiftEnd = new Date(`${date.toISOString().split('T')[0]}T${shift.end_time}`);
-    
-    // If end time is before start time, it crosses midnight
-    if (shiftEnd < shiftStart) {
-      shiftEnd.setDate(shiftEnd.getDate() + 1);
+  splitShiftAcrossDays(shift: Shift, date: string): ShiftSegment[] {
+    const segments: ShiftSegment[] = [];
+    const startDate = new Date(`${date}T${shift.start_time}`);
+    let endDate = new Date(`${date}T${shift.end_time}`);
+
+    // If end time is before start time, the shift crosses midnight
+    if (shift.end_time < shift.start_time) {
+      endDate = addDays(endDate, 1);
     }
+
+    // Calculate hours for first day
+    const midnightFirstDay = new Date(startDate);
+    midnightFirstDay.setHours(24, 0, 0, 0);
     
-    // Calculate hours in first day
-    const midnight = new Date(shiftStart);
-    midnight.setDate(midnight.getDate() + 1);
-    midnight.setHours(0, 0, 0, 0);
-    
-    if (midnight < shiftEnd) {
-      // Split across days
-      const firstDayHours = (midnight.getTime() - shiftStart.getTime()) / (1000 * 60 * 60);
-      const secondDayHours = (shiftEnd.getTime() - midnight.getTime()) / (1000 * 60 * 60);
-      
-      segments.push(
-        { date: new Date(date), hours: firstDayHours },
-        { date: new Date(midnight), hours: secondDayHours }
-      );
-    } else {
-      // All hours in same day
+    if (endDate > midnightFirstDay) {
+      // Shift crosses midnight
+      const firstDayHours = differenceInHours(midnightFirstDay, startDate);
       segments.push({
-        date: new Date(date),
-        hours: (shiftEnd.getTime() - shiftStart.getTime()) / (1000 * 60 * 60)
+        date: date,
+        hours: firstDayHours
+      });
+
+      // Add hours for second day
+      const secondDayHours = differenceInHours(endDate, midnightFirstDay);
+      segments.push({
+        date: addDays(new Date(date), 1).toISOString().split('T')[0],
+        hours: secondDayHours
+      });
+    } else {
+      // Shift doesn't cross midnight
+      segments.push({
+        date: date,
+        hours: shift.duration_hours
       });
     }
-    
+
     return segments;
   }
 
   /**
-   * Calculate coverage for shifts that may cross midnight
+   * Calculates coverage for shifts that may cross midnight
    */
-  public async calculateCoverage(schedules: Schedule[]): Promise<Map<string, CoverageReport>> {
+  async calculateCoverage(schedules: Schedule[]): Promise<Map<string, CoverageReport>> {
     const coverage = new Map<string, CoverageReport>();
     
-    // Get all shifts
+    // Get all shifts and staffing requirements
     const { data: shifts } = await this.supabase
       .from('shifts')
       .select('*');
-      
-    if (!shifts) {
-      throw new Error('Failed to fetch shifts');
-    }
     
-    // Get staffing requirements
     const { data: requirements } = await this.supabase
       .from('staffing_requirements')
       .select('*');
-      
-    if (!requirements) {
-      throw new Error('Failed to fetch staffing requirements');
+
+    if (!shifts || !requirements) {
+      throw new Error('Failed to fetch shifts or staffing requirements');
     }
-    
+
     // Process each schedule
     for (const schedule of schedules) {
       const shift = shifts.find(s => s.id === schedule.shift_id);
       if (!shift) continue;
+
+      // Split shift if it crosses midnight
+      const segments = this.splitShiftAcrossDays(shift, schedule.date);
       
-      const segments = this.splitShiftAcrossDays(shift, new Date(schedule.date));
-      
-      // Update coverage for each day segment
+      // Update coverage for each segment
       for (const segment of segments) {
-        const dateKey = segment.date.toISOString().split('T')[0];
-        
-        if (!coverage.has(dateKey)) {
-          coverage.set(dateKey, {
-            date: dateKey,
-            periods: {}
+        if (!coverage.has(segment.date)) {
+          coverage.set(segment.date, {
+            date: segment.date,
+            periods: new Map()
           });
         }
+
+        const dailyCoverage = coverage.get(segment.date)!;
         
-        const dayReport = coverage.get(dateKey)!;
-        
-        // Check coverage for each requirement period
-        for (const req of requirements) {
-          const periodKey = `${req.start_time}-${req.end_time}`;
+        // Find overlapping requirements
+        requirements.forEach(req => {
+          const reqStart = parseISO(`${segment.date}T${req.start_time}`);
+          let reqEnd = parseISO(`${segment.date}T${req.end_time}`);
           
-          if (!dayReport.periods[periodKey]) {
-            dayReport.periods[periodKey] = {
-              required: req.minimum_employees,
-              actual: 0,
-              supervisors: 0,
-              overtime: 0
-            };
+          // Handle requirements that cross midnight
+          if (req.end_time < req.start_time) {
+            reqEnd = addDays(reqEnd, 1);
           }
+
+          // Check if shift segment overlaps with requirement period
+          const shiftStart = parseISO(`${segment.date}T${shift.start_time}`);
+          let shiftEnd = parseISO(`${segment.date}T${shift.end_time}`);
           
-          // Update coverage if shift overlaps with requirement period
-          const shiftStart = new Date(`1970-01-01T${shift.start_time}`);
-          const shiftEnd = new Date(`1970-01-01T${shift.end_time}`);
-          const reqStart = new Date(`1970-01-01T${req.start_time}`);
-          const reqEnd = new Date(`1970-01-01T${req.end_time}`);
-          
-          if (shiftStart <= reqEnd && shiftEnd >= reqStart) {
-            dayReport.periods[periodKey].actual++;
-            
-            // Get employee details for supervisor count
-            const { data: employee } = await this.supabase
-              .from('employees')
-              .select('employee_role')
-              .eq('id', schedule.employee_id)
-              .single();
-              
-            if (employee?.employee_role === 'Shift Supervisor') {
-              dayReport.periods[periodKey].supervisors++;
+          if (shift.end_time < shift.start_time) {
+            shiftEnd = addDays(shiftEnd, 1);
+          }
+
+          if (shiftStart < reqEnd && shiftEnd > reqStart) {
+            // Periods overlap, update coverage
+            const periodKey = `${req.start_time}-${req.end_time}`;
+            if (!dailyCoverage.periods.has(periodKey)) {
+              dailyCoverage.periods.set(periodKey, {
+                start_time: req.start_time,
+                end_time: req.end_time,
+                required: req.minimum_employees,
+                actual: 0,
+                supervisors: 0
+              });
             }
+
+            const periodCoverage = dailyCoverage.periods.get(periodKey)!;
+            periodCoverage.actual++;
           }
-        }
+        });
       }
     }
-    
+
     return coverage;
   }
 
   /**
-   * Update daily coverage records for midnight shifts
+   * Updates daily coverage records for midnight shifts
    */
-  public async updateDailyCoverage(schedules: Schedule[]): Promise<void> {
-    const coverage = await this.calculateCoverage(schedules);
-    
-    // Update database records
-    for (const [date, report] of coverage.entries()) {
-      for (const [periodKey, stats] of Object.entries(report.periods)) {
-        const [startTime, endTime] = periodKey.split('-');
-        
-        // Get or create daily coverage record
-        const { data: requirement } = await this.supabase
-          .from('staffing_requirements')
-          .select('id')
-          .eq('start_time', startTime)
-          .eq('end_time', endTime)
-          .single();
-          
-        if (!requirement) continue;
-        
-        const { error } = await this.supabase
-          .from('daily_coverage')
-          .upsert({
-            date,
-            period_id: requirement.id,
-            actual_coverage: stats.actual,
-            supervisor_count: stats.supervisors,
-            coverage_status: stats.actual < stats.required ? 'Under' :
-                           stats.actual === stats.required ? 'Met' : 'Over'
-          });
-          
-        if (error) {
-          console.error(`Failed to update coverage for ${date}:`, error);
+  async updateDailyCoverage(schedules: Schedule[]): Promise<void> {
+    try {
+      const coverage = await this.calculateCoverage(schedules);
+
+      // Update coverage records in database
+      for (const [date, dailyCoverage] of coverage.entries()) {
+        for (const [periodKey, periodCoverage] of dailyCoverage.periods.entries()) {
+          await this.supabase
+            .from('daily_coverage')
+            .upsert({
+              date,
+              period_start: periodCoverage.start_time,
+              period_end: periodCoverage.end_time,
+              actual_coverage: periodCoverage.actual,
+              supervisor_count: periodCoverage.supervisors,
+              updated_at: new Date().toISOString()
+            })
+            .select();
         }
       }
+    } catch (error) {
+      console.error('Failed to update daily coverage:', error);
+      throw new Error('Failed to update daily coverage records');
     }
   }
-} 
+}

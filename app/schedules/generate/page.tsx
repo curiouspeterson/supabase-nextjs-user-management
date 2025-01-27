@@ -7,6 +7,7 @@ import { scheduleService } from '@/services/scheduleService'
 import { Employee } from '@/utils/scheduling/types'
 import { format, addMonths } from 'date-fns'
 import { withRoleAccess } from '@/hooks/useRoleAccess'
+import { toast } from '@/components/ui/use-toast'
 
 interface FormData {
   startDate: string
@@ -38,7 +39,7 @@ function GenerateSchedulePage() {
 
   // Fetch employees
   useEffect(() => {
-    const fetchEmployees = async () => {
+    async function loadEmployees() {
       try {
         setLoading(true)
         const { data, error } = await supabase
@@ -47,17 +48,21 @@ function GenerateSchedulePage() {
           .order('full_name')
 
         if (error) throw error
-        setEmployees(data)
-      } catch (err) {
-        console.error('Error fetching employees:', err)
-        setError('Failed to load employees')
+        setEmployees(data || [])
+      } catch (error) {
+        console.error('Error loading employees:', error)
+        toast({
+          title: 'Error',
+          description: 'Failed to load employees',
+          variant: 'destructive',
+        })
       } finally {
         setLoading(false)
       }
     }
 
-    fetchEmployees()
-  }, [])
+    loadEmployees()
+  }, [supabase, toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

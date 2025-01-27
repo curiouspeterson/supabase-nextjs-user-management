@@ -1,104 +1,152 @@
-import React from 'react';
-import { format, addDays, addWeeks, addMonths, subDays, subWeeks, subMonths } from 'date-fns';
-import { ScheduleControlsProps, ViewMode } from './types';
+'use client';
 
-export function ScheduleControls({
-  viewMode,
-  onViewModeChange,
+import React from 'react';
+import { addDays, addWeeks, addMonths, format } from 'date-fns';
+
+interface ScheduleControlsProps {
+  currentDate: Date;
+  onDateChange: (date: Date) => void;
+  viewMode?: 'day' | 'week' | 'month';
+  onViewModeChange?: (mode: 'day' | 'week' | 'month') => void;
+  onRefresh?: () => Promise<void>;
+}
+
+export default function ScheduleControls({
+  currentDate,
   onDateChange,
+  viewMode = 'week',
+  onViewModeChange,
   onRefresh
 }: ScheduleControlsProps) {
-  const handleNavigate = (direction: 'prev' | 'next') => {
-    const modifier = direction === 'next' ? 1 : -1;
+  // Navigation functions
+  const goToPrevious = () => {
     switch (viewMode) {
       case 'day':
-        onDateChange(new Date(addDays(new Date(), modifier)));
+        onDateChange(addDays(currentDate, -1));
         break;
       case 'week':
-        onDateChange(new Date(addWeeks(new Date(), modifier)));
+        onDateChange(addWeeks(currentDate, -1));
         break;
       case 'month':
-        onDateChange(new Date(addMonths(new Date(), modifier)));
+        onDateChange(addMonths(currentDate, -1));
         break;
     }
   };
 
-  const handleToday = () => {
+  const goToNext = () => {
+    switch (viewMode) {
+      case 'day':
+        onDateChange(addDays(currentDate, 1));
+        break;
+      case 'week':
+        onDateChange(addWeeks(currentDate, 1));
+        break;
+      case 'month':
+        onDateChange(addMonths(currentDate, 1));
+        break;
+    }
+  };
+
+  const goToToday = () => {
     onDateChange(new Date());
   };
 
   return (
-    <div className="flex items-center justify-between p-4 border-b border-gray-200">
+    <div className="flex items-center justify-between p-4 border-b">
       {/* Navigation controls */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => handleNavigate('prev')}
+          onClick={goToPrevious}
           className="p-2 hover:bg-gray-100 rounded-full"
-          title="Previous"
         >
-          ←
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
         </button>
+
         <button
-          onClick={() => handleNavigate('next')}
-          className="p-2 hover:bg-gray-100 rounded-full"
-          title="Next"
-        >
-          →
-        </button>
-        <button
-          onClick={handleToday}
-          className="px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md"
+          onClick={goToToday}
+          className="px-3 py-1 text-sm hover:bg-gray-100 rounded-md"
         >
           Today
         </button>
+
+        <button
+          onClick={goToNext}
+          className="p-2 hover:bg-gray-100 rounded-full"
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+        </button>
+
+        <span className="ml-4 text-lg font-semibold">
+          {format(currentDate, 'MMMM d, yyyy')}
+        </span>
       </div>
 
       {/* View mode selector */}
-      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg">
-        {(['day', 'week', 'month'] as ViewMode[]).map(mode => (
-          <button
-            key={mode}
-            onClick={() => onViewModeChange(mode)}
-            className={`
-              px-3 py-1 text-sm font-medium rounded-md capitalize
-              ${viewMode === mode
-                ? 'bg-white text-gray-900 shadow'
-                : 'text-gray-600 hover:text-gray-900'
-              }
-            `}
-          >
-            {mode}
-          </button>
-        ))}
-      </div>
+      {onViewModeChange && (
+        <div className="flex items-center gap-1 rounded-lg bg-gray-100 p-1">
+          {(['day', 'week', 'month'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => onViewModeChange(mode)}
+              className={`
+                px-3 py-1 text-sm rounded-md capitalize transition-colors
+                ${viewMode === mode
+                  ? 'bg-white shadow-sm'
+                  : 'hover:bg-gray-200'
+                }
+              `}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Refresh button */}
-      <button
-        onClick={onRefresh}
-        className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full"
-        title="Refresh"
-      >
-        <RefreshIcon className="w-5 h-5" />
-      </button>
+      {onRefresh && (
+        <button
+          onClick={onRefresh}
+          className="p-2 hover:bg-gray-100 rounded-full"
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+        </button>
+      )}
     </div>
-  );
-}
-
-function RefreshIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-      />
-    </svg>
   );
 } 

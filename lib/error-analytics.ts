@@ -8,27 +8,10 @@ import {
   ErrorRecoveryStrategy,
   ErrorSeverity,
   ErrorCategory,
-  AppError,
   ErrorMetrics,
   ErrorTrend,
   ErrorMetadata
 } from '@/lib/types/error'
-
-/**
- * Enum representing error recovery strategies
- */
-export enum ErrorRecoveryStrategy {
-  /** Retry the failed operation */
-  RETRY = 'retry',
-  /** Refresh the page */
-  REFRESH = 'refresh',
-  /** Reset application state and refresh */
-  RESET = 'reset',
-  /** Use fallback functionality */
-  FALLBACK = 'fallback',
-  /** No automatic recovery possible */
-  NONE = 'none'
-}
 
 /**
  * Base error class for application errors
@@ -611,12 +594,11 @@ export class ErrorAnalyticsService {
   }
 
   private async persistData(): Promise<void> {
-    // Only run in browser environment
     if (typeof window === 'undefined') return
 
     try {
       const analyticsData = Object.fromEntries(this.errorMetrics)
-      const trendsData = Object.fromEntries(this.errorTrends)
+      const trendsData = Array.from(this.errorTrends.entries())
 
       await this.storage.saveData({
         analytics: analyticsData,
@@ -633,26 +615,26 @@ export class ErrorAnalyticsService {
    * @param errorKey - The error key to analyze
    * @returns Suggested recovery strategy
    */
-  suggestRecoveryStrategy(errorKey: string): TypeErrorRecoveryStrategy {
+  suggestRecoveryStrategy(errorKey: string): ErrorRecoveryStrategy {
     const metrics = this.errorMetrics.get(errorKey)
-    if (!metrics) return TypeErrorRecoveryStrategy.RETRY
+    if (!metrics) return ErrorRecoveryStrategy.RETRY
 
     // If we've had too many consecutive failures, try a different strategy
     if (metrics.consecutiveFailures > 3) {
-      return TypeErrorRecoveryStrategy.REFRESH
+      return ErrorRecoveryStrategy.REFRESH
     }
 
     // If the error is persistent across refreshes, try resetting
     if (metrics.count > 5 && metrics.recoveryRate < 0.2) {
-      return TypeErrorRecoveryStrategy.RESET
+      return ErrorRecoveryStrategy.RESET
     }
 
     // If nothing else works, fallback to home
     if (metrics.count > 10 && metrics.recoveryRate < 0.1) {
-      return TypeErrorRecoveryStrategy.FALLBACK
+      return ErrorRecoveryStrategy.FALLBACK
     }
 
-    return TypeErrorRecoveryStrategy.RETRY
+    return ErrorRecoveryStrategy.RETRY
   }
 }
 

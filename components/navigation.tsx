@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { useErrorHandler } from '@/lib/hooks/use-error-handler'
 import { AuthError, DatabaseError } from '@/lib/errors'
+import { useSupabase } from '@/lib/supabase/client'
 
 interface NavigationProps {
   className?: string
@@ -17,17 +18,16 @@ interface AuthSubscription {
   unsubscribe: () => void
 }
 
+type Role = 'manager' | 'supervisor' | 'employee'
+
 export function Navigation({ className }: NavigationProps) {
   const pathname = usePathname()
-  const [userRole, setUserRole] = useState<string | null>(null)
+  const { supabase, user } = useSupabase()
+  const [role, setRole] = useState<Role | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSigningOut, setIsSigningOut] = useState(false)
   const router = useRouter()
   const { handleError } = useErrorHandler()
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
 
   const setupAuthListener = useCallback(async (): Promise<AuthSubscription> => {
     try {
@@ -39,7 +39,7 @@ export function Navigation({ className }: NavigationProps) {
           router.refresh()
         }
         if (event === 'SIGNED_OUT') {
-          setUserRole(null)
+          setRole(null)
           router.refresh()
         }
       })
@@ -56,70 +56,25 @@ export function Navigation({ className }: NavigationProps) {
   }, [supabase, router, handleError])
 
   const getUserRole = useCallback(async () => {
-    try {
-      setIsLoading(true)
-      const { data: { user }, error: userError } = await supabase.auth.getUser()
-      
-      // If no user or error, we're not authenticated
-      if (!user || userError) {
-        setUserRole(null)
-        setIsLoading(false)
-        return
-      }
-
-      // First check user metadata for user_role
-      if (user.user_metadata?.user_role) {
-        setUserRole(user.user_metadata.user_role)
-        setIsLoading(false)
-        return
-      }
-
-      // Don't fetch employee data on auth pages
-      if (pathname.includes('/login') || pathname.includes('/signup')) {
-        setUserRole('Employee') // Default role
-        setIsLoading(false)
-        return
-      }
-
-      // Fetch employee data with retries
-      let retries = 3
-      while (retries > 0) {
-        try {
-          const { data: employee, error: employeeError } = await supabase
-            .from('employees')
-            .select('user_role')
-            .eq('id', user.id)
-            .single()
-          
-          if (employeeError) {
-            if (employeeError.message.includes('no rows')) {
-              setUserRole('Employee') // Default role
-              break
-            }
-            throw employeeError
-          }
-          
-          if (employee?.user_role) {
-            setUserRole(employee.user_role)
-            break
-          }
-        } catch (error) {
-          retries--
-          if (retries === 0) {
-            console.warn('Failed to fetch employee role after retries:', error)
-            setUserRole('Employee') // Default role
-          } else {
-            await new Promise(resolve => setTimeout(resolve, 1000)) // Wait before retry
-          }
-        }
-      }
-    } catch (error) {
-      console.warn('Error in getUserRole:', error)
-      setUserRole('Employee') // Default role
-    } finally {
-      setIsLoading(false)
+    if (!user) {
+      setRole(null)
+      return
     }
-  }, [supabase, pathname])
+
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      if (error) throw error
+      setRole(profile?.role as Role)
+    } catch (error) {
+      console.error('Error fetching user role:', error)
+      setRole(null)
+    }
+  }, [user, supabase])
 
   useEffect(() => {
     let subscription: AuthSubscription | null = null
@@ -137,32 +92,37 @@ export function Navigation({ className }: NavigationProps) {
     }
   }, [setupAuthListener, getUserRole])
 
-  const isManager = !isLoading && userRole && (
-    userRole === 'Manager' || 
-    userRole === 'Admin' || 
-    userRole === 'Supervisor'
+  const isManager = !isLoading && role && (
+    role === 'manager' || 
+    role === 'supervisor' || 
+    role === 'employee'
   )
 
   const mainLinks = [
     {
       href: '/schedule',
       label: 'Schedule',
-      show: !!userRole, // Only show if authenticated
+      show: !!role, // Only show if authenticated
     },
     {
       href: '/shifts',
       label: 'Shifts',
-      show: !!userRole,
+      show: !!role,
     },
     {
       href: '/time-off',
       label: 'Time Off',
-      show: !!userRole,
+      show: !!role,
     },
     {
       href: '/staffing',
       label: 'Staffing Requirements',
-      show: !!userRole,
+      show: !!role,
+    },
+    {
+      href: '/dashboard/patterns',
+      label: 'Shift Patterns',
+      show: isManager,
     },
     {
       href: '/employees',
@@ -189,6 +149,8 @@ export function Navigation({ className }: NavigationProps) {
     }
   }, [supabase, handleError, isSigningOut])
 
+  const filteredLinks = mainLinks.filter(link => link.show)
+
   return (
     <div className={cn('flex items-center justify-between w-full', className)}>
       {/* Left - Site Title */}
@@ -203,28 +165,26 @@ export function Navigation({ className }: NavigationProps) {
 
       {/* Center - Main Navigation */}
       <nav className="flex space-x-4" role="navigation" aria-label="Main navigation">
-        {mainLinks
-          .filter(link => link.show)
-          .map(link => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={cn(
-                'px-3 py-2 rounded-md text-sm font-medium transition-colors',
-                pathname === link.href
-                  ? 'bg-gray-900 text-white'
-                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-              )}
-              aria-current={pathname === link.href ? 'page' : undefined}
-            >
-              {link.label}
-            </Link>
-          ))}
+        {filteredLinks.map(link => (
+          <Link
+            key={link.href}
+            href={link.href}
+            className={cn(
+              'px-3 py-2 rounded-md text-sm font-medium transition-colors',
+              pathname === link.href
+                ? 'bg-gray-900 text-white'
+                : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+            )}
+            aria-current={pathname === link.href ? 'page' : undefined}
+          >
+            {link.label}
+          </Link>
+        ))}
       </nav>
 
       {/* Right - Account & Sign Out */}
       <div className="flex items-center space-x-4">
-        {userRole ? (
+        {role ? (
           <>
             <Link
               href="/account"

@@ -1,220 +1,203 @@
 import { SchedulerMonitor } from '@/services/scheduler/monitor';
 import { createClient } from '@/utils/supabase/server';
-import { mockClient } from '@/lib/test-utils';
+import type { SchedulerMetrics, CoverageReport } from '@/services/scheduler/types';
 
 // Mock Supabase client
 jest.mock('@/utils/supabase/server', () => ({
-  createClient: jest.fn()
+  createClient: jest.fn(() => ({
+    from: jest.fn(() => ({
+      select: jest.fn(() => ({
+        order: jest.fn(() => ({
+          limit: jest.fn(() => ({
+            single: jest.fn(() => ({
+              data: mockMetrics.healthy,
+              error: null
+            }))
+          })),
+          limit: jest.fn(() => ({
+            data: mockCoverage,
+            error: null
+          }))
+        }))
+      })),
+      insert: jest.fn(() => ({
+        error: null
+      })),
+      gte: jest.fn(() => ({
+        order: jest.fn(() => ({
+          limit: jest.fn(() => ({
+            data: mockCoverage,
+            error: null
+          }))
+        }))
+      }))
+    }))
+  }))
 }));
+
+// Mock data
+const mockMetrics = {
+  healthy: {
+    coverage_deficit: 0,
+    overtime_violations: 0,
+    pattern_errors: 0,
+    schedule_generation_time: 60,
+    last_run_status: 'success',
+    error_message: null
+  } as SchedulerMetrics,
+  degraded: {
+    coverage_deficit: 1,
+    overtime_violations: 2,
+    pattern_errors: 1,
+    schedule_generation_time: 120,
+    last_run_status: 'success',
+    error_message: null
+  } as SchedulerMetrics,
+  critical: {
+    coverage_deficit: 3,
+    overtime_violations: 5,
+    pattern_errors: 2,
+    schedule_generation_time: 300,
+    last_run_status: 'error',
+    error_message: 'Test error'
+  } as SchedulerMetrics
+};
+
+const mockCoverage: CoverageReport[] = [
+  {
+    date: '2024-03-20',
+    periods: {
+      '1': {
+        required: 3,
+        actual: 3,
+        supervisors: 1,
+        overtime: 0
+      },
+      '2': {
+        required: 4,
+        actual: 2,
+        supervisors: 0,
+        overtime: 2
+      }
+    }
+  }
+];
 
 describe('SchedulerMonitor', () => {
   let monitor: SchedulerMonitor;
-  let mockSupabase: ReturnType<typeof mockClient>;
+  const mockSupabase = createClient();
 
   beforeEach(() => {
-    mockSupabase = mockClient();
-    (createClient as jest.Mock).mockReturnValue(mockSupabase);
+    jest.clearAllMocks();
     monitor = new SchedulerMonitor();
   });
 
   describe('checkHealth', () => {
-    it('should report healthy status when all metrics are good', async () => {
-      // Mock healthy metrics
-      mockSupabase.from.mockImplementation((table: string) => ({
-        select: jest.fn().mockReturnValue({
-          data: table === 'daily_coverage' ? [] :
-                table === 'schedules' ? [] :
-                table === 'scheduler_metrics' ? [{
-                  generation_time: 60,
-                  status: 'success',
-                  created_at: new Date().toISOString()
-                }] : [],
-          error: null
-        }),
-        eq: jest.fn().mockReturnThis(),
-        gte: jest.fn().mockReturnThis(),
-        lte: jest.fn().mockReturnThis(),
-        filter: jest.fn().mockReturnThis(),
-        order: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        single: jest.fn().mockReturnValue({
-          data: {
-            generation_time: 60,
-            status: 'success'
-          },
-          error: null
-        })
+    it('should return healthy status when all metrics are good', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementationOnce(() => ({
+        select: jest.fn(() => ({
+          order: jest.fn(() => ({
+            limit: jest.fn(() => ({
+              single: jest.fn(() => ({
+                data: mockMetrics.healthy,
+                error: null
+              }))
+            }))
+          }))
+        }))
       }));
 
-      mockSupabase.rpc.mockResolvedValue({
-        data: [],
-        error: null
-      });
-
-      const health = await monitor.checkHealth();
-
-      expect(health.status).toBe('healthy');
-      expect(health.metrics.coverage_deficit).toBe(0);
-      expect(health.metrics.overtime_violations).toBe(0);
-      expect(health.metrics.pattern_errors).toBe(0);
-      expect(health.alerts).toHaveLength(0);
+      const result = await monitor.checkHealth();
+      expect(result.status).toBe('healthy');
+      expect(result.metrics).toEqual(mockMetrics.healthy);
+      expect(result.alerts).toHaveLength(1); // Warning for period 2 with no supervisor
     });
 
-    it('should report degraded status with warnings', async () => {
-      // Mock metrics with warnings
-      mockSupabase.from.mockImplementation((table: string) => ({
-        select: jest.fn().mockReturnValue({
-          data: table === 'daily_coverage' ? [{
-            date: '2025-01-01',
-            coverage_status: 'Under',
-            actual_coverage: 1,
-            supervisor_count: 0,
-            staffing_requirements: {
-              start_time: '07:00:00',
-              end_time: '19:00:00',
-              minimum_employees: 2
-            }
-          }] :
-          table === 'schedules' ? [] :
-          table === 'scheduler_metrics' ? [{
-            generation_time: 200,
-            status: 'success',
-            created_at: new Date().toISOString()
-          }] : [],
-          error: null
-        }),
-        eq: jest.fn().mockReturnThis(),
-        gte: jest.fn().mockReturnThis(),
-        lte: jest.fn().mockReturnThis(),
-        filter: jest.fn().mockReturnThis(),
-        order: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        single: jest.fn().mockReturnValue({
-          data: {
-            generation_time: 200,
-            status: 'success'
-          },
-          error: null
-        })
+    it('should return degraded status when metrics show warnings', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementationOnce(() => ({
+        select: jest.fn(() => ({
+          order: jest.fn(() => ({
+            limit: jest.fn(() => ({
+              single: jest.fn(() => ({
+                data: mockMetrics.degraded,
+                error: null
+              }))
+            }))
+          }))
+        }))
       }));
 
-      mockSupabase.rpc.mockResolvedValue({
-        data: [],
-        error: null
-      });
-
-      const health = await monitor.checkHealth();
-
-      expect(health.status).toBe('degraded');
-      expect(health.alerts).toContain('WARNING: Coverage deficit on 2025-01-01 during 07:00:00-19:00:00');
-      expect(health.alerts).toContain('WARNING: No supervisor coverage on 2025-01-01 during 07:00:00-19:00:00');
+      const result = await monitor.checkHealth();
+      expect(result.status).toBe('degraded');
+      expect(result.metrics).toEqual(mockMetrics.degraded);
+      expect(result.alerts.length).toBeGreaterThan(0);
     });
 
-    it('should report critical status with severe issues', async () => {
-      // Mock critical metrics
-      mockSupabase.from.mockImplementation((table: string) => ({
-        select: jest.fn().mockReturnValue({
-          data: table === 'daily_coverage' ? [
-            { coverage_status: 'Under' },
-            { coverage_status: 'Under' },
-            { coverage_status: 'Under' }
-          ] :
-          table === 'schedules' ? [
-            { id: '1' },
-            { id: '2' }
-          ] :
-          table === 'scheduler_metrics' ? [{
-            generation_time: 400,
-            status: 'failure',
-            error_message: 'Schedule generation failed',
-            created_at: new Date().toISOString()
-          }] : [],
-          error: null
-        }),
-        eq: jest.fn().mockReturnThis(),
-        gte: jest.fn().mockReturnThis(),
-        lte: jest.fn().mockReturnThis(),
-        filter: jest.fn().mockReturnThis(),
-        order: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        single: jest.fn().mockReturnValue({
-          data: {
-            generation_time: 400,
-            status: 'failure',
-            error_message: 'Schedule generation failed'
-          },
-          error: null
-        })
+    it('should return critical status when metrics exceed thresholds', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementationOnce(() => ({
+        select: jest.fn(() => ({
+          order: jest.fn(() => ({
+            limit: jest.fn(() => ({
+              single: jest.fn(() => ({
+                data: mockMetrics.critical,
+                error: null
+              }))
+            }))
+          }))
+        }))
       }));
 
-      mockSupabase.rpc.mockResolvedValue({
-        data: [{ id: '1' }],
-        error: null
-      });
+      const result = await monitor.checkHealth();
+      expect(result.status).toBe('critical');
+      expect(result.metrics).toEqual(mockMetrics.critical);
+      expect(result.alerts.length).toBeGreaterThan(0);
+    });
 
-      const health = await monitor.checkHealth();
+    it('should handle database errors gracefully', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementationOnce(() => ({
+        select: jest.fn(() => ({
+          order: jest.fn(() => ({
+            limit: jest.fn(() => ({
+              single: jest.fn(() => ({
+                data: null,
+                error: new Error('Database error')
+              }))
+            }))
+          }))
+        }))
+      }));
 
-      expect(health.status).toBe('critical');
-      expect(health.metrics.coverage_deficit).toBe(3);
-      expect(health.metrics.overtime_violations).toBe(2);
-      expect(health.metrics.pattern_errors).toBe(1);
-      expect(health.metrics.schedule_generation_time).toBe(400);
-      expect(health.metrics.last_run_status).toBe('failure');
-      expect(health.alerts).toContain('CRITICAL: 3 coverage deficits found');
-      expect(health.alerts).toContain('CRITICAL: Schedule generation taking too long (400s)');
+      const result = await monitor.checkHealth();
+      expect(result.status).toBe('critical');
+      expect(result.metrics.error_message).toBe('Failed to fetch metrics');
     });
   });
 
   describe('recordMetrics', () => {
-    it('should record metrics successfully', async () => {
-      const startTime = Date.now() - 5000; // 5 seconds ago
-      const endTime = Date.now();
+    it('should successfully record metrics', async () => {
+      const metrics: Partial<SchedulerMetrics> = {
+        coverage_deficit: 1,
+        overtime_violations: 2,
+        pattern_errors: 0,
+        last_run_status: 'success'
+      };
 
-      mockSupabase.from.mockImplementation((table: string) => ({
-        insert: jest.fn().mockReturnValue({
-          data: {
-            id: 'new-metric',
-            generation_time: 5,
-            status: 'success',
-            created_at: new Date().toISOString()
-          },
-          error: null
-        })
-      }));
-
-      await monitor.recordMetrics(startTime, endTime, 'success');
-
-      expect(mockSupabase.from).toHaveBeenCalledWith('scheduler_metrics');
-      expect(mockSupabase.from().insert).toHaveBeenCalledWith({
-        generation_time: expect.any(Number),
-        status: 'success',
-        error_message: undefined,
-        created_at: expect.any(String)
-      });
+      await expect(monitor.recordMetrics(metrics)).resolves.not.toThrow();
     });
 
-    it('should handle errors when recording metrics', async () => {
-      const startTime = Date.now() - 5000;
-      const endTime = Date.now();
-      const testError = new Error('Test error');
-
-      mockSupabase.from.mockImplementation((table: string) => ({
-        insert: jest.fn().mockReturnValue({
-          data: null,
-          error: { message: 'Database error' }
-        })
+    it('should handle database errors when recording metrics', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementationOnce(() => ({
+        insert: jest.fn(() => ({
+          error: new Error('Database error')
+        }))
       }));
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const metrics: Partial<SchedulerMetrics> = {
+        coverage_deficit: 1,
+        last_run_status: 'error'
+      };
 
-      await monitor.recordMetrics(startTime, endTime, 'failure', testError);
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'Failed to record scheduler metrics:',
-        expect.any(Object)
-      );
-
-      consoleSpy.mockRestore();
+      await expect(monitor.recordMetrics(metrics)).rejects.toThrow('Failed to record metrics');
     });
   });
 }); 

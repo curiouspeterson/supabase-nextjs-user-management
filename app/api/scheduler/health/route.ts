@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { SchedulerMonitor } from '@/services/scheduler/monitor';
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const monitor = new SchedulerMonitor();
     const health = await monitor.checkHealth();
@@ -13,12 +13,18 @@ export async function GET(request: Request) {
     return NextResponse.json(health, { status });
   } catch (error) {
     console.error('Health check failed:', error);
-    return NextResponse.json(
-      {
-        status: 'critical',
-        error: error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({
+      status: 'critical',
+      metrics: {
+        coverage_deficit: 0,
+        overtime_violations: 0,
+        pattern_errors: 0,
+        schedule_generation_time: 0,
+        last_run_status: 'error',
+        error_message: 'Health check failed'
       },
-      { status: 500 }
-    );
+      coverage: [],
+      alerts: ['Health check system error']
+    }, { status: 500 });
   }
 } 
