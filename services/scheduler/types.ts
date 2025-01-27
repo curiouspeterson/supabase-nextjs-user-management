@@ -1,12 +1,53 @@
 import { Database } from '@/types/supabase';
+import { z } from 'zod';
+import { isValid, parseISO, differenceInHours } from 'date-fns';
+import { zonedTimeToUtc } from 'date-fns-tz';
 
-export type ShiftDurationCategory = '4 hours' | '8 hours' | '10 hours' | '12 hours' | null;
-export type EmployeeRole = 'Employee' | 'Shift Supervisor' | 'Management';
-export type ScheduleStatus = 'Draft' | 'Published' | 'Approved';
-export type TimeOffType = 'Vacation' | 'Sick Leave' | 'Training';
-export type TimeOffStatus = 'Pending' | 'Approved' | 'Declined';
-export type CoverageStatus = 'Under' | 'Met' | 'Over';
-export type PatternType = '4x10' | '3x12_1x4' | 'Custom';
+export enum ShiftDurationCategory {
+  SHORT = 'SHORT',
+  REGULAR = 'REGULAR',
+  EXTENDED = 'EXTENDED',
+  LONG = 'LONG'
+}
+
+export enum ScheduleStatus {
+  DRAFT = 'DRAFT',
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  PUBLISHED = 'PUBLISHED',
+  CANCELLED = 'CANCELLED'
+}
+
+export enum EmployeeRole {
+  STAFF = 'STAFF',
+  SUPERVISOR = 'SUPERVISOR',
+  MANAGER = 'MANAGER',
+  ADMIN = 'ADMIN'
+}
+
+export enum TimeOffType {
+  VACATION = 'VACATION',
+  SICK_LEAVE = 'SICK_LEAVE',
+  TRAINING = 'TRAINING'
+}
+
+export enum TimeOffStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  DECLINED = 'DECLINED'
+}
+
+export enum CoverageStatus {
+  UNDER = 'UNDER',
+  MET = 'MET',
+  OVER = 'OVER'
+}
+
+export enum PatternType {
+  FOUR_BY_TEN = '4x10',
+  THREE_BY_TWELVE_ONE_BY_FOUR = '3x12_1x4',
+  CUSTOM = 'Custom'
+}
 
 export interface ShiftType {
   id: string;
@@ -175,4 +216,126 @@ export interface HealthCheckResult {
   metrics: SchedulerMetrics;
   coverage: CoverageReport[];
   alerts: string[];
-} 
+}
+
+export const ShiftSchema = z.object({
+  id: z.string().uuid(),
+  start_time: z.string().datetime(),
+  end_time: z.string().datetime(),
+  duration_hours: z.number().positive().max(24),
+  duration_category: z.nativeEnum(ShiftDurationCategory),
+  department_id: z.string().uuid(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+  is_active: z.boolean()
+}).refine(
+  data => {
+    const start = parseISO(data.start_time);
+    const end = parseISO(data.end_time);
+    return end > start || (
+      // Handle shifts crossing midnight
+      end < start && differenceInHours(
+        zonedTimeToUtc(end, 'UTC'),
+        zonedTimeToUtc(start, 'UTC')
+      ) + 24 <= 24
+    );
+  },
+  {
+    message: 'End time must be after start time or within 24 hours for overnight shifts',
+    path: ['end_time']
+  }
+);
+
+export const ScheduleSchema = z.object({
+  id: z.string().uuid(),
+  employee_id: z.string().uuid(),
+  shift_id: z.string().uuid(),
+  date: z.string().refine(val => isValid(parseISO(val)), {
+    message: 'Invalid date format'
+  }),
+  status: z.nativeEnum(ScheduleStatus),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+  department_id: z.string().uuid(),
+  notes: z.string().optional(),
+  is_active: z.boolean()
+});
+
+export const EmployeeSchema = z.object({
+  id: z.string().uuid(),
+  employee_role: z.nativeEnum(EmployeeRole),
+  department_id: z.string().uuid(),
+  weekly_hours_scheduled: z.number().min(0).max(168),
+  max_consecutive_days: z.number().min(1).max(7),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+  is_active: z.boolean()
+});
+
+export const DepartmentSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  timezone: z.string(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+  is_active: z.boolean()
+});
+
+export type Shift = z.infer<typeof ShiftSchema>;
+export type Schedule = z.infer<typeof ScheduleSchema>;
+export type Employee = z.infer<typeof EmployeeSchema>;
+export type Department = z.infer<typeof DepartmentSchema>;
+
+export const isShift = (value: unknown): value is Shift => {
+  return ShiftSchema.safeParse(value).success;
+};
+
+export const isSchedule = (value: unknown): value is Schedule => {
+  return ScheduleSchema.safeParse(value).success;
+};
+
+export const isEmployee = (value: unknown): value is Employee => {
+  return EmployeeSchema.safeParse(value).success;
+};
+
+export const isDepartment = (value: unknown): value is Department => {
+  return DepartmentSchema.safeParse(value).success;
+};
+
+export const validateShift = (data: unknown): Shift => {
+  return ShiftSchema.parse(data);
+};
+
+export const validateSchedule = (data: unknown): Schedule => {
+  return ScheduleSchema.parse(data);
+};
+
+export const validateEmployee = (data: unknown): Employee => {
+  return EmployeeSchema.parse(data);
+};
+
+export const validateDepartment = (data: unknown): Department => {
+  return DepartmentSchema.parse(data);
+};
+
+export const isValidStatusTransition = (
+  currentStatus: ScheduleStatus,
+  newStatus: ScheduleStatus
+): boolean => {
+  const validTransitions: Record<ScheduleStatus, ScheduleStatus[]> = {
+    [ScheduleStatus.DRAFT]: [ScheduleStatus.PENDING, ScheduleStatus.CANCELLED],
+    [ScheduleStatus.PENDING]: [ScheduleStatus.APPROVED, ScheduleStatus.CANCELLED],
+    [ScheduleStatus.APPROVED]: [ScheduleStatus.PUBLISHED, ScheduleStatus.CANCELLED],
+    [ScheduleStatus.PUBLISHED]: [ScheduleStatus.CANCELLED],
+    [ScheduleStatus.CANCELLED]: []
+  };
+
+  return validTransitions[currentStatus].includes(newStatus);
+};
+
+export const calculateDurationCategory = (hours: number): ShiftDurationCategory => {
+  if (hours <= 4) return ShiftDurationCategory.SHORT;
+  if (hours <= 8) return ShiftDurationCategory.REGULAR;
+  if (hours <= 10) return ShiftDurationCategory.EXTENDED;
+  return ShiftDurationCategory.LONG;
+}; 

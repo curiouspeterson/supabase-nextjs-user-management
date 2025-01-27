@@ -1,409 +1,259 @@
 import { createClient } from '@/utils/supabase/server';
-import { addDays, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
-import type { 
-  Employee, 
-  Shift, 
-  Schedule,
-  StaffingRequirement,
-  CoverageReport,
-  ScheduleGenerationOptions,
-  ScheduleValidationResult,
-  AssignmentPhase,
-  ShiftAssignment,
-  ShiftPattern,
-  ShiftPreference
-} from './types';
+import { logger } from '@/lib/logger';
+import { AppError, DatabaseError, ValidationError } from '@/lib/errors';
+import { format, parseISO, addDays, isValid } from 'date-fns';
+import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
+import { z } from 'zod';
+import { PatternValidator } from './pattern-validator';
+import type { Schedule, Employee, Department, Shift } from './types';
 
-export class ScheduleGenerator {
+interface SchedulerConstraints {
+  max_weekly_hours: number;
+  max_consecutive_days: number;
+  min_hours_between_shifts: number;
+  max_daily_hours: number;
+  max_overtime_hours: number;
+  preferred_shift_length: number;
+  max_shifts_per_day: number;
+  optimization_timeout_ms: number;
+  max_retry_attempts: number;
+  retry_delay_ms: number;
+}
+
+interface GenerationMetrics {
+  generation_time_ms: number;
+  optimization_iterations: number;
+  constraints_checked: number;
+  errors_encountered: number;
+  schedules_generated: number;
+}
+
+// Zod schema for schedule generation request
+const ScheduleRequestSchema = z.object({
+  department_id: z.string().uuid(),
+  start_date: z.string().refine(val => isValid(parseISO(val)), {
+    message: 'Invalid start date format'
+  }),
+  end_date: z.string().refine(val => isValid(parseISO(val)), {
+    message: 'Invalid end date format'
+  }),
+  timezone: z.string().default('UTC')
+});
+
+export class Scheduler {
   private supabase = createClient();
-  private readonly MAX_WEEKLY_HOURS = 40;
-  private readonly MAX_CONSECUTIVE_DAYS = 6;
+  private patternValidator: PatternValidator;
+  private constraints: SchedulerConstraints | null = null;
+  private readonly environment: string;
+  private readonly retryOptions: {
+    maxAttempts: number;
+    delayMs: number;
+  };
+
+  constructor(
+    environment: string = process.env.NODE_ENV || 'development',
+    retryOptions = { maxAttempts: 3, delayMs: 1000 }
+  ) {
+    this.environment = environment;
+    this.patternValidator = new PatternValidator(environment);
+    this.retryOptions = retryOptions;
+  }
 
   /**
-   * Generate a schedule for the specified date range
+   * Initialize scheduler constraints from database
    */
-  public async generateSchedule(options: ScheduleGenerationOptions): Promise<Schedule[]> {
-    const {
-      startDate,
-      endDate,
-      employees,
-      shifts,
-      patterns,
-      preferences = []
-    } = options;
-
+  private async initializeConstraints(): Promise<void> {
     try {
-      // Track weekly hours for each employee
-      const weeklyHours = new Map<string, number>();
-      const schedules: Schedule[] = [];
-
-      // Process each day in the date range
-      let currentDate = new Date(startDate);
-      while (currentDate <= endDate) {
-        // Reset weekly hours at the start of each week
-        if (currentDate.getDay() === 0) {
-          weeklyHours.clear();
+      const { data: config, error } = await this.supabase.rpc(
+        'get_scheduler_config',
+        { 
+          p_config_key: 'scheduler_constraints',
+          p_environment: this.environment
         }
+      );
 
-        // Get staffing requirements for the current date
-        const requirements = await this.getStaffingRequirements(currentDate);
-        
-        // Generate daily schedule
-        const dailyAssignments = await this.generateDailySchedule(
-          currentDate,
-          employees,
-          shifts,
-          requirements,
-          weeklyHours,
-          patterns,
-          preferences
-        );
-
-        // Create schedule entries
-        for (const assignment of dailyAssignments) {
-          const schedule = await this.createScheduleEntry(assignment);
-          if (schedule) {
-            schedules.push(schedule);
-            
-            // Update weekly hours
-            const shift = shifts.find(s => s.id === assignment.shiftId);
-            if (shift) {
-              const currentHours = weeklyHours.get(assignment.employeeId) || 0;
-              weeklyHours.set(assignment.employeeId, currentHours + shift.duration_hours);
-            }
-          }
-        }
-
-        // Move to next day
-        currentDate.setDate(currentDate.getDate() + 1);
+      if (error) {
+        throw new DatabaseError(`Failed to get scheduler constraints: ${error.message}`);
       }
 
-      return schedules;
+      this.constraints = config as SchedulerConstraints;
     } catch (error) {
-      console.error('Failed to generate schedule:', error);
-      throw new Error('Schedule generation failed');
+      logger.error('Failed to initialize scheduler constraints', {
+        error,
+        context: 'Scheduler.initializeConstraints'
+      });
+      throw new AppError('Failed to initialize scheduler', 'SCHEDULER_INIT_ERROR');
     }
   }
 
   /**
-   * Generate schedule for a single day
+   * Generate a schedule for a department
    */
-  private async generateDailySchedule(
-    date: Date,
-    employees: Employee[],
-    shifts: Shift[],
-    requirements: StaffingRequirement[],
-    weeklyHours: Map<string, number>,
-    patterns: ShiftPattern[],
-    preferences: ShiftPreference[]
-  ): Promise<ShiftAssignment[]> {
-    const assignments: ShiftAssignment[] = [];
+  public async generateSchedule(request: unknown): Promise<{
+    schedule_id: string;
+    metrics: GenerationMetrics;
+  }> {
+    try {
+      // Initialize constraints if not already done
+      if (!this.constraints) {
+        await this.initializeConstraints();
+      }
 
-    // Sort requirements by priority (supervisor required first)
-    const sortedRequirements = requirements.sort((a, b) => 
-      Number(b.shift_supervisor_required) - Number(a.shift_supervisor_required)
-    );
+      // Validate request
+      const validatedRequest = ScheduleRequestSchema.parse(request);
+      const { department_id, start_date, end_date, timezone } = validatedRequest;
 
-    // Process each staffing requirement
-    for (const requirement of sortedRequirements) {
-      let assignedCount = 0;
-      let supervisorAssigned = false;
+      // Convert dates to UTC
+      const utcStartDate = zonedTimeToUtc(parseISO(start_date), timezone);
+      const utcEndDate = zonedTimeToUtc(parseISO(end_date), timezone);
 
-      // Try to fill positions in phases (ideal -> fallback -> override)
-      for (const phase of ['ideal', 'fallback', 'override'] as AssignmentPhase[]) {
-        const candidates = this.getPhaseCandidates(
-          phase,
-          employees,
-          date,
-          requirement,
-          weeklyHours,
-          patterns,
-          preferences
-        );
+      // Start generation process with retry mechanism
+      let attempt = 0;
+      let lastError: Error | null = null;
 
-        for (const employee of candidates) {
-          // Stop if we've met the requirement
-          if (assignedCount >= requirement.minimum_employees && 
-              (!requirement.shift_supervisor_required || supervisorAssigned)) {
-            break;
-          }
+      while (attempt < this.retryOptions.maxAttempts) {
+        try {
+          const startTime = performance.now();
 
-          // Find best matching shift
-          const shift = this.findBestShiftMatch(employee, requirement, shifts);
-          if (!shift) continue;
-
-          // Validate assignment
-          const validation = await this.validateAssignment(
-            employee,
-            shift,
-            date,
-            weeklyHours,
-            patterns
+          // Generate schedule using database function
+          const { data, error } = await this.supabase.rpc(
+            'generate_schedule',
+            {
+              p_start_date: format(utcStartDate, 'yyyy-MM-dd'),
+              p_end_date: format(utcEndDate, 'yyyy-MM-dd'),
+              p_department_id: department_id,
+              p_environment: this.environment
+            }
           );
 
-          if (validation.isValid) {
-            assignments.push({
-              employeeId: employee.id,
-              shiftId: shift.id,
-              date: date,
-              phase: phase,
-              isOvertime: (weeklyHours.get(employee.id) || 0) + shift.duration_hours > this.MAX_WEEKLY_HOURS,
-              isSupervisor: employee.employee_role === 'Shift Supervisor'
-            });
+          if (error) throw new DatabaseError(error.message);
 
-            assignedCount++;
-            if (employee.employee_role === 'Shift Supervisor') {
-              supervisorAssigned = true;
-            }
-          }
+          // Convert metrics to proper format
+          const metrics: GenerationMetrics = {
+            generation_time_ms: data.metrics.generation_time_ms,
+            optimization_iterations: data.metrics.optimization_iterations || 0,
+            constraints_checked: data.metrics.constraints_checked || 0,
+            errors_encountered: data.metrics.errors_encountered || 0,
+            schedules_generated: data.metrics.schedules_generated || 0
+          };
+
+          // Record success metrics
+          await this.recordGenerationMetrics('success', metrics);
+
+          return {
+            schedule_id: data.schedule_id,
+            metrics
+          };
+
+        } catch (error) {
+          lastError = error as Error;
+          logger.warn(`Schedule generation attempt ${attempt + 1} failed`, {
+            error,
+            context: 'Scheduler.generateSchedule',
+            attempt: attempt + 1
+          });
+
+          // Record failure metrics
+          await this.recordGenerationMetrics('failure', {
+            error: lastError.message,
+            attempt: attempt + 1
+          });
+
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, this.retryOptions.delayMs));
+          attempt++;
         }
       }
-    }
 
-    return assignments;
-  }
+      // If all attempts failed, throw the last error
+      throw lastError || new Error('Failed to generate schedule after all attempts');
 
-  /**
-   * Get candidates for a specific assignment phase
-   */
-  private getPhaseCandidates(
-    phase: AssignmentPhase,
-    employees: Employee[],
-    date: Date,
-    requirement: StaffingRequirement,
-    weeklyHours: Map<string, number>,
-    patterns: ShiftPattern[],
-    preferences: ShiftPreference[]
-  ): Employee[] {
-    // Filter available employees
-    let candidates = employees.filter(employee => 
-      this.isEmployeeAvailable(employee, date, weeklyHours)
-    );
-
-    // Apply phase-specific filtering
-    switch (phase) {
-      case 'ideal':
-        // Preferred employees who match pattern and have low hours
-        candidates = candidates.filter(employee => {
-          const hours = weeklyHours.get(employee.id) || 0;
-          return hours < (employee.weekly_hours_scheduled || this.MAX_WEEKLY_HOURS) &&
-                 this.matchesPattern(employee, date, patterns) &&
-                 this.hasPreference(employee, requirement, preferences);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        logger.error('Invalid schedule generation request', {
+          error: error.errors,
+          context: 'Scheduler.generateSchedule'
         });
-        break;
+        throw new ValidationError('Invalid schedule generation request');
+      }
 
-      case 'fallback':
-        // Employees who can work overtime or don't perfectly match pattern
-        candidates = candidates.filter(employee => {
-          const hours = weeklyHours.get(employee.id) || 0;
-          return hours < (employee.weekly_hours_scheduled || this.MAX_WEEKLY_HOURS) &&
-                 !this.hasNegativePreference(employee, requirement, preferences);
-        });
-        break;
+      if (error instanceof DatabaseError) {
+        throw error;
+      }
 
-      case 'override':
-        // Any available employee as a last resort
-        break;
+      logger.error('Schedule generation failed', {
+        error,
+        context: 'Scheduler.generateSchedule'
+      });
+      throw new AppError('Failed to generate schedule', 'SCHEDULE_GENERATION_ERROR');
     }
-
-    // Prioritize supervisors if required
-    if (requirement.shift_supervisor_required) {
-      candidates.sort((a, b) => 
-        Number(b.employee_role === 'Shift Supervisor') - 
-        Number(a.employee_role === 'Shift Supervisor')
-      );
-    }
-
-    return candidates;
   }
 
   /**
-   * Find the best matching shift for an employee and requirement
+   * Record generation metrics
    */
-  private findBestShiftMatch(
-    employee: Employee,
-    requirement: StaffingRequirement,
-    shifts: Shift[]
-  ): Shift | null {
-    return shifts.find(shift => 
-      shift.start_time >= requirement.start_time &&
-      shift.end_time <= requirement.end_time
-    ) || null;
-  }
-
-  /**
-   * Validate a potential assignment
-   */
-  private async validateAssignment(
-    employee: Employee,
-    shift: Shift,
-    date: Date,
-    weeklyHours: Map<string, number>,
-    patterns: ShiftPattern[]
-  ): Promise<ScheduleValidationResult> {
-    const errors: string[] = [];
-    const warnings: string[] = [];
-
-    // Check weekly hours
-    const currentHours = weeklyHours.get(employee.id) || 0;
-    const maxHours = employee.weekly_hours_scheduled || this.MAX_WEEKLY_HOURS;
-    if (currentHours + shift.duration_hours > maxHours) {
-      errors.push('Would exceed maximum weekly hours');
-    }
-
-    // Check consecutive days
-    const consecutiveDays = await this.getConsecutiveWorkDays(employee.id, date);
-    if (consecutiveDays >= this.MAX_CONSECUTIVE_DAYS) {
-      errors.push('Would exceed maximum consecutive days');
-    }
-
-    // Check pattern compliance
-    if (!this.matchesPattern(employee, date, patterns)) {
-      warnings.push('Assignment does not match preferred pattern');
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors,
-      warnings
-    };
-  }
-
-  /**
-   * Create a schedule entry in the database
-   */
-  private async createScheduleEntry(
-    assignment: ShiftAssignment
-  ): Promise<Schedule | null> {
+  private async recordGenerationMetrics(
+    status: 'success' | 'failure',
+    metrics: Record<string, unknown>
+  ): Promise<void> {
     try {
-      const { data, error } = await this.supabase
+      await this.supabase.rpc('record_scheduler_metrics', {
+        p_metrics_type: `schedule_generation_${status}`,
+        p_metrics_value: metrics,
+        p_environment: this.environment
+      });
+    } catch (error) {
+      logger.error('Failed to record generation metrics', {
+        error,
+        context: 'Scheduler.recordGenerationMetrics'
+      });
+      // Don't throw here as this is not critical for the generation process
+    }
+  }
+
+  /**
+   * Optimize a generated schedule
+   */
+  private async optimizeSchedule(
+    scheduleId: string,
+    constraints: SchedulerConstraints
+  ): Promise<void> {
+    const startTime = performance.now();
+    let iterations = 0;
+
+    try {
+      // Get current schedule
+      const { data: schedule, error: scheduleError } = await this.supabase
         .from('schedules')
-        .insert({
-          employee_id: assignment.employeeId,
-          shift_id: assignment.shiftId,
-          date: assignment.date.toISOString().split('T')[0],
-          status: 'Draft'
-        })
-        .select()
+        .select('*')
+        .eq('id', scheduleId)
         .single();
 
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Failed to create schedule entry:', error);
-      return null;
-    }
-  }
+      if (scheduleError) throw new DatabaseError(scheduleError.message);
 
-  /**
-   * Get staffing requirements for a date
-   */
-  private async getStaffingRequirements(
-    date: Date
-  ): Promise<StaffingRequirement[]> {
-    try {
-      const { data, error } = await this.supabase
-        .from('staffing_requirements')
-        .select('*')
-        .eq('date', date.toISOString().split('T')[0]);
-
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      console.error('Failed to get staffing requirements:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get the number of consecutive days worked
-   */
-  private async getConsecutiveWorkDays(
-    employeeId: string,
-    date: Date
-  ): Promise<number> {
-    try {
-      const { data, error } = await this.supabase
-        .from('schedules')
-        .select('date')
-        .eq('employee_id', employeeId)
-        .lt('date', date.toISOString().split('T')[0])
-        .order('date', { ascending: false })
-        .limit(7);
-
-      if (error) throw error;
-
-      let consecutiveDays = 0;
-      let currentDate = new Date(date);
-      currentDate.setDate(currentDate.getDate() - 1);
-
-      for (const schedule of data) {
-        if (schedule.date === currentDate.toISOString().split('T')[0]) {
-          consecutiveDays++;
-          currentDate.setDate(currentDate.getDate() - 1);
-        } else {
-          break;
-        }
+      // Perform optimization
+      while (
+        performance.now() - startTime < constraints.optimization_timeout_ms &&
+        iterations < 1000
+      ) {
+        // Optimization logic here
+        iterations++;
       }
 
-      return consecutiveDays;
+      // Record optimization metrics
+      await this.recordGenerationMetrics('optimization', {
+        schedule_id: scheduleId,
+        iterations,
+        time_ms: performance.now() - startTime
+      });
+
     } catch (error) {
-      console.error('Failed to get consecutive work days:', error);
-      return 0;
+      logger.error('Schedule optimization failed', {
+        error,
+        context: 'Scheduler.optimizeSchedule',
+        schedule_id: scheduleId
+      });
+      throw new AppError('Failed to optimize schedule', 'SCHEDULE_OPTIMIZATION_ERROR');
     }
-  }
-
-  /**
-   * Check if an employee is available on a date
-   */
-  private isEmployeeAvailable(
-    employee: Employee,
-    date: Date,
-    weeklyHours: Map<string, number>
-  ): boolean {
-    const hours = weeklyHours.get(employee.id) || 0;
-    return hours < (employee.weekly_hours_scheduled || this.MAX_WEEKLY_HOURS);
-  }
-
-  /**
-   * Check if an assignment matches the employee's pattern
-   */
-  private matchesPattern(
-    employee: Employee,
-    date: Date,
-    patterns: ShiftPattern[]
-  ): boolean {
-    // TODO: Implement pattern matching logic
-    return true;
-  }
-
-  /**
-   * Check if an employee has a preference for a requirement
-   */
-  private hasPreference(
-    employee: Employee,
-    requirement: StaffingRequirement,
-    preferences: ShiftPreference[]
-  ): boolean {
-    return preferences.some(p => 
-      p.employee_id === employee.id &&
-      p.preference_level === 'Preferred' &&
-      (!p.expiry_date || new Date(p.expiry_date) > new Date())
-    );
-  }
-
-  /**
-   * Check if an employee has a negative preference for a requirement
-   */
-  private hasNegativePreference(
-    employee: Employee,
-    requirement: StaffingRequirement,
-    preferences: ShiftPreference[]
-  ): boolean {
-    return preferences.some(p => 
-      p.employee_id === employee.id &&
-      p.preference_level === 'Avoid' &&
-      (!p.expiry_date || new Date(p.expiry_date) > new Date())
-    );
   }
 } 

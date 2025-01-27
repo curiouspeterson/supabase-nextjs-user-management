@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import { ReactNode } from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
@@ -13,7 +14,7 @@ const alertVariants = cva(
         destructive:
           'border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive',
         warning:
-          'border-yellow-500/50 text-yellow-600 dark:border-yellow-500 [&>svg]:text-yellow-600',
+          'border-yellow-500/50 text-yellow-700 dark:text-yellow-500 [&>svg]:text-yellow-500',
       },
     },
     defaultVariants: {
@@ -22,18 +23,28 @@ const alertVariants = cva(
   }
 )
 
-const Alert = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, ...props }, ref) => (
-  <div
-    ref={ref}
-    role="alert"
-    className={cn(alertVariants({ variant }), className)}
-    {...props}
-  />
-))
-Alert.displayName = 'Alert'
+export interface AlertProps
+  extends React.HTMLAttributes<HTMLDivElement>,
+    VariantProps<typeof alertVariants> {
+  children: ReactNode
+}
+
+export function Alert({
+  className,
+  variant,
+  children,
+  ...props
+}: AlertProps) {
+  return (
+    <div
+      role="alert"
+      className={cn(alertVariants({ variant }), className)}
+      {...props}
+    >
+      {children}
+    </div>
+  )
+}
 
 const AlertTitle = React.forwardRef<
   HTMLParagraphElement,
@@ -59,4 +70,4 @@ const AlertDescription = React.forwardRef<
 ))
 AlertDescription.displayName = 'AlertDescription'
 
-export { Alert, AlertTitle, AlertDescription } 
+export { AlertTitle, AlertDescription } 

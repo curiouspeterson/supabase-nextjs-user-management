@@ -1,164 +1,230 @@
 'use client';
 
-import { addDays, differenceInHours, parseISO } from 'date-fns';
+import { addDays, differenceInHours, parseISO, format, zonedTimeToUtc, utcToZonedTime } from 'date-fns';
 import type { Shift, Schedule, CoverageReport } from './types';
 import { createClient } from '@/utils/supabase/server';
+import { logger } from '@/lib/logger';
+import { AppError, DatabaseError } from '@/lib/errors';
 
 export interface ShiftSegment {
   date: string;
   hours: number;
 }
 
+interface ErrorDetails {
+  shift_id?: string;
+  schedule_id?: string;
+  date?: string;
+  error?: string;
+}
+
 export class MidnightShiftHandler {
   private supabase = createClient();
+  private readonly timezone: string;
 
-  constructor() {}
-
-  /**
-   * Splits a shift that crosses midnight into segments for each day
-   */
-  splitShiftAcrossDays(shift: Shift, date: string): ShiftSegment[] {
-    const segments: ShiftSegment[] = [];
-    const startDate = new Date(`${date}T${shift.start_time}`);
-    let endDate = new Date(`${date}T${shift.end_time}`);
-
-    // If end time is before start time, the shift crosses midnight
-    if (shift.end_time < shift.start_time) {
-      endDate = addDays(endDate, 1);
-    }
-
-    // Calculate hours for first day
-    const midnightFirstDay = new Date(startDate);
-    midnightFirstDay.setHours(24, 0, 0, 0);
-    
-    if (endDate > midnightFirstDay) {
-      // Shift crosses midnight
-      const firstDayHours = differenceInHours(midnightFirstDay, startDate);
-      segments.push({
-        date: date,
-        hours: firstDayHours
-      });
-
-      // Add hours for second day
-      const secondDayHours = differenceInHours(endDate, midnightFirstDay);
-      segments.push({
-        date: addDays(new Date(date), 1).toISOString().split('T')[0],
-        hours: secondDayHours
-      });
-    } else {
-      // Shift doesn't cross midnight
-      segments.push({
-        date: date,
-        hours: shift.duration_hours
-      });
-    }
-
-    return segments;
+  constructor(timezone: string = 'UTC') {
+    this.timezone = timezone;
   }
 
   /**
-   * Calculates coverage for shifts that may cross midnight
+   * Split a shift that crosses midnight into segments for each day
+   * @param shift The shift to split
+   * @param date The date of the shift
+   * @returns Array of shift segments
+   */
+  async splitShiftAcrossDays(shift: Shift, date: string): Promise<ShiftSegment[]> {
+    try {
+      // Convert the shift times to UTC, considering the timezone
+      const shiftDate = parseISO(date);
+      const startTime = zonedTimeToUtc(`${date}T${shift.start_time}`, this.timezone);
+      const endTime = zonedTimeToUtc(`${date}T${shift.end_time}`, this.timezone);
+
+      // Use the database function to split the shift
+      const { data: segments, error } = await this.supabase.rpc('split_midnight_shift', {
+        p_start_time: startTime.toISOString(),
+        p_end_time: endTime.toISOString(),
+        p_timezone: this.timezone
+      });
+
+      if (error) {
+        throw new DatabaseError(`Failed to split midnight shift: ${error.message}`, {
+          shift_id: shift.id,
+          date,
+          error: error.message
+        });
+      }
+
+      return segments.map(segment => ({
+        date: format(utcToZonedTime(parseISO(segment.segment_date), this.timezone), 'yyyy-MM-dd'),
+        hours: Number(segment.hours)
+      }));
+    } catch (error) {
+      const errorDetails: ErrorDetails = {
+        shift_id: shift.id,
+        date,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+
+      // Log the error
+      logger.error('Error splitting midnight shift', {
+        error: errorDetails,
+        context: 'MidnightShiftHandler.splitShiftAcrossDays'
+      });
+
+      // Log to database
+      await this.supabase.rpc('log_scheduler_error', {
+        p_error_type: 'MIDNIGHT_SHIFT_SPLIT_ERROR',
+        p_error_message: 'Failed to split midnight shift',
+        p_error_details: errorDetails
+      });
+
+      throw new AppError('Failed to process midnight shift', 'MIDNIGHT_SHIFT_ERROR');
+    }
+  }
+
+  /**
+   * Calculate coverage for a set of schedules
+   * @param schedules Array of schedules to calculate coverage for
+   * @returns Map of dates to coverage reports
    */
   async calculateCoverage(schedules: Schedule[]): Promise<Map<string, CoverageReport>> {
-    const coverage = new Map<string, CoverageReport>();
-    
-    // Get all shifts and staffing requirements
-    const { data: shifts } = await this.supabase
-      .from('shifts')
-      .select('*');
-    
-    const { data: requirements } = await this.supabase
-      .from('staffing_requirements')
-      .select('*');
-
-    if (!shifts || !requirements) {
-      throw new Error('Failed to fetch shifts or staffing requirements');
-    }
-
-    // Process each schedule
-    for (const schedule of schedules) {
-      const shift = shifts.find(s => s.id === schedule.shift_id);
-      if (!shift) continue;
-
-      // Split shift if it crosses midnight
-      const segments = this.splitShiftAcrossDays(shift, schedule.date);
+    try {
+      const coverage = new Map<string, CoverageReport>();
       
-      // Update coverage for each segment
-      for (const segment of segments) {
-        if (!coverage.has(segment.date)) {
-          coverage.set(segment.date, {
-            date: segment.date,
-            periods: {}
-          });
-        }
+      // Start a database transaction
+      const { error: txError } = await this.supabase.rpc('begin_transaction');
+      if (txError) throw new DatabaseError('Failed to start transaction');
 
-        const dailyCoverage = coverage.get(segment.date)!;
-        
-        // Find overlapping requirements
-        requirements.forEach(req => {
-          const reqStart = parseISO(`${segment.date}T${req.start_time}`);
-          let reqEnd = parseISO(`${segment.date}T${req.end_time}`);
-          
-          // Handle requirements that cross midnight
-          if (req.end_time < req.start_time) {
-            reqEnd = addDays(reqEnd, 1);
-          }
+      try {
+        for (const schedule of schedules) {
+          const { data: shift, error: shiftError } = await this.supabase
+            .from('shifts')
+            .select('*')
+            .eq('id', schedule.shift_id)
+            .single();
 
-          // Check if shift segment overlaps with requirement period
-          const shiftStart = parseISO(`${segment.date}T${shift.start_time}`);
-          let shiftEnd = parseISO(`${segment.date}T${shift.end_time}`);
-          
-          if (shift.end_time < shift.start_time) {
-            shiftEnd = addDays(shiftEnd, 1);
-          }
+          if (shiftError) throw new DatabaseError('Failed to fetch shift');
 
-          if (shiftStart < reqEnd && shiftEnd > reqStart) {
-            // Periods overlap, update coverage
-            const periodKey = `${req.start_time}-${req.end_time}`;
-            if (!dailyCoverage.periods[periodKey]) {
-              dailyCoverage.periods[periodKey] = {
-                required: req.minimum_employees,
+          const segments = await this.splitShiftAcrossDays(shift, schedule.date);
+
+          for (const segment of segments) {
+            if (!coverage.has(segment.date)) {
+              coverage.set(segment.date, {
+                date: segment.date,
+                periods: {}
+              });
+            }
+
+            const report = coverage.get(segment.date)!;
+            const periodKey = `${shift.start_time}-${shift.end_time}`;
+
+            if (!report.periods[periodKey]) {
+              report.periods[periodKey] = {
+                required: 0,
                 actual: 0,
                 supervisors: 0,
                 overtime: 0
               };
             }
 
-            dailyCoverage.periods[periodKey].actual++;
+            report.periods[periodKey].actual += segment.hours;
           }
-        });
-      }
-    }
+        }
 
-    return coverage;
+        // Commit transaction
+        await this.supabase.rpc('commit_transaction');
+        
+        return coverage;
+      } catch (error) {
+        // Rollback transaction on error
+        await this.supabase.rpc('rollback_transaction');
+        throw error;
+      }
+    } catch (error) {
+      const errorDetails: ErrorDetails = {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+
+      logger.error('Error calculating coverage', {
+        error: errorDetails,
+        context: 'MidnightShiftHandler.calculateCoverage'
+      });
+
+      await this.supabase.rpc('log_scheduler_error', {
+        p_error_type: 'COVERAGE_CALCULATION_ERROR',
+        p_error_message: 'Failed to calculate coverage',
+        p_error_details: errorDetails
+      });
+
+      throw new AppError('Failed to calculate coverage', 'COVERAGE_ERROR');
+    }
   }
 
   /**
-   * Updates daily coverage records for midnight shifts
+   * Update daily coverage based on schedules
+   * @param schedules Array of schedules to update coverage for
    */
   async updateDailyCoverage(schedules: Schedule[]): Promise<void> {
     try {
       const coverage = await this.calculateCoverage(schedules);
 
-      // Update coverage records in database
-      for (const [date, dailyCoverage] of coverage.entries()) {
-        for (const periodKey in dailyCoverage.periods) {
-          const periodCoverage = dailyCoverage.periods[periodKey];
-          await this.supabase
-            .from('daily_coverage')
-            .upsert({
-              date,
-              period_id: periodKey,
-              actual_coverage: periodCoverage.actual,
-              coverage_status: periodCoverage.actual >= periodCoverage.required ? 'Met' : 'Under',
-              updated_at: new Date().toISOString()
-            })
-            .select();
+      // Start a database transaction
+      const { error: txError } = await this.supabase.rpc('begin_transaction');
+      if (txError) throw new DatabaseError('Failed to start transaction');
+
+      try {
+        for (const [date, report] of coverage) {
+          for (const [periodId, data] of Object.entries(report.periods)) {
+            const { error: upsertError } = await this.supabase
+              .from('daily_coverage')
+              .upsert({
+                date,
+                period_id: periodId,
+                actual_coverage: data.actual,
+                required_coverage: data.required,
+                supervisor_count: data.supervisors,
+                overtime_hours: data.overtime,
+                coverage_status: this.determineCoverageStatus(data.required, data.actual),
+                timezone: this.timezone,
+                updated_at: new Date().toISOString()
+              });
+
+            if (upsertError) {
+              throw new DatabaseError(`Failed to upsert daily coverage: ${upsertError.message}`);
+            }
+          }
         }
+
+        // Commit transaction
+        await this.supabase.rpc('commit_transaction');
+      } catch (error) {
+        // Rollback transaction on error
+        await this.supabase.rpc('rollback_transaction');
+        throw error;
       }
     } catch (error) {
-      console.error('Failed to update daily coverage:', error);
-      throw new Error('Failed to update daily coverage records');
+      const errorDetails: ErrorDetails = {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+
+      logger.error('Error updating daily coverage', {
+        error: errorDetails,
+        context: 'MidnightShiftHandler.updateDailyCoverage'
+      });
+
+      await this.supabase.rpc('log_scheduler_error', {
+        p_error_type: 'COVERAGE_UPDATE_ERROR',
+        p_error_message: 'Failed to update daily coverage',
+        p_error_details: errorDetails
+      });
+
+      throw new AppError('Failed to update daily coverage', 'COVERAGE_UPDATE_ERROR');
     }
+  }
+
+  private determineCoverageStatus(required: number, actual: number): 'Under' | 'Met' | 'Over' {
+    if (actual < required) return 'Under';
+    if (actual === required) return 'Met';
+    return 'Over';
   }
 }

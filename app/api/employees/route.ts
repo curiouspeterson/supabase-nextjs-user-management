@@ -1,7 +1,33 @@
-import { createAdminClient } from '@/utils/supabase/admin'
 import { NextResponse } from 'next/server'
-import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
+import { createServerClient } from '@/utils/supabase/server'
+import { z } from 'zod'
+import { logger } from '@/lib/logger'
+import { ApiError, DatabaseError, AuthError } from '@/lib/errors'
 import crypto from 'crypto'
+
+// Environment variables validation
+const envSchema = z.object({
+  EMAIL_DOMAIN: z.string().min(1),
+  NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
+})
+
+// Validate environment variables
+const env = envSchema.parse({
+  EMAIL_DOMAIN: process.env.EMAIL_DOMAIN || 'example.com',
+  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+})
+
+// Request validation schema
+const createEmployeeSchema = z.object({
+  full_name: z.string().min(1, 'Full name is required'),
+  username: z.string().min(1, 'Username is required'),
+  employee_role: z.enum(['Employee', 'Shift Supervisor', 'Management']),
+  weekly_hours_scheduled: z.number().min(0).max(168),
+  default_shift_type_id: z.string().optional(),
+})
 
 function generateUniqueEmail(fullName: string): string {
   // Remove special characters and convert to lowercase
@@ -41,222 +67,163 @@ function generateSecurePassword(): string {
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID()
+  
   try {
-    console.log('Starting employee creation process...')
-    const requestData = await request.json()
-    console.log('Received request data:', JSON.stringify(requestData, null, 2))
-
-    const {
-      email,
-      full_name,
-      employee_role,
-      user_role,
-      weekly_hours_scheduled,
-      default_shift_type_id
-    } = requestData
-
-    // Validate required fields
-    if (!email || !full_name || !employee_role || !user_role || !weekly_hours_scheduled || !default_shift_type_id) {
-      console.error('Missing required fields:', {
-        email: !email,
-        full_name: !full_name,
-        employee_role: !employee_role,
-        user_role: !user_role,
-        weekly_hours_scheduled: !weekly_hours_scheduled,
-        default_shift_type_id: !default_shift_type_id
-      })
-      return NextResponse.json(
-        { error: 'Missing required fields', details: 'All fields are required' },
-        { status: 400 }
-      )
-    }
-
-    // Validate field formats
-    if (typeof weekly_hours_scheduled !== 'number' || weekly_hours_scheduled < 0) {
-      return NextResponse.json(
-        { error: 'Invalid weekly_hours_scheduled', details: 'Must be a positive number' },
-        { status: 400 }
-      )
-    }
-
-    if (!default_shift_type_id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-      return NextResponse.json(
-        { error: 'Invalid default_shift_type_id', details: 'Must be a valid UUID' },
-        { status: 400 }
-      )
-    }
-
-    if (!['Dispatcher', 'Shift Supervisor', 'Management'].includes(employee_role)) {
-      return NextResponse.json(
-        { error: 'Invalid employee_role', details: 'Must be one of: Dispatcher, Shift Supervisor, Management' },
-        { status: 400 }
-      )
-    }
-
-    if (!['Employee', 'Manager', 'Admin'].includes(user_role)) {
-      return NextResponse.json(
-        { error: 'Invalid user_role', details: 'Must be one of: Employee, Manager, Admin' },
-        { status: 400 }
-      )
-    }
-
-    console.log('Request data validated:', { email, full_name, employee_role, user_role })
-
-    // Create Supabase client with admin role
-    const supabase = createAdminClient()
-    console.log('Admin client created')
-
-    // Check if user already exists
-    console.log('Checking for existing user...')
-    const { data: existingUser, error: lookupError } = await supabase.auth.admin.listUsers()
-    if (lookupError) {
-      console.error('Error checking existing users:', lookupError)
-      return NextResponse.json(
-        { error: 'Error checking existing users', details: lookupError.message },
-        { status: 500 }
-      )
-    }
-
-    const userExists = existingUser.users.some(user => user.email === email)
-    if (userExists) {
-      console.log('User already exists:', email)
-      return NextResponse.json(
-        { error: 'User already exists', details: 'A user with this email already exists' },
-        { status: 400 }
-      )
-    }
-    console.log('No existing user found')
-
-    // Generate a secure password if not provided
-    const password = generateSecurePassword()
-    console.log('Password generated')
-
-    // First try creating user with minimal data
-    console.log('Attempting to create user with minimal data...')
-    const { data: minimalAuthData, error: minimalAuthError } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: {
-        full_name
-      }
+    // Parse and validate request body
+    const body = await request.json()
+    const validatedData = createEmployeeSchema.parse(body)
+    
+    logger.info('Creating new employee', {
+      requestId,
+      username: validatedData.username,
+      role: validatedData.employee_role
     })
 
-    if (minimalAuthError) {
-      console.error('Error creating user with minimal data:', minimalAuthError)
-      console.error('Minimal user data:', { email, full_name })
-      return NextResponse.json(
-        { 
-          error: 'Error creating user', 
-          details: minimalAuthError.message,
-          code: minimalAuthError.status,
-          context: 'minimal_data',
-          metadata: { email, full_name }
-        },
-        { status: minimalAuthError.status || 400 }
-      )
-    }
-
-    // If minimal user creation succeeds, update with full metadata
-    console.log('User created successfully with minimal data, updating metadata...')
-    console.log('Full metadata to be updated:', {
-      full_name,
-      employee_role,
-      user_role,
-      weekly_hours_scheduled,
-      default_shift_type_id
-    })
-
-    const { error: updateError } = await supabase.auth.admin.updateUserById(
-      minimalAuthData.user.id,
+    const supabase = createServerClient(
+      env.NEXT_PUBLIC_SUPABASE_URL,
+      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
-        user_metadata: {
-          full_name,
-          employee_role,
-          user_role,
-          weekly_hours_scheduled: parseInt(weekly_hours_scheduled.toString(), 10),
-          default_shift_type_id
-        }
+        cookies: {
+          get(name: string) {
+            return cookies().get(name)?.value
+          },
+          set(name: string, value: string, options: any) {
+            cookies().set({ name, value, ...options })
+          },
+          remove(name: string, options: any) {
+            cookies().set({ name, value: '', ...options })
+          },
+        },
       }
     )
 
-    if (updateError) {
-      console.error('Error updating user metadata:', updateError)
-      console.error('Update data:', {
-        userId: minimalAuthData.user.id,
-        metadata: {
-          full_name,
-          employee_role,
-          user_role,
-          weekly_hours_scheduled,
-          default_shift_type_id
-        }
-      })
-      // Try to clean up the user if metadata update fails
-      await supabase.auth.admin.deleteUser(minimalAuthData.user.id)
-      return NextResponse.json(
-        { 
-          error: 'Error updating user metadata', 
-          details: updateError.message,
-          code: updateError.status,
-          metadata: {
-            full_name,
-            employee_role,
-            user_role,
-            weekly_hours_scheduled,
-            default_shift_type_id
-          }
+    // Get the authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError) {
+      throw new AuthError('Failed to authenticate user', { cause: authError })
+    }
+    if (!user) {
+      throw new AuthError('No authenticated user found')
+    }
+
+    // Check if user has admin role
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('user_role')
+      .eq('id', user.id)
+      .single()
+
+    if (employeeError) {
+      throw new DatabaseError('Failed to fetch employee data', { cause: employeeError })
+    }
+    if (!employeeData || !['Manager', 'Admin'].includes(employeeData.user_role)) {
+      throw new AuthError('Insufficient permissions to create employee')
+    }
+
+    // Generate a secure random password
+    const password = crypto.randomBytes(16).toString('hex')
+
+    // Create the user account
+    const { data: userData, error: createUserError } = await supabase.auth.signUp({
+      email: `${validatedData.username}@${env.EMAIL_DOMAIN}`,
+      password,
+    })
+
+    if (createUserError || !userData.user) {
+      throw new DatabaseError('Failed to create user account', { cause: createUserError })
+    }
+
+    // Create employee profile
+    const { error: profileError } = await supabase.from('profiles').insert({
+      id: userData.user.id,
+      full_name: validatedData.full_name,
+      username: validatedData.username,
+    })
+
+    if (profileError) {
+      throw new DatabaseError('Failed to create employee profile', { cause: profileError })
+    }
+
+    // Create employee record
+    const { error: createEmployeeError } = await supabase.from('employees').insert({
+      id: userData.user.id,
+      employee_role: validatedData.employee_role,
+      weekly_hours_scheduled: validatedData.weekly_hours_scheduled,
+      default_shift_type_id: validatedData.default_shift_type_id,
+      user_role: validatedData.employee_role === 'Management' ? 'Admin' : 'Employee',
+    })
+
+    if (createEmployeeError) {
+      throw new DatabaseError('Failed to create employee record', { cause: createEmployeeError })
+    }
+
+    logger.info('Successfully created employee', {
+      requestId,
+      employeeId: userData.user.id
+    })
+
+    return NextResponse.json(
+      {
+        message: 'Employee created successfully',
+        data: {
+          id: userData.user.id,
+          email: `${validatedData.username}@${env.EMAIL_DOMAIN}`,
         },
-        { status: updateError.status || 400 }
+      },
+      { status: 201 }
+    )
+
+  } catch (error) {
+    logger.error('Error creating employee', {
+      requestId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        {
+          type: 'validation_error',
+          title: 'Validation Error',
+          status: 400,
+          detail: 'Invalid request data',
+          errors: error.errors,
+        },
+        { status: 400 }
       )
     }
 
-    // Wait a moment for the trigger to complete
-    console.log('Waiting for database trigger...')
-    await new Promise(resolve => setTimeout(resolve, 2000)) // Increased wait time
-
-    // Verify the employee record was created
-    console.log('Verifying employee record...')
-    const { data: employee, error: employeeError } = await supabase
-      .from('employees')
-      .select('*')
-      .eq('id', minimalAuthData.user.id)
-      .single()
-
-    if (employeeError || !employee) {
-      console.error('Error verifying employee creation:', employeeError)
-      console.error('Employee verification data:', {
-        userId: minimalAuthData.user.id,
-        error: employeeError
-      })
-      // Try to clean up the user if employee verification fails
-      await supabase.auth.admin.deleteUser(minimalAuthData.user.id)
+    if (error instanceof AuthError) {
       return NextResponse.json(
-        { 
-          error: 'Failed to verify employee record', 
-          details: employeeError?.message,
-          context: 'verification',
-          userId: minimalAuthData.user.id
+        {
+          type: 'authorization_error',
+          title: 'Authorization Error',
+          status: 403,
+          detail: error.message,
+        },
+        { status: 403 }
+      )
+    }
+
+    if (error instanceof DatabaseError) {
+      return NextResponse.json(
+        {
+          type: 'database_error',
+          title: 'Database Error',
+          status: 500,
+          detail: error.message,
         },
         { status: 500 }
       )
     }
 
-    console.log('Employee created successfully:', employee)
-    return NextResponse.json({ 
-      message: 'Employee created successfully',
-      userId: minimalAuthData.user.id,
-      employee
-    })
-
-  } catch (error) {
-    console.error('Unexpected error in employee creation:', error)
     return NextResponse.json(
-      { 
-        error: 'Internal server error', 
-        details: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined,
-        timestamp: new Date().toISOString()
+      {
+        type: 'internal_server_error',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: 'An unexpected error occurred',
       },
       { status: 500 }
     )

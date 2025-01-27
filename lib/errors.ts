@@ -17,50 +17,30 @@ export class AppError extends Error {
   }
 }
 
-export class AuthError extends AppError {
-  constructor(message: string, code: string = 'AUTH_ERROR') {
-    super(
-      message,
-      code,
-      401,
-      true,
-      ErrorSeverity.HIGH,
-      ErrorCategory.AUTH,
-      {},
-      ErrorRecoveryStrategy.REFRESH
-    )
+export class ApiError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'ApiError'
+  }
+}
+
+export class AuthError extends ApiError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'AuthError'
   }
 }
 
-export class ValidationError extends AppError {
-  constructor(message: string, code: string = 'VALIDATION_ERROR') {
-    super(
-      message,
-      code,
-      400,
-      true,
-      ErrorSeverity.LOW,
-      ErrorCategory.VALIDATION,
-      {},
-      ErrorRecoveryStrategy.NONE
-    )
+export class ValidationError extends ApiError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'ValidationError'
   }
 }
 
-export class DatabaseError extends AppError {
-  constructor(message: string, code: string = 'DATABASE_ERROR') {
-    super(
-      message,
-      code,
-      500,
-      true,
-      ErrorSeverity.HIGH,
-      ErrorCategory.DATA,
-      {},
-      ErrorRecoveryStrategy.RETRY
-    )
+export class DatabaseError extends ApiError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'DatabaseError'
   }
 }
