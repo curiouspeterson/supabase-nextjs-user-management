@@ -14,6 +14,7 @@ import {
   ErrorAnalyticsService,
   ErrorRecoveryStrategy
 } from '@/lib/error-analytics'
+import { ErrorRecoveryStrategy as TypeErrorRecoveryStrategy } from '@/lib/types/error'
 
 /**
  * Props for the ErrorBoundary component
@@ -24,9 +25,11 @@ interface Props {
   /** Optional custom fallback UI to show when an error occurs */
   fallback?: React.ReactNode
   /** Optional callback for error handling */
-  onError?: (error: Error, errorInfo: React.ErrorInfo) => void
+  onError?: (error: Error) => void
   /** Maximum number of retry attempts (default: 3) */
   maxRetries?: number
+  /** Optional recovery strategy */
+  recoveryStrategy?: TypeErrorRecoveryStrategy
 }
 
 /**
@@ -38,11 +41,18 @@ interface State {
   /** Number of retry attempts */
   retryCount: number
   /** Unique key for the current error */
-  errorKey?: string
+  errorKey: string | null
   /** Timestamp when the error occurred */
-  startTime?: number
+  startTime: number | null
   /** Current recovery strategy */
-  recoveryStrategy?: ErrorRecoveryStrategy
+  recoveryStrategy: TypeErrorRecoveryStrategy
+}
+
+/**
+ * Props for the ErrorBoundaryClass component
+ */
+interface ErrorBoundaryClassProps extends Props {
+  router: ReturnType<typeof useRouter>
 }
 
 /**
@@ -66,23 +76,24 @@ interface State {
  * </ErrorBoundary>
  * ```
  */
-export class ErrorBoundary extends React.Component<Props, State> {
+export class ErrorBoundaryClass extends React.Component<ErrorBoundaryClassProps, State> {
   /** Error analytics service instance */
-  private errorAnalytics: ErrorAnalyticsService
-  /** Next.js router instance */
-  private router = useRouter()
+  private analyticsService: ErrorAnalyticsService
 
   /**
    * Creates a new ErrorBoundary instance
    * @param props - Component props
    */
-  constructor(props: Props) {
+  constructor(props: ErrorBoundaryClassProps) {
     super(props)
     this.state = {
       error: null,
-      retryCount: 0
+      retryCount: 0,
+      errorKey: null,
+      startTime: null,
+      recoveryStrategy: props.recoveryStrategy || TypeErrorRecoveryStrategy.RETRY
     }
-    this.errorAnalytics = ErrorAnalyticsService.getInstance()
+    this.analyticsService = ErrorAnalyticsService.getInstance()
   }
 
   /**
@@ -94,161 +105,112 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return {
       error,
       retryCount: 0,
-      startTime: Date.now()
+      errorKey: null,
+      startTime: Date.now(),
+      recoveryStrategy: TypeErrorRecoveryStrategy.RETRY
     }
   }
 
   /**
-   * Initializes error analytics service
+   * Converts a standard Error to an AppError
+   * @param error - The error to convert
+   * @returns An AppError instance
    */
-  async componentDidMount() {
-    await this.errorAnalytics.initialize()
+  private convertToAppError(error: Error): AppError {
+    if (error instanceof AppError) {
+      return error
+    }
+    if (error.name === 'NetworkError' || error.message.toLowerCase().includes('network')) {
+      return new NetworkError(error.message)
+    }
+    if (error.name === 'ValidationError' || error.message.toLowerCase().includes('validation')) {
+      return new ValidationError(error.message)
+    }
+    return new AppError(error.message)
   }
 
   /**
    * Handles caught errors
    * @param error - The error that was caught
-   * @param errorInfo - React error info object
    */
-  async componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    const { onError } = this.props
+  async componentDidCatch(error: Error) {
+    const appError = this.convertToAppError(error)
+    const errorKey = await this.analyticsService.trackError(appError)
+    const suggestedStrategy = this.analyticsService.suggestRecoveryStrategy(errorKey)
     
-    if (onError) {
-      onError(error, errorInfo)
-    }
+    this.setState({
+      errorKey,
+      recoveryStrategy: suggestedStrategy
+    })
 
-    // Track error with analytics
-    const context = `${window.location.pathname}${window.location.search}`
-    const errorKey = await this.trackError(error, context)
-    
-    // Get suggested recovery strategy
-    const recoveryStrategy = this.errorAnalytics.suggestRecoveryStrategy(errorKey)
-    
-    this.setState({ errorKey, recoveryStrategy })
-  }
-
-  /**
-   * Tracks an error with the analytics service
-   * @param error - The error to track
-   * @param context - Error context (e.g., URL)
-   * @returns Error key for tracking
-   */
-  private async trackError(error: Error, context: string): Promise<string> {
-    try {
-      let appError: AppError
-      
-      if (error instanceof AppError) {
-        appError = error
-      } else {
-        // Convert standard errors to AppError
-        appError = new AppError(
-          error.message,
-          error.name,
-          undefined,
-          undefined,
-          { stack: error.stack }
-        )
-      }
-
-      await this.errorAnalytics.trackError(appError, context)
-      return `${appError.name}:${appError.code}`
-    } catch (trackingError) {
-      console.error('Failed to track error:', trackingError)
-      return 'UNKNOWN:TRACKING_FAILED'
+    if (this.props.onError) {
+      this.props.onError(error)
     }
   }
 
   /**
    * Handles error recovery based on the current strategy
    */
-  private async handleRecovery() {
-    const { maxRetries = 3 } = this.props
-    const { retryCount, errorKey, startTime, recoveryStrategy } = this.state
-    
-    if (retryCount >= maxRetries) {
+  handleRecovery = async () => {
+    const { error, errorKey, retryCount, startTime, recoveryStrategy } = this.state
+    const { maxRetries = 3, router } = this.props
+
+    if (!error || !errorKey || retryCount >= maxRetries) {
       return
     }
 
-    const strategy = recoveryStrategy || ErrorRecoveryStrategy.RETRY
-    
-    try {
-      switch (strategy) {
-        case ErrorRecoveryStrategy.RETRY:
-          this.setState(prev => ({
-            error: null,
-            retryCount: prev.retryCount + 1
-          }))
-          break
+    const resolutionTime = startTime ? Date.now() - startTime : 0
+    this.analyticsService.updateErrorResolution(
+      errorKey,
+      resolutionTime,
+      false,
+      recoveryStrategy
+    )
 
-        case ErrorRecoveryStrategy.REFRESH:
-          window.location.reload()
-          break
-
-        case ErrorRecoveryStrategy.RESET:
-          // Clear local state and refresh
-          localStorage.clear()
-          sessionStorage.clear()
-          window.location.reload()
-          break
-
-        case ErrorRecoveryStrategy.FALLBACK:
-          // Navigate to fallback route
-          this.router.push('/')
-          break
-
-        case ErrorRecoveryStrategy.NONE:
-          // Do nothing, user must manually refresh
-          return
-      }
-
-      // Track recovery attempt
-      if (errorKey && startTime) {
-        const resolutionTime = Date.now() - startTime
-        const wasSuccessful = true
-        
-        await this.errorAnalytics.updateErrorResolution(
-          errorKey,
-          resolutionTime,
-          wasSuccessful,
-          strategy
-        )
-      }
-    } catch (recoveryError) {
-      console.error('Recovery failed:', recoveryError)
-      
-      // Track failed recovery
-      if (errorKey && startTime) {
-        const resolutionTime = Date.now() - startTime
-        const wasSuccessful = false
-        
-        await this.errorAnalytics.updateErrorResolution(
-          errorKey,
-          resolutionTime,
-          wasSuccessful,
-          strategy
-        )
-      }
-
-      // Update state to show recovery failed
-      this.setState(prev => ({
-        retryCount: prev.retryCount + 1
-      }))
+    switch (recoveryStrategy) {
+      case TypeErrorRecoveryStrategy.RETRY:
+        this.setState(prevState => ({
+          error: null,
+          retryCount: prevState.retryCount + 1
+        }))
+        break
+      case TypeErrorRecoveryStrategy.REFRESH:
+        window.location.reload()
+        break
+      case TypeErrorRecoveryStrategy.RESET:
+        this.setState({
+          error: null,
+          retryCount: 0,
+          errorKey: null,
+          startTime: null
+        })
+        break
+      case TypeErrorRecoveryStrategy.FALLBACK:
+        router.push('/')
+        break
+      default:
+        break
     }
   }
 
   /**
    * Gets the appropriate error message based on error type
-   * @param error - The error to get message for
    * @returns User-friendly error message
    */
-  private getErrorMessage(error: Error): string {
+  getErrorMessage(): string {
+    const { error } = this.state
+    if (!error) return 'An unexpected error occurred'
+
     if (error instanceof NetworkError) {
-      return 'Connection Error'
+      return 'Please check your internet connection and try again'
     }
     if (error instanceof ValidationError) {
-      return 'Validation Error'
+      return 'The provided data is invalid. Please check your input and try again'
     }
-    return 'Something went wrong'
+    if (error instanceof AppError) {
+      return error.message
+    }
+    return 'An unexpected error occurred. Please try again later'
   }
 
   /**
@@ -270,27 +232,21 @@ export class ErrorBoundary extends React.Component<Props, State> {
    * Gets the appropriate button text based on recovery strategy
    * @returns Button text for recovery action
    */
-  private getRecoveryButtonText(): string {
-    const { maxRetries = 3 } = this.props
+  getRecoveryButtonText(): string {
     const { retryCount, recoveryStrategy } = this.state
-
-    if (retryCount >= maxRetries) {
-      return 'Please refresh the page'
-    }
+    const { maxRetries = 3 } = this.props
 
     switch (recoveryStrategy) {
-      case ErrorRecoveryStrategy.RETRY:
+      case TypeErrorRecoveryStrategy.RETRY:
         return `Try again (attempt ${retryCount + 1} of ${maxRetries})`
-      case ErrorRecoveryStrategy.REFRESH:
+      case TypeErrorRecoveryStrategy.REFRESH:
         return 'Refresh page'
-      case ErrorRecoveryStrategy.RESET:
+      case TypeErrorRecoveryStrategy.RESET:
         return 'Reset and refresh'
-      case ErrorRecoveryStrategy.FALLBACK:
+      case TypeErrorRecoveryStrategy.FALLBACK:
         return 'Return to home'
-      case ErrorRecoveryStrategy.NONE:
-        return 'Please contact support'
       default:
-        return `Try again (attempt ${retryCount + 1} of ${maxRetries})`
+        return 'Try again'
     }
   }
 
@@ -298,37 +254,45 @@ export class ErrorBoundary extends React.Component<Props, State> {
    * Renders the error boundary component
    */
   render() {
+    const { error, retryCount } = this.state
     const { children, fallback, maxRetries = 3 } = this.props
-    const { error, retryCount, recoveryStrategy } = this.state
 
     if (error) {
-      if (fallback) {
-        return fallback
+      if (retryCount >= maxRetries) {
+        return fallback || (
+          <div className="p-4 rounded-lg bg-red-50 border border-red-100" role="alert">
+            <h2 className="text-lg font-semibold text-red-800 mb-2">Maximum retries exceeded</h2>
+            <p className="text-sm text-red-600">
+              Please try again later or contact support if the problem persists.
+            </p>
+          </div>
+        )
       }
 
-      const showRecoveryButton = retryCount < maxRetries && 
-        recoveryStrategy !== ErrorRecoveryStrategy.NONE
-
       return (
-        <div role="alert" className="p-4 rounded-lg bg-red-50 border border-red-100">
+        <div className="p-4 rounded-lg bg-red-50 border border-red-100" role="alert">
           <h2 className="text-lg font-semibold text-red-800 mb-2">
-            {this.getErrorMessage(error)}
+            {error instanceof NetworkError ? 'Connection Error' : 'Something went wrong'}
           </h2>
-          <p className="text-sm text-red-600 mb-4">
-            {this.getErrorDescription(error)}
-          </p>
-          {showRecoveryButton && (
-            <button
-              onClick={() => this.handleRecovery()}
-              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-            >
-              {this.getRecoveryButtonText()}
-            </button>
-          )}
+          <p className="text-sm text-red-600 mb-4">{this.getErrorMessage()}</p>
+          <button
+            onClick={this.handleRecovery}
+            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+          >
+            {this.getRecoveryButtonText()}
+          </button>
         </div>
       )
     }
 
     return children
   }
+}
+
+/**
+ * Wrapper component to provide hooks to the class component
+ */
+export function ErrorBoundary(props: Props) {
+  const router = useRouter()
+  return <ErrorBoundaryClass {...props} router={router} />
 } 

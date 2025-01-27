@@ -1,13 +1,16 @@
 import React from 'react'
-import { render } from '@testing-library/react'
+import { render, RenderOptions } from '@testing-library/react'
 import { faker } from '@faker-js/faker'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient, User, Session } from '@supabase/supabase-js'
 import { PostgrestQueryBuilder } from '@supabase/postgrest-js'
 import 'whatwg-fetch'
 import { NextRequest } from 'next/server'
-import { mockToast, createMockPromise, createDefaultMockClient, TEST_BASE_URL } from '@/lib/test-utils'
+import { ErrorAnalyticsService, ErrorRecoveryStrategy, ErrorSeverity, ErrorCategory } from '@/lib/error-analytics'
+import userEvent from '@testing-library/user-event'
+import { ReactElement } from 'react'
+import { createClient } from '@supabase/supabase-js'
 
-export const BASE_URL = 'http://localhost:3000'
+export const TEST_BASE_URL = 'http://localhost:3000'
 
 // Create a wrapper around fetch that handles relative URLs
 const originalFetch = global.fetch
@@ -21,352 +24,179 @@ global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return originalFetch(url, init)
 }
 
-interface QueryBuilder {
-  select: jest.Mock
-  insert: jest.Mock
-  update: jest.Mock
-  delete: jest.Mock
-  eq: jest.Mock
-  neq: jest.Mock
-  gt: jest.Mock
-  gte: jest.Mock
-  lt: jest.Mock
-  lte: jest.Mock
-  like: jest.Mock
-  ilike: jest.Mock
-  is: jest.Mock
-  in: jest.Mock
-  contains: jest.Mock
-  containedBy: jest.Mock
-  overlap: jest.Mock
-  order: jest.Mock
-  single: jest.Mock
-  maybeSingle: jest.Mock
-  execute: jest.Mock
+// Mock toast functions
+export const mockToast = {
+  error: jest.fn(),
+  success: jest.fn(),
+  info: jest.fn(),
+  warning: jest.fn(),
 }
 
-function createQueryBuilder(table: string): QueryBuilder {
-  const builder = {
-    select: jest.fn().mockReturnThis(),
-    insert: jest.fn().mockReturnThis(),
-    update: jest.fn().mockReturnThis(),
-    delete: jest.fn().mockReturnThis(),
-    eq: jest.fn().mockReturnThis(),
-    neq: jest.fn().mockReturnThis(),
-    gt: jest.fn().mockReturnThis(),
-    gte: jest.fn().mockReturnThis(),
-    lt: jest.fn().mockReturnThis(),
-    lte: jest.fn().mockReturnThis(),
-    like: jest.fn().mockReturnThis(),
-    ilike: jest.fn().mockReturnThis(),
-    is: jest.fn().mockReturnThis(),
-    in: jest.fn().mockReturnThis(),
-    contains: jest.fn().mockReturnThis(),
-    containedBy: jest.fn().mockReturnThis(),
-    overlap: jest.fn().mockReturnThis(),
-    order: jest.fn().mockReturnThis(),
-    single: jest.fn().mockResolvedValue({ data: null, error: null }),
-    maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
-    execute: jest.fn().mockResolvedValue({ data: [], error: null })
-  }
+// Mock Supabase user and session
+export const createMockSupabaseUser = (overrides: Partial<User> = {}): User => ({
+  id: faker.string.uuid(),
+  email: faker.internet.email(),
+  created_at: faker.date.past().toISOString(),
+  updated_at: faker.date.recent().toISOString(),
+  user_metadata: { role: 'Employee' },
+  ...overrides
+})
 
-  tableNames.set(builder as QueryBuilder, table)
-  return builder as QueryBuilder
-}
+export const createMockSupabaseSession = (overrides: Partial<Session> = {}): Session => ({
+  user: createMockSupabaseUser(),
+  access_token: faker.string.alphanumeric(32),
+  refresh_token: faker.string.alphanumeric(32),
+  expires_at: Date.now() + 3600,
+  ...overrides
+})
 
-const tableNames = new Map<QueryBuilder, string>()
-
-export function getTableName(builder: QueryBuilder): string | undefined {
-  return tableNames.get(builder)
-}
-
-export const mockSupabaseClient = {
+// Mock Supabase client
+export const mockSupabase = {
   auth: {
-    signInWithPassword: jest.fn().mockResolvedValue({ data: { user: null }, error: null }),
-    signUp: jest.fn().mockResolvedValue({ data: { user: null }, error: null }),
-    signOut: jest.fn().mockResolvedValue({ error: null }),
-    verifyOtp: jest.fn().mockResolvedValue({ data: { user: null }, error: null })
+    getUser: jest.fn(),
+    signOut: jest.fn(),
+    signInWithOAuth: jest.fn(),
+    signInWithPassword: jest.fn(),
+    signUp: jest.fn(),
+    resetPasswordForEmail: jest.fn(),
+    updateUser: jest.fn(),
   },
-  from: jest.fn((table: string) => {
-    const builder = createQueryBuilder(table)
-    const chainedMethods = {
-      ...builder,
-      select: jest.fn().mockImplementation(() => ({
-        ...builder,
-        eq: jest.fn().mockImplementation(() => ({
-          ...builder,
-          order: jest.fn().mockResolvedValue({ data: [], error: null }),
-          single: jest.fn().mockResolvedValue({ data: null, error: null }),
-          execute: jest.fn().mockResolvedValue({ data: [], error: null })
-        }))
-      })),
-      insert: jest.fn().mockImplementation(() => ({
-        ...builder,
-        select: jest.fn().mockImplementation(() => ({
-          ...builder,
-          single: jest.fn().mockResolvedValue({ data: null, error: null }),
-          execute: jest.fn().mockResolvedValue({ data: [], error: null })
-        }))
-      })),
-      update: jest.fn().mockImplementation(() => ({
-        ...builder,
-        eq: jest.fn().mockResolvedValue({ data: null, error: null }),
-        execute: jest.fn().mockResolvedValue({ data: null, error: null })
-      })),
-      delete: jest.fn().mockImplementation(() => ({
-        ...builder,
-        eq: jest.fn().mockResolvedValue({ data: null, error: null }),
-        execute: jest.fn().mockResolvedValue({ data: null, error: null })
-      })),
-      rpc: jest.fn().mockResolvedValue({ data: [], error: null })
-    }
-    return chainedMethods
-  }),
-  rpc: jest.fn().mockResolvedValue({ data: [], error: null })
-} as unknown as SupabaseClient
-
-export function mockCreateClient(): SupabaseClient {
-  jest.clearAllMocks()
-  tableNames.clear()
-  return mockSupabaseClient
-}
-
-export function createMockUser(overrides = {}) {
-  return {
-    id: faker.string.uuid(),
-    email: faker.internet.email(),
-    role: 'employee',
-    created_at: faker.date.past().toISOString(),
-    updated_at: faker.date.recent().toISOString(),
-    ...overrides
-  }
-}
-
-export function createMockEmployee(overrides = {}) {
-  return {
-    id: faker.string.uuid(),
-    email: faker.internet.email(),
-    weekly_hours: faker.number.int({ min: 20, max: 40 }),
-    shift_type_id: faker.string.uuid(),
-    role: 'employee',
-    created_at: faker.date.past().toISOString(),
-    updated_at: faker.date.recent().toISOString(),
-    ...overrides
-  }
-}
-
-export function createMockTimeOff(overrides = {}) {
-  return {
-    id: faker.string.uuid(),
-    employee_id: faker.string.uuid(),
-    start_date: faker.date.future().toISOString(),
-    end_date: faker.date.future().toISOString(),
-    status: 'Pending',
-    notes: faker.lorem.sentence(),
-    submitted_at: faker.date.past().toISOString(),
-    reviewed_by: null,
-    reviewed_at: null,
-    created_at: faker.date.past().toISOString(),
-    updated_at: faker.date.recent().toISOString(),
-    ...overrides
-  }
-}
-
-export function customRender(ui: React.ReactElement) {
-  return render(ui)
-}
-
-export function createMockResponse(overrides = {}) {
-  return {
-    status: 200,
-    headers: new Headers(),
-    ok: true,
-    json: jest.fn().mockResolvedValue({}),
-    ...overrides
-  }
-}
-
-export function createMockRequest(overrides = {}) {
-  return {
-    method: 'GET',
-    headers: new Headers(),
-    url: `${BASE_URL}/api/test`,
-    ...overrides
-  }
-}
-
-export function createMockCookie(overrides = {}) {
-  return {
-    name: 'test-cookie',
-    value: 'test-value',
-    ...overrides
-  }
-}
-
-export function isErrorResponse(response: Response) {
-  return !response.ok
-}
-
-// Re-export everything
-export * from '@testing-library/react'
-
-// Override render method
-export { customRender as render }
-
-// Add a helper function to create error responses
-export function createErrorResponse(message: string) {
-  return { data: null, error: new Error(message) }
-}
-
-type SafeRequestInit = Omit<RequestInit, 'signal'> & {
-  signal?: AbortSignal | undefined
-}
-
-type NextRequestInit = {
-  [K in keyof RequestInit]: K extends 'signal'
-    ? AbortSignal | undefined
-    : RequestInit[K]
-}
-
-export function createTestRequest(path: string, options: Partial<SafeRequestInit> = {}) {
-  const url = new URL(`${TEST_BASE_URL}${path}`)
-  const safeOptions = { ...options }
-  if (safeOptions.signal === null) {
-    delete safeOptions.signal
-  }
-  return new NextRequest(url, safeOptions as NextRequestInit)
-}
-
-export function createTestResponse() {
-  return {
-    status: 200,
-    headers: new Headers(),
-    json: jest.fn(),
-  }
-}
-
-export const createMockSupabaseClient = (): SupabaseClient => {
-  const client = {
-    auth: {
-      signInWithPassword: jest.fn(),
-      signUp: jest.fn(),
-      signOut: jest.fn(),
-      verifyOtp: jest.fn(),
-      getUser: jest.fn(),
-      getSession: jest.fn(),
-      setSession: jest.fn(),
-      onAuthStateChange: jest.fn(),
-      resetPasswordForEmail: jest.fn(),
-      updateUser: jest.fn(),
-      admin: {
-        createUser: jest.fn(),
-        deleteUser: jest.fn(),
-        listUsers: jest.fn(),
-        updateUser: jest.fn(),
-      },
-    },
-    from: jest.fn().mockReturnThis(),
+  from: jest.fn(() => ({
     select: jest.fn().mockReturnThis(),
     insert: jest.fn().mockReturnThis(),
     update: jest.fn().mockReturnThis(),
     delete: jest.fn().mockReturnThis(),
     eq: jest.fn().mockReturnThis(),
-    single: jest.fn().mockReturnThis(),
+    single: jest.fn(),
     order: jest.fn().mockReturnThis(),
-    storage: {
-      from: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+  })),
+  storage: {
+    from: jest.fn(() => ({
       upload: jest.fn(),
       download: jest.fn(),
       remove: jest.fn(),
       list: jest.fn(),
-      createSignedUrl: jest.fn(),
-    },
-    realtime: {
-      on: jest.fn(),
-      subscribe: jest.fn(),
-      unsubscribe: jest.fn(),
-    },
-  }
-  return client as unknown as SupabaseClient
+    })),
+  },
 }
 
-export function mockToast() {
+jest.mock('@supabase/auth-helpers-nextjs', () => ({
+  createClientComponentClient: jest.fn(() => mockSupabase),
+}))
+
+// Mock error analytics
+export const mockErrorAnalytics = {
+  trackError: jest.fn().mockResolvedValue('error-123'),
+  getErrorById: jest.fn(),
+  getAllErrors: jest.fn(),
+  clearErrors: jest.fn(),
+}
+
+// Mock router
+const mockRouter = {
+  push: jest.fn(),
+  replace: jest.fn(),
+  refresh: jest.fn(),
+  back: jest.fn(),
+  pathname: '/',
+  query: {},
+}
+
+// Mock next/navigation
+jest.mock('next/navigation', () => ({
+  useRouter: () => mockRouter,
+  usePathname: () => '/',
+  useSearchParams: () => new URLSearchParams(),
+}))
+
+// Mock next/image
+jest.mock('next/image', () => ({
+  __esModule: true,
+  default: function Image(props: any) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return React.createElement('img', { ...props, alt: props.alt || '' })
+  }
+}))
+
+// Mock toast hook
+jest.mock('@/components/ui/use-toast', () => ({
+  useToast: () => mockToast,
+}))
+
+// Custom render function
+function customRender(
+  ui: ReactElement,
+  options?: Omit<RenderOptions, 'wrapper'>,
+) {
   return {
-    toast: jest.fn(),
+    ...render(ui, { ...options }),
+    user: userEvent.setup(),
   }
 }
 
-export function mockNextRouter() {
-  return {
-    push: jest.fn(),
-    replace: jest.fn(),
-    prefetch: jest.fn(),
-    back: jest.fn(),
-    reload: jest.fn(),
-    events: {
-      on: jest.fn(),
-      off: jest.fn(),
-      emit: jest.fn(),
-    },
-    beforePopState: jest.fn(),
-    isFallback: false,
-    isReady: true,
-    isPreview: false,
-  }
-}
+// Create mock requests and responses
+export const createMockRequest = (options = {}) => {
+  const {
+    method = 'GET',
+    url = '/api/test',
+    headers = {},
+    body = null,
+    searchParams = {},
+  } = options
 
-export function mockNextAuth() {
-  return {
-    getSession: jest.fn(),
-    signIn: jest.fn(),
-    signOut: jest.fn(),
-    useSession: jest.fn(),
-  }
-}
+  const searchParamsString = new URLSearchParams(searchParams).toString()
+  const fullUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}${url}${searchParamsString ? `?${searchParamsString}` : ''}`
 
-export function mockSupabaseAuthUI() {
-  return {
-    Auth: jest.fn(),
-    ThemeSupa: {},
-  }
-}
-
-export function mockSupabaseAuthHelpers() {
-  return {
-    createServerSupabaseClient: jest.fn(),
-    createBrowserSupabaseClient: jest.fn(),
-    createMiddlewareSupabaseClient: jest.fn(),
-  }
-}
-
-describe('Test Utilities', () => {
-  describe('mockToast', () => {
-    it('should be a mock function', () => {
-      expect(typeof mockToast).toBe('function')
-      expect(jest.isMockFunction(mockToast)).toBe(true)
-    })
+  return new Request(fullUrl, {
+    method,
+    headers: new Headers({
+      'Content-Type': 'application/json',
+      ...headers,
+    }),
+    body: body ? JSON.stringify(body) : null,
   })
+}
 
-  describe('createMockPromise', () => {
-    it('should resolve with provided data', async () => {
-      const data = { test: 'data' }
-      const promise = createMockPromise(data)
-      await expect(promise).resolves.toEqual(data)
-    })
+export const createMockResponse = (options = {}) => {
+  const {
+    status = 200,
+    statusText = 'OK',
+    headers = {},
+    body = {},
+  } = options
 
-    it('should reject with provided error', async () => {
-      const error = new Error('test error')
-      const promise = createMockPromise(null, error)
-      await expect(promise).rejects.toEqual(error)
-    })
+  return new Response(JSON.stringify(body), {
+    status,
+    statusText,
+    headers: new Headers({
+      'Content-Type': 'application/json',
+      ...headers,
+    }),
   })
+}
 
-  describe('createDefaultMockClient', () => {
-    it('should return a mock client with auth methods', () => {
-      const mockClient = createDefaultMockClient()
-      expect(mockClient.auth).toBeDefined()
-      expect(mockClient.auth.getUser).toBeDefined()
-      expect(jest.isMockFunction(mockClient.auth.getUser)).toBe(true)
-    })
-  })
-}) 
+// Create mock promises
+export const createMockPromise = (data: any) => Promise.resolve({ data, error: null })
+export const createMockErrorPromise = (error: any) => Promise.resolve({ data: null, error })
+
+// Clear all mocks before each test
+beforeEach(() => {
+  jest.clearAllMocks()
+})
+
+// Mock ErrorAnalyticsService
+jest.mock('@/lib/error-analytics', () => ({
+  ErrorAnalyticsService: {
+    getInstance: jest.fn(() => mockErrorAnalytics),
+  },
+}))
+
+// Mock Supabase client
+jest.mock('@supabase/supabase-js', () => ({
+  createClient: jest.fn(() => mockSupabase),
+}))
+
+export * from '@testing-library/react'
+export { customRender as render }
+export { mockErrorAnalytics, mockSupabase, mockRouter, mockToast } 

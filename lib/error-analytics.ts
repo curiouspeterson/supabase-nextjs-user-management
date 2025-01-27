@@ -4,42 +4,15 @@
  */
 
 import { StorageAdapter } from './storage/error-analytics-storage'
-
-/**
- * Enum representing error severity levels
- */
-export enum ErrorSeverity {
-  /** Low impact errors that don't affect core functionality */
-  LOW = 'low',
-  /** Medium impact errors that affect some functionality but have workarounds */
-  MEDIUM = 'medium',
-  /** High impact errors that affect core functionality */
-  HIGH = 'high',
-  /** Critical errors that require immediate attention */
-  CRITICAL = 'critical'
-}
-
-/**
- * Enum representing error categories
- */
-export enum ErrorCategory {
-  /** UI-related errors (rendering, state management) */
-  UI = 'ui',
-  /** Network-related errors (API calls, connectivity) */
-  NETWORK = 'network',
-  /** Authentication/Authorization errors */
-  AUTH = 'auth',
-  /** Data-related errors (parsing, validation) */
-  DATA = 'data',
-  /** Input validation errors */
-  VALIDATION = 'validation',
-  /** Performance-related errors (timeouts, memory) */
-  PERFORMANCE = 'performance',
-  /** Security-related errors */
-  SECURITY = 'security',
-  /** Uncategorized errors */
-  UNKNOWN = 'unknown'
-}
+import {
+  ErrorRecoveryStrategy,
+  ErrorSeverity,
+  ErrorCategory,
+  AppError,
+  ErrorMetrics,
+  ErrorTrend,
+  ErrorMetadata
+} from '@/lib/types/error'
 
 /**
  * Enum representing error recovery strategies
@@ -186,70 +159,15 @@ export class SecurityError extends AppError {
 }
 
 /**
- * Interface for error metrics data
+ * Interface for error analytics data
  */
-export interface ErrorMetrics {
-  /** Number of times this error occurred */
-  count: number
-  /** Timestamp of first occurrence */
-  firstSeen: string
-  /** Timestamp of last occurrence */
-  lastSeen: string
-  /** Set of contexts where error occurred */
-  contexts: Set<string>
-  /** Set of user agents that encountered the error */
-  userAgents: Set<string>
-  /** Set of URLs where error occurred */
-  urls: Set<string>
-  /** Error severity level */
-  severity: ErrorSeverity
-  /** Error category */
-  category: ErrorCategory
-  /** Suggested recovery strategy */
-  recoveryStrategy: ErrorRecoveryStrategy
-  /** Set of users affected by the error */
-  impactedUsers: Set<string>
-  /** Success rate of recovery attempts */
-  recoveryRate: number
-  /** Average time to resolve the error */
-  avgResolutionTime: number
-  /** Set of related error keys */
-  relatedErrors: Set<string>
-  /** Number of successful recovery attempts */
-  successfulAttempts: number
-  /** Total number of recovery attempts */
-  totalAttempts: number
-  /** Time taken for last resolution attempt */
-  lastResolutionTime: number
-  /** Maximum resolution time recorded */
-  maxResolutionTime: number
-  /** Minimum resolution time recorded */
-  minResolutionTime: number
-  /** Number of consecutive failed attempts */
-  consecutiveFailures: number
-  /** Timestamp of last successful recovery */
-  lastRecoveryTime: string | null
-  /** Statistics for each recovery strategy */
-  recoveryAttempts: {
-    [key in ErrorRecoveryStrategy]: {
-      attempts: number
-      successes: number
-    }
-  }
-}
-
-export interface ErrorTrend {
-  period: string
-  count: number
-  severity: ErrorSeverity
-  category: ErrorCategory
-  impactedUsers: Set<string>
-}
-
-interface ErrorAnalytics {
+export interface ErrorAnalytics {
   [key: string]: ErrorMetrics
 }
 
+/**
+ * Interface for error impact analysis
+ */
 interface ErrorImpactAnalysis {
   userCount: number
   recoveryRate: number
@@ -280,10 +198,13 @@ interface ErrorImpactAnalysis {
   }
 }
 
+/**
+ * Service for tracking and analyzing application errors
+ */
 export class ErrorAnalyticsService {
-  private static instance: ErrorAnalyticsService
-  private analytics: ErrorAnalytics = {}
-  private trends: ErrorTrend[] = []
+  private static instance: ErrorAnalyticsService | null = null
+  private errorMetrics: Map<string, ErrorMetrics> = new Map()
+  private errorTrends: Map<string, ErrorTrend[]> = new Map()
   private storage: StorageAdapter
   private initialized = false
   private readonly maxContexts = 100
@@ -294,29 +215,14 @@ export class ErrorAnalyticsService {
 
   private constructor() {
     this.storage = new StorageAdapter()
+    this.loadPersistedData()
   }
 
-  static getInstance(): ErrorAnalyticsService {
+  public static getInstance(): ErrorAnalyticsService {
     if (!ErrorAnalyticsService.instance) {
       ErrorAnalyticsService.instance = new ErrorAnalyticsService()
     }
     return ErrorAnalyticsService.instance
-  }
-
-  async initialize(): Promise<void> {
-    if (this.initialized) return
-
-    try {
-      const data = await this.storage.getData()
-      if (data) {
-        this.analytics = data.analytics
-        this.trends = data.trends
-      }
-      this.initialized = true
-    } catch (error) {
-      console.error('Failed to initialize error analytics:', error)
-      throw error
-    }
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -325,94 +231,97 @@ export class ErrorAnalyticsService {
     }
   }
 
-  private determineSeverity(error: AppError): ErrorSeverity {
-    if (error.severity) return error.severity
-    
-    // Default severity logic
-    if (error instanceof NetworkError) return ErrorSeverity.HIGH
-    if (error instanceof ValidationError) return ErrorSeverity.MEDIUM
-    return ErrorSeverity.MEDIUM
-  }
+  async initialize(): Promise<void> {
+    if (this.initialized) return
 
-  private determineCategory(error: AppError): ErrorCategory {
-    if (error.category) return error.category
-    
-    // Default category logic
-    if (error instanceof NetworkError) return ErrorCategory.NETWORK
-    if (error instanceof ValidationError) return ErrorCategory.VALIDATION
-    return ErrorCategory.UNKNOWN
+    try {
+      const data = await this.storage.getData()
+      if (data) {
+        this.errorMetrics = new Map(Object.entries(data.analytics))
+        this.errorTrends = new Map(Object.entries(data.trends))
+      }
+      this.initialized = true
+    } catch (error) {
+      console.error('Failed to initialize error analytics:', error)
+      throw error
+    }
   }
 
   private initializeMetrics(
-    errorKey: string,
     error: AppError,
-    now: string,
-    severity: ErrorSeverity,
-    category: ErrorCategory
+    now: string
   ): ErrorMetrics {
     return {
       count: 1,
       firstSeen: now,
       lastSeen: now,
-      contexts: new Set(),
-      userAgents: new Set(),
-      urls: new Set(),
-      severity,
-      category,
+      contexts: [],
+      userAgents: [],
+      urls: [],
+      severity: error.severity,
+      category: error.category,
       recoveryStrategy: error.recoveryStrategy,
-      impactedUsers: new Set(),
+      impactedUsers: 0,
       recoveryRate: 0,
       avgResolutionTime: 0,
-      relatedErrors: new Set(),
-      successfulAttempts: 0,
+      relatedErrors: [],
+      frequency: 0,
       totalAttempts: 0,
+      successfulAttempts: 0,
+      consecutiveFailures: 0,
       lastResolutionTime: 0,
       maxResolutionTime: 0,
       minResolutionTime: Number.MAX_VALUE,
-      consecutiveFailures: 0,
       lastRecoveryTime: null,
-      recoveryAttempts: {
-        [ErrorRecoveryStrategy.RETRY]: { attempts: 0, successes: 0 },
-        [ErrorRecoveryStrategy.REFRESH]: { attempts: 0, successes: 0 },
-        [ErrorRecoveryStrategy.RESET]: { attempts: 0, successes: 0 },
-        [ErrorRecoveryStrategy.FALLBACK]: { attempts: 0, successes: 0 },
-        [ErrorRecoveryStrategy.NONE]: { attempts: 0, successes: 0 }
-      }
+      recoveryAttempts: Object.values(ErrorRecoveryStrategy).reduce((acc, strategy) => {
+        acc[strategy] = { attempts: 0, successes: 0 }
+        return acc
+      }, {} as Record<ErrorRecoveryStrategy, { attempts: number; successes: number }>)
     }
   }
 
-  async trackError(error: AppError, context?: string, userId?: string): Promise<void> {
+  async trackError(error: AppError, context?: string, userId?: string): Promise<string> {
     await this.ensureInitialized()
 
     const now = new Date().toISOString()
     const errorKey = this.getErrorKey(error)
-    const severity = this.determineSeverity(error)
-    const category = this.determineCategory(error)
 
-    if (!this.analytics[errorKey]) {
-      this.analytics[errorKey] = this.initializeMetrics(errorKey, error, now, severity, category)
+    if (!this.errorMetrics.has(errorKey)) {
+      this.errorMetrics.set(errorKey, this.initializeMetrics(error, now))
     }
 
-    const metrics = this.analytics[errorKey]
+    const metrics = this.errorMetrics.get(errorKey)!
     metrics.count++
     metrics.lastSeen = now
 
+    // Update arrays with limits
     if (context) {
-      this.addToSetWithLimit(metrics.contexts, context, this.maxContexts)
+      metrics.contexts = Array.from(new Set([...metrics.contexts, context]))
+        .slice(-this.maxContexts)
     }
 
+    const userAgent = typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
+    metrics.userAgents = Array.from(new Set([...metrics.userAgents, userAgent]))
+      .slice(-this.maxUserAgents)
+
+    const url = typeof window !== 'undefined' ? window.location.href : 'unknown'
+    metrics.urls = Array.from(new Set([...metrics.urls, url]))
+      .slice(-this.maxUrls)
+
     if (userId) {
-      metrics.impactedUsers.add(userId)
+      metrics.impactedUsers++
     }
 
     // Update trends
-    this.updateTrends(errorKey, severity, category, userId)
+    this.updateTrends(errorKey, error.severity, error.category, userId)
 
     // Find related errors
     this.findRelatedErrors(errorKey, error)
 
     // Persist data
     await this.persistData()
+
+    return errorKey
   }
 
   private updateTrends(
@@ -420,50 +329,46 @@ export class ErrorAnalyticsService {
     severity: ErrorSeverity,
     category: ErrorCategory,
     userId?: string
-  ) {
+  ): void {
     const now = new Date()
     const period = new Date(
       Math.floor(now.getTime() / this.trendPeriodMs) * this.trendPeriodMs
     ).toISOString()
 
-    let trend = this.trends.find(t => t.period === period)
-    if (!trend) {
-      trend = {
-        period,
-        count: 0,
-        severity,
-        category,
-        impactedUsers: new Set()
-      }
-      this.trends.unshift(trend)
-
-      // Maintain trend limit
-      if (this.trends.length > this.maxTrends) {
-        this.trends.pop()
-      }
+    const trend: ErrorTrend = {
+      timestamp: period,
+      count: 1,
+      severity,
+      category,
+      impactedUsers: userId ? 1 : 0
     }
 
-    trend.count++
-    if (userId) {
-      trend.impactedUsers.add(userId)
+    const trends = this.errorTrends.get(errorKey) || []
+    trends.push(trend)
+
+    // Maintain trend limit
+    if (trends.length > this.maxTrends) {
+      trends.shift()
     }
+
+    this.errorTrends.set(errorKey, trends)
   }
 
-  private findRelatedErrors(errorKey: string, error: AppError) {
-    const metrics = this.analytics[errorKey]
-    
-    Object.entries(this.analytics).forEach(([key, otherMetrics]) => {
+  private findRelatedErrors(errorKey: string, error: AppError): void {
+    const metrics = this.errorMetrics.get(errorKey)
+    if (!metrics) return
+
+    this.errorMetrics.forEach((otherMetrics, key) => {
       if (key !== errorKey) {
-        // Check for errors affecting same users
-        const commonUsers = new Set(
-          [...metrics.impactedUsers].filter(user => 
-            otherMetrics.impactedUsers.has(user)
-          )
-        )
-        
-        if (commonUsers.size > 0) {
-          metrics.relatedErrors.add(key)
-          otherMetrics.relatedErrors.add(errorKey)
+        // Check for errors with similar contexts or URLs
+        const hasCommonContext = metrics.contexts.some(ctx => 
+          otherMetrics.contexts.includes(ctx))
+        const hasCommonUrl = metrics.urls.some(url => 
+          otherMetrics.urls.includes(url))
+
+        if (hasCommonContext || hasCommonUrl) {
+          metrics.relatedErrors = Array.from(new Set([...metrics.relatedErrors, key]))
+          otherMetrics.relatedErrors = Array.from(new Set([...otherMetrics.relatedErrors, errorKey]))
         }
       }
     })
@@ -474,17 +379,18 @@ export class ErrorAnalyticsService {
     resolutionTime: number,
     wasSuccessful: boolean,
     strategy: ErrorRecoveryStrategy = ErrorRecoveryStrategy.RETRY
-  ) {
-    const metrics = this.analytics[errorKey]
+  ): void {
+    const metrics = this.errorMetrics.get(errorKey)
     if (!metrics) return
 
     metrics.totalAttempts++
     metrics.lastResolutionTime = resolutionTime
 
     // Update strategy-specific metrics
-    metrics.recoveryAttempts[strategy].attempts++
+    const strategyMetrics = metrics.recoveryAttempts[strategy]
+    strategyMetrics.attempts++
     if (wasSuccessful) {
-      metrics.recoveryAttempts[strategy].successes++
+      strategyMetrics.successes++
     }
 
     if (wasSuccessful) {
@@ -526,7 +432,7 @@ export class ErrorAnalyticsService {
     const result: Record<string, any> = {}
     const now = Date.now()
 
-    Object.entries(this.analytics).forEach(([key, metrics]) => {
+    this.errorMetrics.forEach((metrics, key) => {
       const hoursSinceFirstSeen = (
         now - new Date(metrics.firstSeen).getTime()
       ) / (1000 * 60 * 60)
@@ -535,15 +441,15 @@ export class ErrorAnalyticsService {
         count: metrics.count,
         firstSeen: metrics.firstSeen,
         lastSeen: metrics.lastSeen,
-        contexts: Array.from(metrics.contexts),
-        userAgents: Array.from(metrics.userAgents),
-        urls: Array.from(metrics.urls),
+        contexts: metrics.contexts,
+        userAgents: metrics.userAgents,
+        urls: metrics.urls,
         severity: metrics.severity,
         category: metrics.category,
-        impactedUsers: metrics.impactedUsers.size,
+        impactedUsers: metrics.impactedUsers,
         recoveryRate: metrics.recoveryRate,
         avgResolutionTime: metrics.avgResolutionTime,
-        relatedErrors: Array.from(metrics.relatedErrors),
+        relatedErrors: metrics.relatedErrors,
         frequency: metrics.count / hoursSinceFirstSeen
       }
     })
@@ -558,7 +464,7 @@ export class ErrorAnalyticsService {
   }): Promise<Array<Omit<ErrorTrend, 'impactedUsers'> & { impactedUsers: number }>> {
     await this.ensureInitialized()
 
-    let filteredTrends = this.trends
+    let filteredTrends = this.errorTrends.get(options?.category?.toString() || '') || []
 
     if (options) {
       const { category, severity, hours } = options
@@ -566,83 +472,77 @@ export class ErrorAnalyticsService {
         ? new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
         : null
 
-      filteredTrends = this.trends.filter(trend => {
+      filteredTrends = filteredTrends.filter(trend => {
         if (category && trend.category !== category) return false
         if (severity && trend.severity !== severity) return false
-        if (cutoff && trend.period < cutoff) return false
+        if (cutoff && trend.timestamp < cutoff) return false
         return true
       })
     }
 
     return filteredTrends.map(trend => ({
       ...trend,
-      impactedUsers: trend.impactedUsers.size
+      impactedUsers: trend.impactedUsers
     }))
   }
 
   getErrorsByFrequency(): [string, number][] {
-    return Object.entries(this.analytics)
+    return Object.entries(this.errorMetrics)
       .map(([key, metrics]) => [key, metrics.count / metrics.totalAttempts] as [string, number])
       .sort((a, b) => b[1] - a[1])
   }
 
   getErrorsByCount(): [string, number][] {
-    return Object.entries(this.analytics)
+    return Object.entries(this.errorMetrics)
       .map(([key, metrics]) => [key, metrics.count] as [string, number])
       .sort((a, b) => b[1] - a[1])
   }
 
   getErrorsBySeverity(severity: ErrorSeverity): string[] {
-    return Object.entries(this.analytics)
+    return Object.entries(this.errorMetrics)
       .filter(([, metrics]) => metrics.severity === severity)
       .map(([key]) => key)
   }
 
   getErrorsByCategory(category: ErrorCategory): string[] {
-    return Object.entries(this.analytics)
+    return Object.entries(this.errorMetrics)
       .filter(([, metrics]) => metrics.category === category)
       .map(([key]) => key)
   }
 
   getRecentErrors(hours: number = 24): string[] {
     const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
-    return Object.entries(this.analytics)
+    return Object.entries(this.errorMetrics)
       .filter(([, metrics]) => metrics.lastSeen >= cutoff)
       .map(([key]) => key)
   }
 
   getRelatedErrors(errorKey: string): string[] {
-    return Array.from(this.analytics[errorKey]?.relatedErrors || [])
+    return Array.from(this.errorMetrics.get(errorKey)?.relatedErrors || [])
   }
 
   getErrorImpact(errorKey: string): ErrorImpactAnalysis {
-    const metrics = this.analytics[errorKey]
+    const metrics = this.errorMetrics.get(errorKey)
     if (!metrics) {
       throw new Error(`No metrics found for error key: ${errorKey}`)
     }
 
     // Calculate hourly distribution
     const hourlyDistribution: { [hour: string]: number } = {}
-    this.trends
-      .filter(trend => trend.period >= metrics.firstSeen)
-      .forEach(trend => {
-        const hour = new Date(trend.period).getHours().toString().padStart(2, '0')
-        hourlyDistribution[hour] = (hourlyDistribution[hour] || 0) + trend.count
-      })
+    this.errorTrends.get(errorKey)?.forEach(trend => {
+      const hour = new Date(trend.timestamp).getHours().toString().padStart(2, '0')
+      hourlyDistribution[hour] = (hourlyDistribution[hour] || 0) + trend.count
+    })
 
     // Calculate growth rate
-    const recentPeriods = this.trends
-      .filter(trend => trend.period >= metrics.firstSeen)
-      .slice(0, 24)
+    const recentPeriods = this.errorTrends.get(errorKey)?.slice(0, 24) || []
     const oldCount = recentPeriods.slice(-12).reduce((sum, trend) => sum + trend.count, 0)
     const newCount = recentPeriods.slice(0, 12).reduce((sum, trend) => sum + trend.count, 0)
     const growthRate = oldCount === 0 ? 0 : (newCount - oldCount) / oldCount
 
     // Find peak user count
     const peakUserCount = Math.max(
-      ...this.trends
-        .filter(trend => trend.period >= metrics.firstSeen)
-        .map(trend => trend.impactedUsers.size)
+      ...this.errorTrends.get(errorKey)?.map(trend => trend.impactedUsers) || []
     )
 
     // Calculate recovery trend
@@ -651,10 +551,10 @@ export class ErrorAnalyticsService {
       : (metrics.successfulAttempts / metrics.totalAttempts) * 100
 
     return {
-      userCount: metrics.impactedUsers.size,
+      userCount: metrics.impactedUsers,
       recoveryRate: metrics.recoveryRate,
       avgResolutionTime: metrics.avgResolutionTime,
-      relatedErrorsCount: metrics.relatedErrors.size,
+      relatedErrorsCount: metrics.relatedErrors.length,
       resolutionMetrics: {
         lastResolutionTime: metrics.lastResolutionTime,
         maxResolutionTime: metrics.maxResolutionTime,
@@ -673,17 +573,17 @@ export class ErrorAnalyticsService {
         recoveryTrend
       },
       contextAnalysis: {
-        uniqueContexts: metrics.contexts.size,
-        topContexts: Array.from(metrics.contexts).slice(0, 10),
-        uniqueUrls: metrics.urls.size,
-        topUrls: Array.from(metrics.urls).slice(0, 10)
+        uniqueContexts: metrics.contexts.length,
+        topContexts: metrics.contexts.slice(0, 10),
+        uniqueUrls: metrics.urls.length,
+        topUrls: metrics.urls.slice(0, 10)
       }
     }
   }
 
   async clearAnalytics(): Promise<void> {
-    this.analytics = {}
-    this.trends = []
+    this.errorMetrics.clear()
+    this.errorTrends.clear()
     await this.storage.clearData()
   }
 
@@ -691,19 +591,36 @@ export class ErrorAnalyticsService {
     return `${error.name}:${error.code}`
   }
 
-  private addToSetWithLimit<T>(set: Set<T>, item: T, limit: number) {
-    set.add(item)
-    if (set.size > limit) {
-      const firstItem = set.values().next().value
-      set.delete(firstItem)
+  private loadPersistedData(): void {
+    // Only run in browser environment
+    if (typeof window === 'undefined') return
+
+    try {
+      const data = localStorage.getItem('errorMetrics')
+      if (data) {
+        this.errorMetrics = new Map(JSON.parse(data))
+      }
+
+      const trendsData = localStorage.getItem('errorTrends')
+      if (trendsData) {
+        this.errorTrends = new Map(JSON.parse(trendsData))
+      }
+    } catch (error) {
+      console.error('Failed to load persisted error data:', error)
     }
   }
 
   private async persistData(): Promise<void> {
+    // Only run in browser environment
+    if (typeof window === 'undefined') return
+
     try {
+      const analyticsData = Object.fromEntries(this.errorMetrics)
+      const trendsData = Object.fromEntries(this.errorTrends)
+
       await this.storage.saveData({
-        analytics: this.analytics,
-        trends: this.trends
+        analytics: analyticsData,
+        trends: trendsData
       })
     } catch (error) {
       console.error('Failed to persist error analytics data:', error)
@@ -711,63 +628,32 @@ export class ErrorAnalyticsService {
     }
   }
 
-  getRecoveryStrategyEffectiveness(errorKey: string): Record<ErrorRecoveryStrategy, number> {
-    const metrics = this.analytics[errorKey]
-    if (!metrics) {
-      return Object.values(ErrorRecoveryStrategy).reduce((acc, strategy) => {
-        acc[strategy] = 0
-        return acc
-      }, {} as Record<ErrorRecoveryStrategy, number>)
+  /**
+   * Suggests a recovery strategy based on error metrics
+   * @param errorKey - The error key to analyze
+   * @returns Suggested recovery strategy
+   */
+  suggestRecoveryStrategy(errorKey: string): TypeErrorRecoveryStrategy {
+    const metrics = this.errorMetrics.get(errorKey)
+    if (!metrics) return TypeErrorRecoveryStrategy.RETRY
+
+    // If we've had too many consecutive failures, try a different strategy
+    if (metrics.consecutiveFailures > 3) {
+      return TypeErrorRecoveryStrategy.REFRESH
     }
 
-    return Object.entries(metrics.recoveryAttempts).reduce((acc, [strategy, data]) => {
-      acc[strategy as ErrorRecoveryStrategy] = data.attempts > 0
-        ? (data.successes / data.attempts) * 100
-        : 0
-      return acc
-    }, {} as Record<ErrorRecoveryStrategy, number>)
+    // If the error is persistent across refreshes, try resetting
+    if (metrics.count > 5 && metrics.recoveryRate < 0.2) {
+      return TypeErrorRecoveryStrategy.RESET
+    }
+
+    // If nothing else works, fallback to home
+    if (metrics.count > 10 && metrics.recoveryRate < 0.1) {
+      return TypeErrorRecoveryStrategy.FALLBACK
+    }
+
+    return TypeErrorRecoveryStrategy.RETRY
   }
+}
 
-  suggestRecoveryStrategy(errorKey: string): ErrorRecoveryStrategy {
-    const metrics = this.analytics[errorKey]
-    if (!metrics) return ErrorRecoveryStrategy.RETRY
-
-    // If error is critical or security-related, don't retry
-    if (metrics.severity === ErrorSeverity.CRITICAL ||
-        metrics.category === ErrorCategory.SECURITY) {
-      return ErrorRecoveryStrategy.NONE
-    }
-
-    // Get effectiveness of each strategy
-    const effectiveness = this.getRecoveryStrategyEffectiveness(errorKey)
-    
-    // Find the most effective strategy
-    let bestStrategy = ErrorRecoveryStrategy.RETRY
-    let bestEffectiveness = 0
-
-    Object.entries(effectiveness).forEach(([strategy, rate]) => {
-      if (rate > bestEffectiveness) {
-        bestStrategy = strategy as ErrorRecoveryStrategy
-        bestEffectiveness = rate
-      }
-    })
-
-    // If no strategy is effective, suggest based on error category
-    if (bestEffectiveness === 0) {
-      switch (metrics.category) {
-        case ErrorCategory.NETWORK:
-          return ErrorRecoveryStrategy.RETRY
-        case ErrorCategory.AUTH:
-          return ErrorRecoveryStrategy.REFRESH
-        case ErrorCategory.PERFORMANCE:
-          return ErrorRecoveryStrategy.RESET
-        case ErrorCategory.DATA:
-          return ErrorRecoveryStrategy.FALLBACK
-        default:
-          return ErrorRecoveryStrategy.RETRY
-      }
-    }
-
-    return bestStrategy
-  }
-} 
+ErrorAnalyticsService.instance = null; 

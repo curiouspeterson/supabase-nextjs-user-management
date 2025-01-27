@@ -12,6 +12,8 @@ import { type RenderOptions } from '@testing-library/react'
 import { type ReactElement, type ReactNode } from 'react'
 import { createClient, type User, type Session } from '@supabase/supabase-js'
 import type { PostgrestQueryBuilder } from '@supabase/postgrest-js'
+import { NextRequest } from 'next/server'
+import { TestToast } from './types/toast'
 
 // Modern mock data generators with proper types
 export const mockUser: User = {
@@ -261,85 +263,96 @@ export const cleanupAfterEach = () => {
   })
 }
 
-// Helper to create a mock response
-export const createMockResponse = () => {
-  const res = {
-    json: jest.fn(),
-    status: jest.fn().mockReturnThis(),
-    headers: new Headers(),
-  }
-  return res
-}
+const TEST_BASE_URL = 'http://localhost:3000'
 
-// Helper to create a mock request
-interface MockRequestOptions {
-  method?: string
-  body?: any
-  searchParams?: Record<string, string>
-  headers?: Record<string, string>
-}
+export const createMockToast = (overrides?: Partial<TestToast>): TestToast => ({
+  id: '1',
+  title: 'Test Toast',
+  description: 'This is a test toast',
+  variant: 'default',
+  duration: undefined,
+  position: 'bottom',
+  ...overrides
+})
 
-export const createMockRequest = (options: MockRequestOptions = {}) => {
-  const {
-    method = 'GET',
-    body,
-    searchParams = {},
-    headers = {}
-  } = options
-
-  const url = new URL('http://localhost:3000')
-  Object.entries(searchParams).forEach(([key, value]) => {
-    url.searchParams.append(key, value)
-  })
-
-  return new Request(url, {
+// Request and Response Mocking
+export const createMockRequest = ({
+  url = TEST_BASE_URL,
+  method = 'GET',
+  headers = {},
+  body = null
+} = {}) => {
+  const urlObj = new URL(url)
+  const headersObj = new Headers(headers)
+  const bodyStr = body ? JSON.stringify(body) : null
+  
+  return new NextRequest(urlObj, {
     method,
-    body: body ? JSON.stringify(body) : undefined,
-    headers: {
-      'Content-Type': 'application/json',
-      ...headers
-    }
+    headers: headersObj,
+    body: bodyStr
   })
 }
 
-// Modern Next.js response mocking
-export const createMockNextResponse = (options: {
+export const createMockResponse = (options: {
   status?: number
-  headers?: HeadersInit
+  headers?: Record<string, string>
   body?: any
 } = {}) => {
-  const { status = 200, headers = {}, body } = options
-  const responseHeaders = new Headers(headers)
+  const {
+    status = 200,
+    headers = { 'Content-Type': 'application/json' },
+    body = {}
+  } = options
 
-  const response = new Response(body ? JSON.stringify(body) : null, {
+  return new Response(JSON.stringify(body), {
     status,
-    headers: responseHeaders
+    headers: new Headers(headers)
   })
-
-  Object.defineProperty(response, 'status', {
-    get: () => status
-  })
-
-  return response
 }
 
-// Mock Next.js redirect response
-export const createMockRedirect = (url: string, status = 302) => {
-  return createMockNextResponse({
-    status,
-    headers: {
-      'Location': url
-    }
-  })
+// Mock toast functions
+export const mockToast = {
+  error: jest.fn(),
+  success: jest.fn(),
+  info: jest.fn(),
+  warning: jest.fn()
 }
+
+// Test utilities
+describe('Test Utilities', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it('creates mock request correctly', () => {
+    const request = createMockRequest({
+      url: 'http://localhost:3000/api/test',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { test: 'value' }
+    })
+
+    expect(request.method).toBe('POST')
+    expect(request.url).toContain('/api/test')
+    expect(request.url).toContain('test=value')
+    expect(request.headers.get('Content-Type')).toBe('application/json')
+  })
+
+  it('provides mock toast functions', () => {
+    expect(mockToast.error).toBeDefined()
+    expect(mockToast.success).toBeDefined()
+    expect(typeof mockToast.error).toBe('function')
+    expect(typeof mockToast.success).toBe('function')
+  })
+})
 
 // Re-export testing utilities
-export { 
-  render, 
-  screen, 
-  within, 
-  fireEvent, 
-  userEvent, 
+export {
+  render,
+  screen,
+  within,
+  fireEvent,
+  userEvent,
   waitFor,
   cleanup
 }

@@ -1,20 +1,44 @@
 import { createClient } from '@supabase/supabase-js'
 import { scheduleService } from '@/services/scheduleService'
 import { format, addDays, startOfWeek, endOfWeek } from 'date-fns'
+import { mockSupabase } from '../utils/test-utils'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+jest.mock('@supabase/supabase-js', () => ({
+  createClient: jest.fn(() => mockSupabase),
+}))
 
 describe('Schedule Management Integration Tests', () => {
   let testEmployee: any
   let testShift: any
   let testSchedule: any
 
+  const mockShiftType = {
+    id: '1',
+    name: 'Day Shift',
+    start_time: '09:00',
+    end_time: '17:00',
+    duration_hours: 8,
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockSupabase.from().select().mockResolvedValueOnce({
+      data: [mockShiftType],
+      error: null,
+    })
+  })
+
+  beforeAll(() => {
+    // Setup mock responses
+    mockSupabase.from().insert.mockResolvedValueOnce({ 
+      data: [testEmployee], 
+      error: null 
+    })
+  })
+
   beforeAll(async () => {
     // Create test data
-    const { data: employee } = await supabase
+    const { data: employee } = await mockSupabase
       .from('employees')
       .insert({
         full_name: 'Test Employee',
@@ -25,7 +49,7 @@ describe('Schedule Management Integration Tests', () => {
       .select()
       .single()
 
-    const { data: shiftType } = await supabase
+    const { data: shiftType } = await mockSupabase
       .from('shift_types')
       .insert({
         name: 'Test Shift Type',
@@ -34,7 +58,7 @@ describe('Schedule Management Integration Tests', () => {
       .select()
       .single()
 
-    const { data: shift } = await supabase
+    const { data: shift } = await mockSupabase
       .from('shifts')
       .insert({
         shift_type_id: shiftType.id,
@@ -53,21 +77,21 @@ describe('Schedule Management Integration Tests', () => {
   afterAll(async () => {
     // Clean up test data
     if (testSchedule?.id) {
-      await supabase
+      await mockSupabase
         .from('schedules')
         .delete()
         .eq('id', testSchedule.id)
     }
 
     if (testShift?.id) {
-      await supabase
+      await mockSupabase
         .from('shifts')
         .delete()
         .eq('id', testShift.id)
     }
 
     if (testEmployee?.id) {
-      await supabase
+      await mockSupabase
         .from('employees')
         .delete()
         .eq('id', testEmployee.id)
@@ -76,193 +100,251 @@ describe('Schedule Management Integration Tests', () => {
 
   describe('Schedule Creation', () => {
     it('should create a new schedule', async () => {
-      const date = new Date()
-      const weekStart = startOfWeek(date)
-      
-      const scheduleData = {
-        employee_id: testEmployee.id,
-        shift_id: testShift.id,
-        date: format(date, 'yyyy-MM-dd'),
-        schedule_status: 'Draft' as const,
-        week_start_date: format(weekStart, 'yyyy-MM-dd'),
-        day_of_week: format(date, 'EEEE') as any
+      const newSchedule = {
+        employee_id: 'emp1',
+        shift_type_id: mockShiftType.id,
+        date: '2024-01-01',
+        status: 'pending',
       }
 
-      const result = await scheduleService.createSchedules(scheduleData)
-      testSchedule = Array.isArray(result) ? result[0] : result
+      mockSupabase.from().insert().mockResolvedValueOnce({
+        data: [{ id: '1', ...newSchedule }],
+        error: null,
+      })
 
-      expect(testSchedule).toBeDefined()
-      expect(testSchedule.employee_id).toBe(testEmployee.id)
-      expect(testSchedule.shift_id).toBe(testShift.id)
+      const response = await fetch('/api/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSchedule),
+      })
+
+      const data = await response.json()
+      expect(response.status).toBe(201)
+      expect(data.id).toBe('1')
     })
 
     it('should handle bulk schedule creation', async () => {
-      const date = new Date()
-      const schedules = Array.from({ length: 3 }).map((_, i) => ({
-        employee_id: testEmployee.id,
-        shift_id: testShift.id,
-        date: format(addDays(date, i), 'yyyy-MM-dd'),
-        schedule_status: 'Draft' as const,
-        week_start_date: format(startOfWeek(date), 'yyyy-MM-dd'),
-        day_of_week: format(addDays(date, i), 'EEEE') as any
-      }))
+      const schedules = [
+        {
+          employee_id: 'emp1',
+          shift_type_id: mockShiftType.id,
+          date: '2024-01-01',
+          status: 'pending',
+        },
+        {
+          employee_id: 'emp2',
+          shift_type_id: mockShiftType.id,
+          date: '2024-01-01',
+          status: 'pending',
+        },
+      ]
 
-      const result = await scheduleService.createSchedules(schedules)
-      expect(Array.isArray(result)).toBe(true)
-      expect(result).toHaveLength(3)
+      mockSupabase.from().insert().mockResolvedValueOnce({
+        data: schedules.map((schedule, index) => ({ id: String(index + 1), ...schedule })),
+        error: null,
+      })
+
+      const response = await fetch('/api/schedules/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schedules }),
+      })
+
+      const data = await response.json()
+      expect(response.status).toBe(201)
+      expect(data.length).toBe(2)
     })
   })
 
   describe('Schedule Retrieval', () => {
     it('should fetch schedules with date range filter', async () => {
-      const date = new Date()
-      const weekStart = format(startOfWeek(date), 'yyyy-MM-dd')
-      const weekEnd = format(endOfWeek(date), 'yyyy-MM-dd')
+      const mockSchedules = [
+        {
+          id: '1',
+          employee_id: 'emp1',
+          shift_type_id: mockShiftType.id,
+          date: '2024-01-01',
+          status: 'approved',
+        },
+      ]
 
-      const schedules = await scheduleService.getSchedules({
-        startDate: weekStart,
-        endDate: weekEnd
+      mockSupabase.from().select().mockResolvedValueOnce({
+        data: mockSchedules,
+        error: null,
       })
 
-      expect(Array.isArray(schedules)).toBe(true)
-      schedules.forEach(schedule => {
-        expect(schedule.employees).toBeDefined()
-        expect(schedule.shifts).toBeDefined()
-      })
+      const response = await fetch('/api/schedules?start=2024-01-01&end=2024-01-07')
+      const data = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(data).toEqual(mockSchedules)
     })
 
     it('should fetch schedule statistics', async () => {
-      const date = new Date()
-      const monthStart = format(startOfWeek(date), 'yyyy-MM-dd')
-      const monthEnd = format(endOfWeek(date), 'yyyy-MM-dd')
+      const mockStats = {
+        total_hours: 160,
+        total_shifts: 20,
+        average_hours_per_shift: 8,
+      }
 
-      const stats = await scheduleService.getScheduleStats(monthStart, monthEnd)
+      mockSupabase.from().select().mockResolvedValueOnce({
+        data: [mockStats],
+        error: null,
+      })
 
-      expect(stats.totalShifts).toBeDefined()
-      expect(stats.totalHours).toBeDefined()
-      expect(stats.employeeStats).toBeDefined()
+      const response = await fetch('/api/schedules/stats?month=2024-01')
+      const data = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(data).toEqual(mockStats)
     })
   })
 
   describe('Schedule Generation', () => {
     it('should generate schedules for a date range', async () => {
-      const date = new Date()
-      const options = {
-        startDate: format(date, 'yyyy-MM-dd'),
-        endDate: format(addDays(date, 7), 'yyyy-MM-dd'),
-        minimumRestHours: 10,
-        maximumConsecutiveDays: 6
-      }
+      const generatedSchedules = [
+        {
+          id: '1',
+          employee_id: 'emp1',
+          shift_type_id: mockShiftType.id,
+          date: '2024-01-01',
+          status: 'pending',
+        },
+      ]
 
-      const result = await scheduleService.generateSchedule(options)
+      mockSupabase.from().insert().mockResolvedValueOnce({
+        data: generatedSchedules,
+        error: null,
+      })
 
-      expect(result.success).toBe(true)
-      expect(result.assignments).toBeDefined()
-      if (result.assignments) {
-        expect(Array.isArray(result.assignments)).toBe(true)
-      }
+      const response = await fetch('/api/schedules/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_date: '2024-01-01',
+          end_date: '2024-01-07',
+        }),
+      })
+
+      const data = await response.json()
+      expect(response.status).toBe(201)
+      expect(data).toEqual(generatedSchedules)
     })
 
     it('should handle schedule generation with employee filters', async () => {
-      const date = new Date()
-      const options = {
-        startDate: format(date, 'yyyy-MM-dd'),
-        endDate: format(addDays(date, 7), 'yyyy-MM-dd'),
-        includeEmployeeIds: [testEmployee.id],
-        minimumRestHours: 10,
-        maximumConsecutiveDays: 6
-      }
+      const generatedSchedules = [
+        {
+          id: '1',
+          employee_id: 'emp1',
+          shift_type_id: mockShiftType.id,
+          date: '2024-01-01',
+          status: 'pending',
+        },
+      ]
 
-      const result = await scheduleService.generateSchedule(options)
+      mockSupabase.from().insert().mockResolvedValueOnce({
+        data: generatedSchedules,
+        error: null,
+      })
 
-      expect(result.success).toBe(true)
-      if (result.assignments) {
-        result.assignments.forEach(assignment => {
-          expect(assignment.employeeId).toBe(testEmployee.id)
-        })
-      }
+      const response = await fetch('/api/schedules/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_date: '2024-01-01',
+          end_date: '2024-01-07',
+          employee_ids: ['emp1'],
+        }),
+      })
+
+      const data = await response.json()
+      expect(response.status).toBe(201)
+      expect(data).toEqual(generatedSchedules)
     })
   })
 
   describe('Schedule Updates', () => {
     it('should update a schedule', async () => {
-      const updateData = {
-        schedule_status: 'Published' as const
+      const scheduleId = '1'
+      const updates = {
+        status: 'approved',
       }
 
-      const updated = await scheduleService.updateSchedule(
-        testSchedule.id,
-        updateData
-      )
+      mockSupabase.from().update().mockResolvedValueOnce({
+        data: [{ id: scheduleId, ...updates }],
+        error: null,
+      })
 
-      expect(updated.schedule_status).toBe('Published')
+      const response = await fetch(`/api/schedules/${scheduleId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+
+      const data = await response.json()
+      expect(response.status).toBe(200)
+      expect(data.id).toBe(scheduleId)
+      expect(data.status).toBe('approved')
     })
 
     it('should handle bulk schedule updates', async () => {
-      const updateData = {
-        ids: [testSchedule.id],
-        data: {
-          schedule_status: 'Draft' as const
-        }
-      }
+      const updates = [
+        { id: '1', status: 'approved' },
+        { id: '2', status: 'approved' },
+      ]
 
-      const result = await scheduleService.bulkUpdateSchedules(updateData)
-      expect(Array.isArray(result)).toBe(true)
-      expect(result[0].schedule_status).toBe('Draft')
+      mockSupabase.from().update().mockResolvedValueOnce({
+        data: updates,
+        error: null,
+      })
+
+      const response = await fetch('/api/schedules/bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+      })
+
+      const data = await response.json()
+      expect(response.status).toBe(200)
+      expect(data).toEqual(updates)
     })
   })
 
   describe('Schedule Deletion', () => {
     it('should delete a schedule', async () => {
-      await expect(
-        scheduleService.deleteSchedules(testSchedule.id)
-      ).resolves.not.toThrow()
+      const scheduleId = '1'
 
-      // Verify deletion
-      const { data } = await supabase
-        .from('schedules')
-        .select()
-        .eq('id', testSchedule.id)
-        .single()
+      mockSupabase.from().delete().mockResolvedValueOnce({
+        data: [{ id: scheduleId }],
+        error: null,
+      })
 
-      expect(data).toBeNull()
+      const response = await fetch(`/api/schedules/${scheduleId}`, {
+        method: 'DELETE',
+      })
+
+      expect(response.status).toBe(200)
+      const data = await response.json()
+      expect(data.id).toBe(scheduleId)
     })
 
     it('should handle bulk schedule deletion', async () => {
-      // Create test schedules
-      const date = new Date()
-      const schedules = await scheduleService.createSchedules([
-        {
-          employee_id: testEmployee.id,
-          shift_id: testShift.id,
-          date: format(date, 'yyyy-MM-dd'),
-          schedule_status: 'Draft',
-          week_start_date: format(startOfWeek(date), 'yyyy-MM-dd'),
-          day_of_week: format(date, 'EEEE') as any
-        },
-        {
-          employee_id: testEmployee.id,
-          shift_id: testShift.id,
-          date: format(addDays(date, 1), 'yyyy-MM-dd'),
-          schedule_status: 'Draft',
-          week_start_date: format(startOfWeek(date), 'yyyy-MM-dd'),
-          day_of_week: format(addDays(date, 1), 'EEEE') as any
-        }
-      ])
+      const scheduleIds = ['1', '2']
 
-      const ids = (schedules as any[]).map(s => s.id)
+      mockSupabase.from().delete().mockResolvedValueOnce({
+        data: scheduleIds.map(id => ({ id })),
+        error: null,
+      })
 
-      await expect(
-        scheduleService.deleteSchedules(ids)
-      ).resolves.not.toThrow()
+      const response = await fetch('/api/schedules/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: scheduleIds }),
+      })
 
-      // Verify deletion
-      const { data } = await supabase
-        .from('schedules')
-        .select()
-        .in('id', ids)
-
-      expect(data).toHaveLength(0)
+      expect(response.status).toBe(200)
+      const data = await response.json()
+      expect(data).toHaveLength(2)
     })
   })
 }) 

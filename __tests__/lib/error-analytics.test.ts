@@ -1,20 +1,9 @@
-import { errorAnalytics, ErrorSeverity, ErrorCategory } from '@/lib/error-analytics'
-import { AppError, NetworkError, AuthError, ValidationError } from '@/lib/errors'
+import { ErrorAnalyticsService } from '@/lib/services/error-analytics-service'
+import { ErrorSeverity, ErrorCategory, ErrorRecoveryStrategy } from '@/lib/types/error'
+import { AppError, NetworkError, AuthError, ValidationError } from '@/lib/types/error'
+import { createMockError } from '@/lib/test-utils'
 
 // Test utilities for error analytics
-const createTestError = (type: string, message: string, severity: ErrorSeverity = ErrorSeverity.MEDIUM) => {
-  switch (type) {
-    case 'network':
-      return new NetworkError(message, severity)
-    case 'validation':
-      return new ValidationError(message, severity)
-    case 'app':
-      return new AppError(message, severity)
-    default:
-      throw new Error(`Unknown error type: ${type}`)
-  }
-}
-
 const generateTestData = async (errorAnalytics: ErrorAnalyticsService, config: {
   errorType: string
   message: string
@@ -23,7 +12,7 @@ const generateTestData = async (errorAnalytics: ErrorAnalyticsService, config: {
   attempts: number
   successRate: number
 }) => {
-  const error = createTestError(config.errorType, config.message)
+  const error = createMockError(config.message, config.errorType)
   const errorKey = `${error.name}:${error.code}`
   
   for (let i = 0; i < config.attempts; i++) {
@@ -56,11 +45,12 @@ describe('ErrorAnalyticsService', () => {
 
   beforeEach(async () => {
     jest.useFakeTimers()
-    errorAnalytics = new ErrorAnalyticsService()
+    errorAnalytics = ErrorAnalyticsService.getInstance()
     await errorAnalytics.initialize()
   })
 
   afterEach(() => {
+    jest.clearAllMocks()
     jest.useRealTimers()
     localStorage.clear()
   })
@@ -452,7 +442,7 @@ describe('ErrorAnalyticsService', () => {
       await errorAnalytics.updateErrorResolution(errorKey2, 3000, false)
 
       // Simulate service restart by creating new instance
-      const newAnalytics = new ErrorAnalyticsService()
+      const newAnalytics = ErrorAnalyticsService.getInstance()
       await newAnalytics.initialize()
 
       // Verify data persisted

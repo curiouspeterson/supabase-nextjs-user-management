@@ -4,7 +4,6 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { useSupabase } from '@/lib/supabase/client'
-import { Avatar } from '@/components/avatar'
 
 interface AccountFormProps {
   initialProfile?: {
@@ -143,4 +142,4 @@ export default function AccountForm({ initialProfile }: AccountFormProps) {
       </form>
     </div>
   )
-}
+} 

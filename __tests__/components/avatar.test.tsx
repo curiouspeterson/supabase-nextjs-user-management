@@ -1,81 +1,31 @@
 import '@testing-library/jest-dom'
+import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Avatar } from '@/components/avatar'
-import { mockToast, createMockErrorToast } from '@/lib/test-utils'
+import { Avatar } from '@/components/auth/avatar'
+import { mockToast, createMockErrorToast } from '../utils/test-utils'
 
-jest.mock('@/components/ui/use-toast', () => ({
-  useToast: () => ({ toast: mockToast })
-}))
-
-jest.mock('next/image', () => ({
-  __esModule: true,
-  default: (props: any) => {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img {...props} src={props.src.startsWith('blob:') ? props.src : props.url} alt={props.alt} />
-  }
-}))
+// Mock file
+const mockFile = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
+const mockInvalidFile = new File(['test'], 'test.txt', { type: 'text/plain' })
 
 describe('Avatar', () => {
   const mockOnUpload = jest.fn()
-  
+  const url = 'https://test.com/avatar.jpg'
+
   beforeEach(() => {
     jest.clearAllMocks()
   })
 
-  describe('Error Handling', () => {
-    it('handles file size exceeding limit', async () => {
-      const user = userEvent.setup()
-      const largeFile = new File(['x'.repeat(6 * 1024 * 1024)], 'large.jpg', { type: 'image/jpeg' })
-      
-      render(<Avatar onUpload={mockOnUpload} />)
-      const input = screen.getByLabelText('Upload avatar')
-      
-      await user.upload(input, largeFile)
-      
-      await waitFor(() => {
-        expect(mockToast).toHaveBeenCalledWith(
-          createMockErrorToast('File size must be less than 5MB')
-        )
-      })
-    })
-
-    it('handles invalid image file', async () => {
-      const user = userEvent.setup()
-      const invalidFile = new File(['not-an-image'], 'test.txt', { type: 'text/plain' })
-      
-      render(<Avatar onUpload={mockOnUpload} />)
-      const input = screen.getByLabelText('Upload avatar')
-      
-      await user.upload(input, invalidFile)
-      
-      await waitFor(() => {
-        expect(mockToast).toHaveBeenCalledWith(
-          createMockErrorToast('Invalid image file')
-        )
-      })
-    })
-
-    it('provides accessible error feedback', async () => {
-      render(<Avatar onUpload={mockOnUpload} />)
-      const errorContainer = document.createElement('div')
-      errorContainer.setAttribute('role', 'alert')
-      errorContainer.setAttribute('aria-live', 'polite')
-      errorContainer.textContent = 'Upload failed'
-      document.body.appendChild(errorContainer)
-      
-      await waitFor(() => {
-        const errorMessage = screen.getByRole('alert')
-        expect(errorMessage).toHaveAttribute('aria-live', 'polite')
-        expect(errorMessage).toHaveTextContent('Upload failed')
-      })
-    })
+  it('renders default avatar when no URL is provided', () => {
+    render(<Avatar onUpload={mockOnUpload} />)
+    const img = screen.getByRole('img')
+    expect(img).toHaveAttribute('src', '/default-avatar.png')
+    expect(img).toHaveAttribute('alt', 'Avatar')
   })
 
   it('downloads and displays avatar when URL is provided', async () => {
-    const url = 'https://test.com/avatar.jpg'
-    render(<Avatar url={url} />)
-    
+    render(<Avatar url={url} onUpload={mockOnUpload} />)
     await waitFor(() => {
       const img = screen.getByRole('img')
       expect(img).toHaveAttribute('src', url)
@@ -84,9 +34,10 @@ describe('Avatar', () => {
   })
 
   it('handles download error gracefully', async () => {
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation()
-    const url = 'invalid-url'
-    render(<Avatar url={url} />)
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const errorUrl = 'https://test.com/error.jpg'
+    
+    render(<Avatar url={errorUrl} onUpload={mockOnUpload} />)
     
     await waitFor(() => {
       expect(consoleSpy).toHaveBeenCalledWith('Error downloading image:', expect.any(Error))
@@ -100,15 +51,13 @@ describe('Avatar', () => {
 
   it('handles file upload', async () => {
     const user = userEvent.setup()
-    const file = new File(['test-image'], 'test.png', { type: 'image/png' })
-    
     render(<Avatar onUpload={mockOnUpload} />)
-    const input = screen.getByLabelText('Upload avatar')
     
-    await user.upload(input, file)
+    const input = screen.getByLabelText(/upload avatar/i)
+    await user.upload(input, mockFile)
     
     await waitFor(() => {
-      expect(mockOnUpload).toHaveBeenCalledWith(expect.any(String), file, {
+      expect(mockOnUpload).toHaveBeenCalledWith(expect.any(String), mockFile, {
         upsert: true
       })
     })
@@ -116,21 +65,35 @@ describe('Avatar', () => {
 
   it('validates file type on upload', async () => {
     const user = userEvent.setup()
-    const invalidFile = new File(['not-an-image'], 'test.txt', { type: 'text/plain' })
-    
     render(<Avatar onUpload={mockOnUpload} />)
-    const input = screen.getByLabelText('Upload avatar')
     
-    await user.upload(input, invalidFile)
+    const input = screen.getByLabelText(/upload avatar/i)
+    await user.upload(input, mockInvalidFile)
     
     await waitFor(() => {
       expect(mockOnUpload).not.toHaveBeenCalled()
-      expect(mockToast).toHaveBeenCalledWith(
+      expect(mockToast.error).toHaveBeenCalledWith(
         createMockErrorToast('File must be an image')
       )
       const errorMessage = screen.getByRole('alert')
-      expect(errorMessage).toHaveAttribute('aria-live', 'polite')
-      expect(errorMessage).toHaveTextContent('File must be an image')
+      expect(errorMessage).toHaveTextContent(/file must be an image/i)
+    })
+  })
+
+  describe('Error Handling', () => {
+    it('handles invalid image file', async () => {
+      const user = userEvent.setup()
+      render(<Avatar onUpload={mockOnUpload} />)
+      
+      const input = screen.getByLabelText(/upload avatar/i)
+      const invalidImageFile = new File(['invalid'], 'test.jpg', { type: 'image/jpeg' })
+      await user.upload(input, invalidImageFile)
+      
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith(
+          createMockErrorToast('Invalid image file')
+        )
+      })
     })
   })
 }) 

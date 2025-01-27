@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/ui/use-toast'
-import { AccountForm } from '@/components/account-form'
+import { AccountForm } from '@/components/account/account-form'
 import { useSupabase } from '@/lib/supabase/client'
 import { SupabaseClient } from '@supabase/supabase-js'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
@@ -29,12 +29,10 @@ describe('AccountForm', () => {
   const mockUser = {
     id: '123',
     email: 'test@example.com',
-    user_metadata: {
-      full_name: 'Test User',
-      username: 'testuser',
-      website: 'https://test.com',
-      avatar_url: 'https://test.com/avatar.jpg',
-    },
+    full_name: 'Test User',
+    username: 'testuser',
+    website: 'https://test.com',
+    avatar_url: 'https://test.com/avatar.jpg'
   }
 
   const mockProfile = {
@@ -95,13 +93,13 @@ describe('AccountForm', () => {
     })
   })
 
-  it('loads and displays user profile', async () => {
+  it('renders user profile data', async () => {
     render(<AccountForm />)
-
     await waitFor(() => {
-      expect(screen.getByDisplayValue('Test User')).toBeInTheDocument()
-      expect(screen.getByDisplayValue('testuser')).toBeInTheDocument()
-      expect(screen.getByDisplayValue('https://test.com')).toBeInTheDocument()
+      expect(screen.getByDisplayValue(mockUser.email)).toBeInTheDocument()
+      expect(screen.getByDisplayValue(mockUser.full_name)).toBeInTheDocument()
+      expect(screen.getByDisplayValue(mockUser.username)).toBeInTheDocument()
+      expect(screen.getByDisplayValue(mockUser.website)).toBeInTheDocument()
     })
   })
 
@@ -110,7 +108,7 @@ describe('AccountForm', () => {
     render(<AccountForm />)
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue('Test User')).toBeInTheDocument()
+      expect(screen.getByDisplayValue(mockUser.full_name)).toBeInTheDocument()
     })
 
     const fullNameInput = screen.getByLabelText(/full name/i)
@@ -123,28 +121,34 @@ describe('AccountForm', () => {
     expect(mockUpsert).toHaveBeenCalledWith({
       id: mockUser.id,
       full_name: 'Updated Name',
-      username: 'testuser',
-      website: 'https://test.com',
-      avatar_url: 'https://test.com/avatar.jpg',
+      username: mockUser.username,
+      website: mockUser.website,
+      avatar_url: mockUser.avatar_url
+    })
+
+    expect(mockToast).toHaveBeenCalledWith({
+      title: 'Profile updated!',
+      description: 'Your profile has been updated successfully.'
     })
   })
 
   it('handles profile update error', async () => {
+    mockUpsert.mockRejectedValueOnce(new Error('Update failed'))
+    
     const user = userEvent.setup()
-    const mockError = new Error('Failed to update profile')
-    mockUpsert.mockResolvedValueOnce({ error: mockError })
-
     render(<AccountForm />)
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue('Test User')).toBeInTheDocument()
+      expect(screen.getByDisplayValue(mockUser.full_name)).toBeInTheDocument()
     })
 
     const updateButton = screen.getByRole('button', { name: /update profile/i })
     await user.click(updateButton)
 
-    await waitFor(() => {
-      expect(screen.getByText(/failed to update profile/i)).toBeInTheDocument()
+    expect(mockToast).toHaveBeenCalledWith({
+      title: 'Error',
+      description: 'Failed to update profile. Please try again.',
+      variant: 'destructive'
     })
   })
 
@@ -159,17 +163,20 @@ describe('AccountForm', () => {
   })
 
   it('handles sign out error', async () => {
+    mockSignOut.mockRejectedValueOnce(new Error('Sign out failed'))
+    
     const user = userEvent.setup()
-    const mockError = new Error('Failed to sign out')
-    mockSignOut.mockResolvedValueOnce({ error: mockError })
-
     render(<AccountForm />)
 
     const signOutButton = screen.getByRole('button', { name: /sign out/i })
     await user.click(signOutButton)
 
     await waitFor(() => {
-      expect(screen.getByText(/failed to sign out/i)).toBeInTheDocument()
+      expect(mockToast).toHaveBeenCalledWith({
+        title: 'Error',
+        description: 'Failed to sign out. Please try again.',
+        variant: 'destructive'
+      })
     })
   })
 

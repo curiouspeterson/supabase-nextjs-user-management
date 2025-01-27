@@ -13,16 +13,22 @@ export async function login(
   const supabase = createClient()
 
   try {
+    // Clear any existing session
+    await supabase.auth.signOut()
+
+    // Attempt sign in
     const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
     if (signInError) {
+      console.error('Sign in error:', signInError)
       return { error: signInError.message, success: false }
     }
 
     if (!signInData.session) {
+      console.error('No session established after sign in')
       return { error: 'No session established', success: false }
     }
 
@@ -48,6 +54,13 @@ export async function login(
         console.error('Error updating user role:', updateError)
         return { error: 'Error updating user role', success: false }
       }
+    }
+
+    // Ensure session is properly set
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError || !session) {
+      console.error('Error verifying session:', sessionError)
+      return { error: 'Error establishing session', success: false }
     }
 
     revalidatePath('/', 'layout')
