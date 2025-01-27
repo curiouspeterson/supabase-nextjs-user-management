@@ -3,29 +3,48 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/utils/supabase/client'
-import { Database } from '@/app/database.types'
 import { EmployeeDialog } from './employee-dialog'
 import { DeleteDialog } from './delete-dialog'
+import { useRouter } from 'next/navigation'
+import type { Employee as EmployeeType } from '@/services/scheduler/types'
+import type { Database } from '@/types/supabase'
 
-type Employee = Database['public']['Tables']['employees']['Row'] & {
-  profiles: Pick<
-    Database['public']['Tables']['profiles']['Row'], 
-    'full_name' | 'avatar_url' | 'updated_at' | 'username'
-  >
-  shift_types?: Pick<Database['public']['Tables']['shift_types']['Row'], 'name' | 'description'>
-  email?: string
+type DatabaseEmployee = Database['public']['Tables']['employees']['Row'] & {
+  profiles: {
+    id: string
+    full_name: string | null
+    avatar_url: string | null
+    username: string | null
+  }
 }
 
+const mapDatabaseEmployee = (employee: DatabaseEmployee): EmployeeType => ({
+  id: employee.id,
+  user_id: employee.id,
+  employee_role: employee.employee_role === 'Dispatcher' ? 'Employee' :
+                employee.employee_role === 'Management' ? 'Management' :
+                employee.employee_role,
+  weekly_hours_scheduled: employee.weekly_hours_scheduled || 40,
+  default_shift_type_id: employee.default_shift_type_id,
+  created_at: employee.created_at,
+  updated_at: employee.updated_at,
+  full_name: employee.profiles?.full_name || 'Unknown',
+  avatar_url: employee.profiles?.avatar_url || null,
+  username: employee.profiles?.username || null,
+  user_role: employee.user_role === 'Admin' ? 'Admin' : 'Employee'
+})
+
 export default function EmployeesPage() {
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee>()
-  const [employeeToDelete, setEmployeeToDelete] = useState<Employee>()
+  const [employees, setEmployees] = useState<DatabaseEmployee[]>([])
+  const [selectedEmployee, setSelectedEmployee] = useState<EmployeeType | undefined>(undefined)
+  const [employeeToDelete, setEmployeeToDelete] = useState<EmployeeType | undefined>(undefined)
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const supabase = createClient()
+  const router = useRouter()
 
   const fetchData = useCallback(async () => {
     try {
@@ -76,7 +95,7 @@ export default function EmployeesPage() {
           )
         `)
         .order('employee_role', { ascending: true })
-        .returns<Employee[]>()
+        .returns<DatabaseEmployee[]>()
 
       if (employeesError) throw employeesError
 
@@ -97,7 +116,7 @@ export default function EmployeesPage() {
         email: userEmailMap.get(employee.id) || ''
       })) || []
 
-      setEmployees(employeesWithEmail as Employee[])
+      setEmployees(employeesWithEmail as DatabaseEmployee[])
     } catch (err) {
       setError('An error occurred while loading the page')
       console.error('Error in fetchData:', err)
@@ -110,6 +129,12 @@ export default function EmployeesPage() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  const handleEmployeeUpdated = () => {
+    setShowAddDialog(false)
+    setSelectedEmployee(undefined)
+    router.refresh()
+  }
 
   // Show loading state
   if (loading) {
@@ -130,123 +155,48 @@ export default function EmployeesPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold">Employees</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage dispatch center employees, roles, and certifications
-          </p>
-        </div>
-        <div className="space-x-2">
-          <Button variant="outline">Import</Button>
-          <Button onClick={() => setShowAddDialog(true)}>Add Employee</Button>
-        </div>
+    <div className="container mx-auto py-10">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-2xl font-bold">Employee Management</h1>
+        <Button onClick={() => setShowAddDialog(true)}>Add Employee</Button>
       </div>
 
-      <div className="border rounded-lg">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">Name</th>
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">Employee Role</th>
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">User Role</th>
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">Hours Scheduled</th>
-                <th className="text-left text-xs font-medium text-muted-foreground p-3">Default Shift Type</th>
-                <th className="text-right text-xs font-medium text-muted-foreground p-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {employees?.map((employee) => (
-                <tr key={employee.id} className="hover:bg-muted/50">
-                  <td className="p-3">
-                    <div className="font-medium">{employee.profiles?.full_name || 'Unnamed'}</div>
-                  </td>
-                  <td className="p-3 text-sm">
-                    <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
-                      ${employee.employee_role === 'Dispatcher' ? 'bg-blue-100 text-blue-800' : 
-                        employee.employee_role === 'Shift Supervisor' ? 'bg-purple-100 text-purple-800' :
-                        'bg-green-100 text-green-800'}`}>
-                      {employee.employee_role}
-                    </div>
-                  </td>
-                  <td className="p-3 text-sm">
-                    <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
-                      ${employee.user_role === 'Employee' ? 'bg-gray-100 text-gray-800' :
-                        employee.user_role === 'Manager' ? 'bg-amber-100 text-amber-800' :
-                        'bg-red-100 text-red-800'}`}>
-                      {employee.user_role}
-                    </div>
-                  </td>
-                  <td className="p-3 text-sm">{employee.weekly_hours_scheduled} hrs/week</td>
-                  <td className="p-3 text-sm">
-                    {employee.shift_types ? (
-                      <div className="text-sm">
-                        <div className="font-medium">{employee.shift_types.name}</div>
-                        <div className="text-muted-foreground">
-                          {employee.shift_types.description}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-muted-foreground">No shift type assigned</div>
-                    )}
-                  </td>
-                  <td className="p-3 text-right">
-                    <div className="flex justify-end space-x-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedEmployee(employee)
-                          setShowEditDialog(true)
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setEmployeeToDelete(employee)
-                          setShowDeleteDialog(true)
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="grid gap-4">
+        {employees.map(employee => (
+          <div
+            key={employee.id}
+            className="p-4 border rounded-lg flex justify-between items-center"
+          >
+            <div>
+              <h3 className="font-semibold">{employee.profiles?.full_name || 'Unknown'}</h3>
+              <p className="text-sm text-gray-500">{employee.employee_role}</p>
+            </div>
+            <div className="space-x-2">
+              <Button
+                variant="outline"
+                onClick={() => setSelectedEmployee(mapDatabaseEmployee(employee))}
+              >
+                Edit
+              </Button>
+            </div>
+          </div>
+        ))}
       </div>
 
       {showAddDialog && (
         <EmployeeDialog
-          mode="add"
+          isOpen={true}
           onClose={() => setShowAddDialog(false)}
-          onSuccess={() => {
-            setShowAddDialog(false)
-            fetchData()
-          }}
+          onEmployeeUpdated={handleEmployeeUpdated}
         />
       )}
 
-      {showEditDialog && selectedEmployee && (
+      {selectedEmployee && (
         <EmployeeDialog
-          mode="edit"
+          isOpen={true}
           employee={selectedEmployee}
-          onClose={() => {
-            setSelectedEmployee(undefined)
-            setShowEditDialog(false)
-          }}
-          onSuccess={() => {
-            setSelectedEmployee(undefined)
-            setShowEditDialog(false)
-            fetchData()
-          }}
+          onClose={() => setSelectedEmployee(undefined)}
+          onEmployeeUpdated={handleEmployeeUpdated}
         />
       )}
 

@@ -1,7 +1,7 @@
 import { Database } from '@/types/supabase';
 
 export type ShiftDurationCategory = '4 hours' | '8 hours' | '10 hours' | '12 hours' | null;
-export type EmployeeRole = 'Dispatcher' | 'Shift Supervisor' | 'Manager';
+export type EmployeeRole = 'Employee' | 'Shift Supervisor' | 'Management';
 export type ScheduleStatus = 'Draft' | 'Published' | 'Approved';
 export type TimeOffType = 'Vacation' | 'Sick Leave' | 'Training';
 export type TimeOffStatus = 'Pending' | 'Approved' | 'Declined';
@@ -39,6 +39,7 @@ export interface Employee {
   full_name?: string;
   avatar_url?: string | null;
   username?: string | null;
+  user_role: 'Employee' | 'Admin';
 }
 
 export interface ShiftPattern {

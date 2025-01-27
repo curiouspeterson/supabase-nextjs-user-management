@@ -1,388 +1,241 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useForm, ControllerRenderProps, FieldValues } from 'react-hook-form'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { createClient } from '@/utils/supabase/client'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage
-} from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { createClient } from '@/utils/supabase/client'
-import { Database } from '@/app/database.types'
+import { useEffect } from 'react'
+import type { Employee, EmployeeRole } from '@/services/scheduler/types'
 
-const formSchema = z.object({
+const employeeSchema = z.object({
   full_name: z.string().min(1, 'Full name is required'),
-  email: z.string().email('Invalid email').min(1, 'Email is required'),
   username: z.string().min(1, 'Username is required'),
-  employee_role: z.enum(['Dispatcher', 'Shift Supervisor', 'Management']),
-  weekly_hours_scheduled: z.coerce
-    .number()
-    .min(0, 'Hours must be 0 or greater')
-    .max(168, 'Hours cannot exceed 168 per week'),
-  default_shift_type_id: z.string().min(1, 'Default shift type is required'),
-  allow_overtime: z.boolean().default(false),
-  max_weekly_hours: z.number().min(0).max(168).default(40)
+  employee_role: z.enum(['Employee', 'Shift Supervisor', 'Management'] as const),
+  weekly_hours_scheduled: z.number().min(0).max(168),
+  default_shift_type_id: z.string().optional(),
 })
 
-type Employee = Database['public']['Tables']['employees']['Row'] & {
-  profiles: Pick<
-    Database['public']['Tables']['profiles']['Row'], 
-    'full_name' | 'avatar_url' | 'updated_at' | 'username'
-  >
-  email?: string
-  shift_types?: Pick<Database['public']['Tables']['shift_types']['Row'], 'name' | 'description'>
-}
+type EmployeeFormValues = z.infer<typeof employeeSchema>
 
 interface EmployeeDialogProps {
-  mode: 'add' | 'edit'
-  employee?: Employee
+  isOpen: boolean
   onClose: () => void
-  onSuccess?: () => void
+  employee?: Employee
+  onEmployeeUpdated: () => void
 }
 
-type FormField = ControllerRenderProps<FieldValues, string>
+const mapRoleToDatabase = (role: EmployeeRole): 'Dispatcher' | 'Shift Supervisor' | 'Management' => {
+  switch (role) {
+    case 'Employee':
+      return 'Dispatcher'
+    case 'Management':
+      return 'Management'
+    case 'Shift Supervisor':
+      return 'Shift Supervisor'
+  }
+}
 
-export function EmployeeDialog({
-  mode,
-  employee,
-  onClose,
-  onSuccess,
-}: EmployeeDialogProps) {
-  const [loading, setLoading] = useState(false)
-  const [shiftTypes, setShiftTypes] = useState<Database['public']['Tables']['shift_types']['Row'][]>([])
+const mapUserRole = (role: EmployeeRole): 'Employee' | 'Admin' => {
+  switch (role) {
+    case 'Management':
+      return 'Admin'
+    default:
+      return 'Employee'
+  }
+}
 
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
+const mapLegacyRole = (role: string): EmployeeRole => {
+  switch (role) {
+    case 'Dispatcher':
+      return 'Employee' as const
+    case 'Manager':
+      return 'Management' as const
+    case 'Shift Supervisor':
+      return 'Shift Supervisor' as const
+    default:
+      return 'Employee' as const
+  }
+}
+
+export function EmployeeDialog({ isOpen, onClose, employee, onEmployeeUpdated }: EmployeeDialogProps) {
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    formState: { errors, isSubmitting },
+  } = useForm<EmployeeFormValues>({
+    resolver: zodResolver(employeeSchema),
     defaultValues: {
-      full_name: employee?.profiles?.full_name || '',
-      email: employee?.email || '',
-      username: employee?.profiles?.username || '',
-      employee_role: (employee?.employee_role || 'Dispatcher') as 'Dispatcher' | 'Shift Supervisor' | 'Management',
-      weekly_hours_scheduled: employee?.weekly_hours_scheduled || 40,
-      default_shift_type_id: employee?.default_shift_type_id || '',
-      allow_overtime: employee?.allow_overtime || false,
-      max_weekly_hours: employee?.max_weekly_hours || 40
+      full_name: '',
+      username: '',
+      employee_role: 'Employee',
+      weekly_hours_scheduled: 40,
+      default_shift_type_id: undefined,
     },
   })
 
-  // Load available shift types
-  useEffect(() => {
-    async function loadShiftTypes() {
-      const client = createClient()
-      if (!client) {
-        alert('Error initializing Supabase client')
-        return
-      }
-
-      const { data, error } = await client
-        .from('shift_types')
-        .select('*')
-        .order('name')
-      
-      if (error) {
-        alert('Error loading shift types. Please try again.')
-        return
-      }
-      
-      setShiftTypes(data)
-
-      // Set default shift type if none selected
-      if (!form.getValues('default_shift_type_id')) {
-        const dayShift = data.find(shift => shift.name === 'Day Shift')
-        if (dayShift) {
-          form.setValue('default_shift_type_id', dayShift.id)
-        }
-      }
-    }
-    
-    loadShiftTypes()
-  }, [form])
-
-  // Reset form when employee changes
   useEffect(() => {
     if (employee) {
-      console.log('Setting employee data:', employee)
-      form.reset({
-        full_name: employee.profiles?.full_name || '',
-        email: employee.email || '',
-        username: employee.profiles?.username || '',
-        employee_role: (employee.employee_role || 'Dispatcher') as 'Dispatcher' | 'Shift Supervisor' | 'Management',
-        weekly_hours_scheduled: employee.weekly_hours_scheduled || 40,
-        default_shift_type_id: employee.default_shift_type_id || '',
-        allow_overtime: employee?.allow_overtime || false,
-        max_weekly_hours: employee?.max_weekly_hours || 40
-      })
+      setValue('full_name', employee.full_name || '')
+      setValue('username', employee.username || '')
+      setValue('employee_role', mapLegacyRole(employee.employee_role))
+      setValue('weekly_hours_scheduled', employee.weekly_hours_scheduled)
+      setValue('default_shift_type_id', employee.default_shift_type_id || undefined)
     } else {
-      // For new employees, try to set Day Shift as default
-      const dayShift = shiftTypes.find(shift => shift.name === 'Day Shift')
-      form.reset({
-        full_name: '',
-        email: '',
-        username: '',
-        employee_role: 'Dispatcher',
-        weekly_hours_scheduled: 40,
-        default_shift_type_id: dayShift?.id || '',
-        allow_overtime: false,
-        max_weekly_hours: 40
-      })
+      reset()
     }
-  }, [employee, form, shiftTypes])
+  }, [employee, setValue, reset])
 
-  async function onSubmit(values: z.infer<typeof formSchema>) {
+  const onSubmit = async (values: EmployeeFormValues) => {
     try {
-      setLoading(true)
       const client = createClient()
-      if (!client) {
-        throw new Error('Could not initialize Supabase client')
-      }
 
       if (employee) {
         // Update existing employee
-        const { error } = await client.rpc('update_employee_and_profile', {
-          p_employee_id: employee.id,
-          p_full_name: values.full_name,
-          p_username: values.username,
-          p_employee_role: values.employee_role,
-          p_weekly_hours_scheduled: values.weekly_hours_scheduled,
-          p_default_shift_type_id: values.default_shift_type_id,
-          p_allow_overtime: values.allow_overtime,
-          p_max_weekly_hours: values.max_weekly_hours
-        })
+        const { error } = await client.from('employees').update({
+          employee_role: mapRoleToDatabase(values.employee_role),
+          weekly_hours_scheduled: values.weekly_hours_scheduled,
+          default_shift_type_id: values.default_shift_type_id,
+          user_role: mapUserRole(values.employee_role),
+        }).eq('id', employee.id)
 
         if (error) {
-          throw new Error(`Failed to update employee: ${error.message}`)
+          throw error
+        }
+
+        // Update profile
+        const { error: profileError } = await client.from('profiles').update({
+          full_name: values.full_name,
+          username: values.username,
+        }).eq('id', employee.id)
+
+        if (profileError) {
+          throw profileError
         }
       } else {
         // Create new employee
-        const response = await fetch('/api/employees', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(values),
+        const { data: userData, error: userError } = await client.auth.signUp({
+          email: `${values.username}@example.com`,
+          password: 'tempPassword123!',
         })
 
-        if (!response.ok) {
-          const data = await response.json()
-          throw new Error(data.error || 'Failed to create employee')
+        if (userError || !userData.user) {
+          throw userError || new Error('Failed to create user')
+        }
+
+        // Create profile
+        const { error: profileError } = await client.from('profiles').insert({
+          id: userData.user.id,
+          full_name: values.full_name,
+          username: values.username,
+        })
+
+        if (profileError) {
+          throw profileError
+        }
+
+        // Create employee
+        const { error: employeeError } = await client.from('employees').insert({
+          id: userData.user.id,
+          employee_role: mapRoleToDatabase(values.employee_role),
+          weekly_hours_scheduled: values.weekly_hours_scheduled,
+          default_shift_type_id: values.default_shift_type_id,
+          user_role: mapUserRole(values.employee_role),
+        })
+
+        if (employeeError) {
+          throw employeeError
         }
       }
 
-      onSuccess?.()
+      onEmployeeUpdated()
       onClose()
     } catch (error) {
-      alert('Error submitting form. Please try again.')
-    } finally {
-      setLoading(false)
+      console.error('Error saving employee:', error)
+      // Handle error (show toast, etc.)
     }
   }
 
   return (
-    <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>{mode === 'edit' ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
-          <DialogDescription>
-            {mode === 'edit'
-              ? 'Update employee information and roles.'
-              : 'Add a new employee to the system.'}
-          </DialogDescription>
+          <DialogTitle>{employee ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
         </DialogHeader>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <FormField
-              control={form.control}
-              name="full_name"
-              render={({ field }: { field: FormField }) => (
-                <FormItem>
-                  <FormLabel>Full Name</FormLabel>
-                  <FormControl>
-                    <Input {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
+
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div>
+            <Label htmlFor="full_name">Full Name</Label>
+            <Input
+              id="full_name"
+              {...register('full_name')}
+              className={errors.full_name ? 'border-red-500' : ''}
             />
-            <FormField
-              control={form.control}
-              name="email"
-              render={({ field }: { field: FormField }) => (
-                <FormItem>
-                  <FormLabel>Email</FormLabel>
-                  <FormControl>
-                    <Input 
-                      {...field} 
-                      disabled={mode === 'edit'}
-                      placeholder={mode === 'edit' ? 'Email cannot be changed' : 'Enter email'}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
+            {errors.full_name && (
+              <p className="text-sm text-red-500">{errors.full_name.message}</p>
+            )}
+          </div>
+
+          <div>
+            <Label htmlFor="username">Username</Label>
+            <Input
+              id="username"
+              {...register('username')}
+              className={errors.username ? 'border-red-500' : ''}
             />
-            <FormField
-              control={form.control}
-              name="username"
-              render={({ field }: { field: FormField }) => (
-                <FormItem>
-                  <FormLabel>Username</FormLabel>
-                  <FormControl>
-                    <Input 
-                      {...field} 
-                      disabled={mode === 'edit'}
-                      placeholder={mode === 'edit' ? 'Username cannot be changed' : 'Enter username'}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
+            {errors.username && (
+              <p className="text-sm text-red-500">{errors.username.message}</p>
+            )}
+          </div>
+
+          <div>
+            <Label htmlFor="employee_role">Role</Label>
+            <Select
+              onValueChange={(value) => setValue('employee_role', value as EmployeeRole)}
+              defaultValue={employee ? mapLegacyRole(employee.employee_role) : 'Employee'}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select role" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Employee">Employee</SelectItem>
+                <SelectItem value="Shift Supervisor">Shift Supervisor</SelectItem>
+                <SelectItem value="Management">Management</SelectItem>
+              </SelectContent>
+            </Select>
+            {errors.employee_role && (
+              <p className="text-sm text-red-500">{errors.employee_role.message}</p>
+            )}
+          </div>
+
+          <div>
+            <Label htmlFor="weekly_hours_scheduled">Weekly Hours</Label>
+            <Input
+              id="weekly_hours_scheduled"
+              type="number"
+              {...register('weekly_hours_scheduled', { valueAsNumber: true })}
+              className={errors.weekly_hours_scheduled ? 'border-red-500' : ''}
             />
-            <FormField
-              control={form.control}
-              name="employee_role"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Employee Role</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select an employee role" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="Dispatcher">Dispatcher</SelectItem>
-                      <SelectItem value="Shift Supervisor">Shift Supervisor</SelectItem>
-                      <SelectItem value="Management">Management</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="weekly_hours_scheduled"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Weekly Hours Scheduled</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={168}
-                      placeholder="40"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="default_shift_type_id"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Default Shift Type</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a default shift type" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {shiftTypes.map((shiftType) => (
-                        <SelectItem key={shiftType.id} value={shiftType.id}>
-                          {shiftType.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="allow_overtime"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Allow Overtime</FormLabel>
-                  <Select
-                    onValueChange={(value) => field.onChange(value === 'true')}
-                    defaultValue={field.value ? 'true' : 'false'}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select allow overtime" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="true">Yes</SelectItem>
-                      <SelectItem value="false">No</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="max_weekly_hours"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Max Weekly Hours</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={168}
-                      placeholder="40"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <DialogFooter>
-              <Button
-                type="submit"
-                disabled={loading}
-              >
-                {loading ? 'Saving...' : mode === 'edit' ? 'Save Changes' : 'Add Employee'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
+            {errors.weekly_hours_scheduled && (
+              <p className="text-sm text-red-500">{errors.weekly_hours_scheduled.message}</p>
+            )}
+          </div>
+
+          <div className="flex justify-end space-x-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : employee ? 'Save Changes' : 'Add Employee'}
+            </Button>
+          </div>
+        </form>
       </DialogContent>
     </Dialog>
   )

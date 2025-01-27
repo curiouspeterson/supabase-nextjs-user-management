@@ -333,14 +333,32 @@ export const mockAuthUser = (overrides = {}) => ({
   ...overrides
 });
 
-export const mockEmployee = (overrides?: Partial<Employee>): Employee => ({
+export const testEmployee: Employee = {
   id: 'test-employee-1',
   user_id: 'test-user-1',
-  employee_role: 'Dispatcher',
+  employee_role: 'Employee',
   weekly_hours_scheduled: 40,
   default_shift_type_id: 'test-shift-type-1',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
+  full_name: 'Test Employee',
+  avatar_url: null,
+  username: 'testemployee',
+  user_role: 'Employee'
+}
+
+export const mockEmployee = (overrides?: Partial<Employee>): Employee => ({
+  id: 'test-employee-1',
+  user_id: 'test-user-1',
+  employee_role: 'Employee',
+  weekly_hours_scheduled: 40,
+  default_shift_type_id: 'test-shift-type-1',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  full_name: 'Test Employee',
+  avatar_url: null,
+  username: 'testemployee',
+  user_role: 'Employee',
   ...overrides
 });
 

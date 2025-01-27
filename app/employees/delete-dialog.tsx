@@ -12,12 +12,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { createClient } from '@/utils/supabase/client'
-import { Database } from '@/app/database.types'
-
-type Employee = Database['public']['Tables']['employees']['Row'] & {
-  profiles: Pick<Database['public']['Tables']['profiles']['Row'], 'full_name' | 'avatar_url' | 'updated_at'>
-  shift_types?: Pick<Database['public']['Tables']['shift_types']['Row'], 'name' | 'description'>
-}
+import type { Employee } from '@/services/scheduler/types'
 
 interface DeleteDialogProps {
   employee: Employee
@@ -61,7 +56,7 @@ export function DeleteDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete Employee</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete {employee.profiles?.full_name}? This
+            Are you sure you want to delete {employee.full_name}? This
             action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
