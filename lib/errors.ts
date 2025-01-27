@@ -1,10 +1,16 @@
+import { ErrorSeverity, ErrorCategory, ErrorRecoveryStrategy } from './types/error'
+
 // Custom error classes
 export class AppError extends Error {
   constructor(
     message: string,
     public code: string,
     public statusCode: number = 500,
-    public shouldLog: boolean = true
+    public shouldLog: boolean = true,
+    public severity: ErrorSeverity = ErrorSeverity.MEDIUM,
+    public category: ErrorCategory = ErrorCategory.UNKNOWN,
+    public metadata: Record<string, unknown> = {},
+    public recoveryStrategy: ErrorRecoveryStrategy = ErrorRecoveryStrategy.RETRY
   ) {
     super(message)
     this.name = 'AppError'
@@ -13,28 +19,64 @@ export class AppError extends Error {
 
 export class AuthError extends AppError {
   constructor(message: string, code: string = 'AUTH_ERROR') {
-    super(message, code, 401)
+    super(
+      message,
+      code,
+      401,
+      true,
+      ErrorSeverity.HIGH,
+      ErrorCategory.AUTH,
+      {},
+      ErrorRecoveryStrategy.REFRESH
+    )
     this.name = 'AuthError'
   }
 }
 
 export class ValidationError extends AppError {
   constructor(message: string, code: string = 'VALIDATION_ERROR') {
-    super(message, code, 400)
+    super(
+      message,
+      code,
+      400,
+      true,
+      ErrorSeverity.LOW,
+      ErrorCategory.VALIDATION,
+      {},
+      ErrorRecoveryStrategy.NONE
+    )
     this.name = 'ValidationError'
   }
 }
 
 export class DatabaseError extends AppError {
   constructor(message: string, code: string = 'DATABASE_ERROR') {
-    super(message, code, 500)
+    super(
+      message,
+      code,
+      500,
+      true,
+      ErrorSeverity.HIGH,
+      ErrorCategory.DATA,
+      {},
+      ErrorRecoveryStrategy.RETRY
+    )
     this.name = 'DatabaseError'
   }
 }
 
 export class NetworkError extends AppError {
   constructor(message: string = 'Network connection error', code: string = 'NETWORK_ERROR') {
-    super(message, code, 503)
+    super(
+      message,
+      code,
+      503,
+      true,
+      ErrorSeverity.HIGH,
+      ErrorCategory.NETWORK,
+      {},
+      ErrorRecoveryStrategy.RETRY
+    )
     this.name = 'NetworkError'
   }
 }

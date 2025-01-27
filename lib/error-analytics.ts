@@ -12,140 +12,41 @@ import {
   ErrorTrend,
   ErrorMetadata
 } from '@/lib/types/error'
+import { AppError } from './errors'
 
 /**
- * Base error class for application errors
+ * Interface for error analytics metadata
  */
-export class AppError extends Error {
-  /**
-   * Creates a new AppError instance
-   * @param message - Error message
-   * @param code - Error code for categorization
-   * @param severity - Error severity level
-   * @param category - Error category
-   * @param metadata - Additional error context
-   * @param recoveryStrategy - Suggested recovery strategy
-   */
-  constructor(
-    message: string,
-    public code: string = 'UNKNOWN',
-    public severity: ErrorSeverity = ErrorSeverity.MEDIUM,
-    public category: ErrorCategory = ErrorCategory.UNKNOWN,
-    public metadata: Record<string, any> = {},
-    public recoveryStrategy: ErrorRecoveryStrategy = ErrorRecoveryStrategy.RETRY
-  ) {
-    super(message)
-    this.name = 'AppError'
-  }
-}
-
-/**
- * Network-related errors
- */
-export class NetworkError extends AppError {
-  constructor(message: string, metadata: Record<string, any> = {}) {
-    super(
-      message,
-      'NETWORK_ERROR',
-      ErrorSeverity.HIGH,
-      ErrorCategory.NETWORK,
-      metadata,
-      ErrorRecoveryStrategy.RETRY
-    )
-    this.name = 'NetworkError'
-  }
-}
-
-/**
- * Validation errors
- */
-export class ValidationError extends AppError {
-  constructor(message: string, metadata: Record<string, any> = {}) {
-    super(
-      message,
-      'VALIDATION_ERROR',
-      ErrorSeverity.MEDIUM,
-      ErrorCategory.VALIDATION,
-      metadata,
-      ErrorRecoveryStrategy.NONE
-    )
-    this.name = 'ValidationError'
-  }
-}
-
-/**
- * Authentication errors
- */
-export class AuthError extends AppError {
-  constructor(message: string, metadata: Record<string, any> = {}) {
-    super(
-      message,
-      'AUTH_ERROR',
-      ErrorSeverity.HIGH,
-      ErrorCategory.AUTH,
-      metadata,
-      ErrorRecoveryStrategy.REFRESH
-    )
-    this.name = 'AuthError'
-  }
-}
-
-/**
- * Data-related errors
- */
-export class DataError extends AppError {
-  constructor(message: string, metadata: Record<string, any> = {}) {
-    super(
-      message,
-      'DATA_ERROR',
-      ErrorSeverity.HIGH,
-      ErrorCategory.DATA,
-      metadata,
-      ErrorRecoveryStrategy.FALLBACK
-    )
-    this.name = 'DataError'
-  }
-}
-
-/**
- * Performance-related errors
- */
-export class PerformanceError extends AppError {
-  constructor(message: string, metadata: Record<string, any> = {}) {
-    super(
-      message,
-      'PERFORMANCE_ERROR',
-      ErrorSeverity.MEDIUM,
-      ErrorCategory.PERFORMANCE,
-      metadata,
-      ErrorRecoveryStrategy.RESET
-    )
-    this.name = 'PerformanceError'
-  }
-}
-
-/**
- * Security-related errors
- */
-export class SecurityError extends AppError {
-  constructor(message: string, metadata: Record<string, any> = {}) {
-    super(
-      message,
-      'SECURITY_ERROR',
-      ErrorSeverity.CRITICAL,
-      ErrorCategory.SECURITY,
-      metadata,
-      ErrorRecoveryStrategy.NONE
-    )
-    this.name = 'SecurityError'
-  }
+export interface AnalyticsError extends AppError {
+  severity: ErrorSeverity
+  category: ErrorCategory
+  metadata: Record<string, unknown>
+  recoveryStrategy: ErrorRecoveryStrategy
 }
 
 /**
  * Interface for error analytics data
  */
+export interface ErrorMetricsData {
+  count: number
+  firstSeen: string
+  lastSeen: string
+  contexts: string[]
+  userAgents: string[]
+  urls: string[]
+  severity: ErrorSeverity
+  category: ErrorCategory
+  impactedUsers: number
+  recoveryRate: number
+  avgResolutionTime: number
+  relatedErrors: string[]
+  frequency: number
+}
+
 export interface ErrorAnalytics {
-  [key: string]: ErrorMetrics
+  trackError(error: AnalyticsError): Promise<void>
+  getErrorMetrics(): Promise<Record<string, ErrorMetricsData>>
+  getErrorTrends(): Map<string, ErrorTrend[]>
 }
 
 /**
@@ -184,7 +85,7 @@ interface ErrorImpactAnalysis {
 /**
  * Service for tracking and analyzing application errors
  */
-export class ErrorAnalyticsService {
+export class ErrorAnalyticsService implements ErrorAnalytics {
   private static instance: ErrorAnalyticsService | null = null
   private errorMetrics: Map<string, ErrorMetrics> = new Map()
   private errorTrends: Map<string, ErrorTrend[]> = new Map()
@@ -206,6 +107,13 @@ export class ErrorAnalyticsService {
       ErrorAnalyticsService.instance = new ErrorAnalyticsService()
     }
     return ErrorAnalyticsService.instance
+  }
+
+  public static resetInstance(): void {
+    if (ErrorAnalyticsService.instance) {
+      ErrorAnalyticsService.instance.clearAnalytics()
+      ErrorAnalyticsService.instance = null
+    }
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -230,10 +138,7 @@ export class ErrorAnalyticsService {
     }
   }
 
-  private initializeMetrics(
-    error: AppError,
-    now: string
-  ): ErrorMetrics {
+  private initializeMetrics(error: AnalyticsError, now: string): ErrorMetrics {
     return {
       count: 1,
       firstSeen: now,
@@ -241,9 +146,9 @@ export class ErrorAnalyticsService {
       contexts: [],
       userAgents: [],
       urls: [],
-      severity: error.severity,
-      category: error.category,
-      recoveryStrategy: error.recoveryStrategy,
+      severity: error.severity || ErrorSeverity.MEDIUM,
+      category: error.category || ErrorCategory.UNKNOWN,
+      recoveryStrategy: error.recoveryStrategy || ErrorRecoveryStrategy.RETRY,
       impactedUsers: 0,
       recoveryRate: 0,
       avgResolutionTime: 0,
@@ -263,48 +168,71 @@ export class ErrorAnalyticsService {
     }
   }
 
-  async trackError(error: AppError, context?: string, userId?: string): Promise<string> {
+  /**
+   * Track an error occurrence
+   * @param error - The error to track
+   */
+  async trackError(error: AnalyticsError): Promise<void> {
+    const errorType = error.name
+    const now = new Date().toISOString()
+    
+    // Get or initialize error metrics
+    let metrics = this.errorMetrics.get(errorType)
+    if (!metrics) {
+      metrics = this.initializeMetrics(error, now)
+      this.errorMetrics.set(errorType, metrics)
+    } else {
+      metrics.count++
+      metrics.lastSeen = now
+    }
+
+    // Update error trends
+    this.updateTrends(errorType, error.severity, error.category)
+
+    // Log error details for analytics
+    console.error('Error tracked:', {
+      type: errorType,
+      message: error.message,
+      severity: error.severity,
+      category: error.category,
+      metadata: error.metadata,
+      recoveryStrategy: error.recoveryStrategy
+    })
+  }
+
+  public async getErrorMetrics(): Promise<Record<string, ErrorMetricsData>> {
     await this.ensureInitialized()
 
-    const now = new Date().toISOString()
-    const errorKey = this.getErrorKey(error)
+    const result: Record<string, ErrorMetricsData> = {}
+    const now = Date.now()
 
-    if (!this.errorMetrics.has(errorKey)) {
-      this.errorMetrics.set(errorKey, this.initializeMetrics(error, now))
-    }
+    this.errorMetrics.forEach((metrics, key) => {
+      const hoursSinceFirstSeen = (
+        now - new Date(metrics.firstSeen).getTime()
+      ) / (1000 * 60 * 60)
 
-    const metrics = this.errorMetrics.get(errorKey)!
-    metrics.count++
-    metrics.lastSeen = now
+      result[key] = {
+        count: metrics.count,
+        firstSeen: metrics.firstSeen,
+        lastSeen: metrics.lastSeen,
+        contexts: metrics.contexts,
+        userAgents: metrics.userAgents,
+        urls: metrics.urls,
+        severity: metrics.severity,
+        category: metrics.category,
+        impactedUsers: metrics.impactedUsers,
+        recoveryRate: metrics.recoveryRate,
+        avgResolutionTime: metrics.avgResolutionTime,
+        relatedErrors: metrics.relatedErrors,
+        frequency: metrics.count / hoursSinceFirstSeen
+      }
+    })
 
-    // Update arrays with limits
-    if (context) {
-      metrics.contexts = Array.from(new Set([...metrics.contexts, context]))
-        .slice(-this.maxContexts)
-    }
+    return result
+  }
 
-    const userAgent = typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
-    metrics.userAgents = Array.from(new Set([...metrics.userAgents, userAgent]))
-      .slice(-this.maxUserAgents)
-
-    const url = typeof window !== 'undefined' ? window.location.href : 'unknown'
-    metrics.urls = Array.from(new Set([...metrics.urls, url]))
-      .slice(-this.maxUrls)
-
-    if (userId) {
-      metrics.impactedUsers++
-    }
-
-    // Update trends
-    this.updateTrends(errorKey, error.severity, error.category, userId)
-
-    // Find related errors
-    this.findRelatedErrors(errorKey, error)
-
-    // Persist data
-    await this.persistData()
-
-    return errorKey
+  public getErrorTrends(): Map<string, ErrorTrend[]> {
+    return new Map(this.errorTrends)
   }
 
   private updateTrends(
@@ -337,7 +265,7 @@ export class ErrorAnalyticsService {
     this.errorTrends.set(errorKey, trends)
   }
 
-  private findRelatedErrors(errorKey: string, error: AppError): void {
+  private findRelatedErrors(errorKey: string, error: AnalyticsError): void {
     const metrics = this.errorMetrics.get(errorKey)
     if (!metrics) return
 
@@ -393,51 +321,6 @@ export class ErrorAnalyticsService {
     }
 
     metrics.recoveryRate = metrics.successfulAttempts / metrics.totalAttempts
-  }
-
-  async getErrorMetrics(): Promise<Record<string, {
-    count: number
-    firstSeen: string
-    lastSeen: string
-    contexts: string[]
-    userAgents: string[]
-    urls: string[]
-    severity: ErrorSeverity
-    category: ErrorCategory
-    impactedUsers: number
-    recoveryRate: number
-    avgResolutionTime: number
-    relatedErrors: string[]
-    frequency: number
-  }>> {
-    await this.ensureInitialized()
-
-    const result: Record<string, any> = {}
-    const now = Date.now()
-
-    this.errorMetrics.forEach((metrics, key) => {
-      const hoursSinceFirstSeen = (
-        now - new Date(metrics.firstSeen).getTime()
-      ) / (1000 * 60 * 60)
-
-      result[key] = {
-        count: metrics.count,
-        firstSeen: metrics.firstSeen,
-        lastSeen: metrics.lastSeen,
-        contexts: metrics.contexts,
-        userAgents: metrics.userAgents,
-        urls: metrics.urls,
-        severity: metrics.severity,
-        category: metrics.category,
-        impactedUsers: metrics.impactedUsers,
-        recoveryRate: metrics.recoveryRate,
-        avgResolutionTime: metrics.avgResolutionTime,
-        relatedErrors: metrics.relatedErrors,
-        frequency: metrics.count / hoursSinceFirstSeen
-      }
-    })
-
-    return result
   }
 
   async getTrends(options?: {
@@ -564,10 +447,11 @@ export class ErrorAnalyticsService {
     }
   }
 
-  async clearAnalytics(): Promise<void> {
+  public async clearAnalytics(): Promise<void> {
     this.errorMetrics.clear()
     this.errorTrends.clear()
-    await this.storage.clearData()
+    this.initialized = false
+    await this.storage?.clearData()
   }
 
   private getErrorKey(error: AppError): string {
@@ -594,11 +478,10 @@ export class ErrorAnalyticsService {
   }
 
   private async persistData(): Promise<void> {
-    if (typeof window === 'undefined') return
-
     try {
-      const analyticsData = Object.fromEntries(this.errorMetrics)
-      const trendsData = Array.from(this.errorTrends.entries())
+      // Convert Maps to Records for storage
+      const analyticsData = Object.fromEntries(this.errorMetrics.entries())
+      const trendsData = Object.fromEntries(this.errorTrends.entries())
 
       await this.storage.saveData({
         analytics: analyticsData,
@@ -638,4 +521,7 @@ export class ErrorAnalyticsService {
   }
 }
 
-ErrorAnalyticsService.instance = null; 
+/**
+ * Singleton instance of ErrorAnalyticsService for global error tracking
+ */
+export const errorAnalytics = ErrorAnalyticsService.getInstance() 

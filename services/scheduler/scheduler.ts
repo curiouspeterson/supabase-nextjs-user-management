@@ -5,7 +5,6 @@ import type {
   Shift, 
   Schedule,
   StaffingRequirement,
-  SchedulingConstraints,
   CoverageReport,
   ScheduleGenerationOptions,
   ScheduleValidationResult,
@@ -187,7 +186,7 @@ export class ScheduleGenerator {
         // Preferred employees who match pattern and have low hours
         candidates = candidates.filter(employee => {
           const hours = weeklyHours.get(employee.id) || 0;
-          return hours < this.MAX_WEEKLY_HOURS &&
+          return hours < (employee.weekly_hours_scheduled || this.MAX_WEEKLY_HOURS) &&
                  this.matchesPattern(employee, date, patterns) &&
                  this.hasPreference(employee, requirement, preferences);
         });
@@ -197,7 +196,7 @@ export class ScheduleGenerator {
         // Employees who can work overtime or don't perfectly match pattern
         candidates = candidates.filter(employee => {
           const hours = weeklyHours.get(employee.id) || 0;
-          return (hours < this.MAX_WEEKLY_HOURS || employee.allow_overtime) &&
+          return hours < (employee.weekly_hours_scheduled || this.MAX_WEEKLY_HOURS) &&
                  !this.hasNegativePreference(employee, requirement, preferences);
         });
         break;
@@ -247,12 +246,9 @@ export class ScheduleGenerator {
 
     // Check weekly hours
     const currentHours = weeklyHours.get(employee.id) || 0;
-    if (currentHours + shift.duration_hours > this.MAX_WEEKLY_HOURS) {
-      if (!employee.allow_overtime) {
-        errors.push('Would exceed maximum weekly hours');
-      } else {
-        warnings.push('Assignment will result in overtime');
-      }
+    const maxHours = employee.weekly_hours_scheduled || this.MAX_WEEKLY_HOURS;
+    if (currentHours + shift.duration_hours > maxHours) {
+      errors.push('Would exceed maximum weekly hours');
     }
 
     // Check consecutive days
@@ -366,7 +362,7 @@ export class ScheduleGenerator {
     weeklyHours: Map<string, number>
   ): boolean {
     const hours = weeklyHours.get(employee.id) || 0;
-    return hours < (employee.allow_overtime ? employee.max_weekly_hours : this.MAX_WEEKLY_HOURS);
+    return hours < (employee.weekly_hours_scheduled || this.MAX_WEEKLY_HOURS);
   }
 
   /**

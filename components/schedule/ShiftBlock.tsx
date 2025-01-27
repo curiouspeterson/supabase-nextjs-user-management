@@ -1,13 +1,20 @@
 'use client';
 
-import React from 'react';
-import { useDrag } from 'react-dnd';
+import React, { useRef } from 'react';
+import { useDrag, DragSourceMonitor } from 'react-dnd';
 import { format } from 'date-fns';
 import type { 
   Schedule, 
   Employee, 
   Shift 
 } from '@/services/scheduler/types';
+
+interface DragItem {
+  type: 'SHIFT';
+  scheduleId: string;
+  shiftId: string;
+  employeeId: string;
+}
 
 interface ShiftBlockProps {
   schedule: Schedule;
@@ -24,7 +31,13 @@ export default function ShiftBlock({
   isEditable,
   onRemove
 }: ShiftBlockProps) {
-  const [{ isDragging }, drag] = useDrag({
+  const ref = useRef<HTMLDivElement>(null);
+  
+  const [{ isDragging }, dragRef] = useDrag<
+    DragItem,
+    void,
+    { isDragging: boolean }
+  >(() => ({
     type: 'SHIFT',
     item: { 
       type: 'SHIFT',
@@ -33,10 +46,13 @@ export default function ShiftBlock({
       employeeId: employee.id
     },
     canDrag: () => isEditable,
-    collect: (monitor) => ({
+    collect: (monitor: DragSourceMonitor) => ({
       isDragging: monitor.isDragging()
     })
-  });
+  }), [schedule.id, shift.id, employee.id, isEditable]);
+
+  // Connect the drag ref to our element ref
+  dragRef(ref);
 
   // Calculate duration for styling
   const startHour = parseInt(shift.start_time.split(':')[0]);
@@ -62,7 +78,7 @@ export default function ShiftBlock({
 
   return (
     <div
-      ref={drag}
+      ref={ref}
       className={`
         relative p-2 rounded-md border
         ${getBgColor()}

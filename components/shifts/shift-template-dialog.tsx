@@ -24,11 +24,14 @@ import {
 } from '@/components/ui/select'
 import { createClient } from '@/utils/supabase/client'
 
+type DurationCategory = "4 hours" | "10 hours" | "12 hours";
+const DURATION_CATEGORIES: DurationCategory[] = ["4 hours", "10 hours", "12 hours"];
+
 const shiftSchema = z.object({
   shift_type_id: z.string().min(1, 'Shift type is required'),
   start_time: z.string().min(1, 'Start time is required'),
   end_time: z.string().min(1, 'End time is required'),
-  duration_category: z.string().min(1, 'Duration is required'),
+  duration_category: z.enum(["4 hours", "10 hours", "12 hours"]),
 })
 
 type ShiftFormData = z.infer<typeof shiftSchema>
@@ -48,12 +51,10 @@ interface ShiftTemplateDialogProps {
     start_time: string
     end_time: string
     duration_hours: number
-    duration_category: string
+    duration_category: DurationCategory | null
   }
   onSuccess?: () => void
 }
-
-const DURATION_CATEGORIES = ['4 hours', '10 hours', '12 hours'] as const
 
 export function ShiftTemplateDialog({
   open,
@@ -71,7 +72,7 @@ export function ShiftTemplateDialog({
       shift_type_id: '',
       start_time: '',
       end_time: '',
-      duration_category: '',
+      duration_category: "4 hours",
     },
   })
 
@@ -101,14 +102,14 @@ export function ShiftTemplateDialog({
         shift_type_id: shift.shift_type_id,
         start_time: shift.start_time,
         end_time: shift.end_time,
-        duration_category: shift.duration_category,
+        duration_category: shift.duration_category || "4 hours",
       })
     } else {
       form.reset({
         shift_type_id: '',
         start_time: '',
         end_time: '',
-        duration_category: '',
+        duration_category: "4 hours",
       })
     }
   }, [shift, form])
@@ -127,21 +128,25 @@ export function ShiftTemplateDialog({
       setLoading(true)
       const duration = calculateDuration(data.start_time, data.end_time)
 
+      const shiftData = {
+        shift_type_id: data.shift_type_id,
+        start_time: data.start_time,
+        end_time: data.end_time,
+        duration_category: data.duration_category as DurationCategory,
+        duration_hours: duration,
+      }
+
       if (shift?.id) {
         const { error } = await supabase
           .from('shifts')
-          .update({
-            ...data,
-            duration_hours: duration,
-          })
+          .update(shiftData)
           .eq('id', shift.id)
 
         if (error) throw error
       } else {
-        const { error } = await supabase.from('shifts').insert({
-          ...data,
-          duration_hours: duration,
-        })
+        const { error } = await supabase
+          .from('shifts')
+          .insert(shiftData)
 
         if (error) throw error
       }
@@ -193,7 +198,7 @@ export function ShiftTemplateDialog({
             <Label htmlFor="duration_category">Duration</Label>
             <Select
               defaultValue={form.getValues('duration_category')}
-              onValueChange={(value) => form.setValue('duration_category', value)}
+              onValueChange={(value) => form.setValue('duration_category', value as DurationCategory)}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select duration" />

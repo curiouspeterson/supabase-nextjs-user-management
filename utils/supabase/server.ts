@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { Database } from '@/types/supabase'
 
+// For use in app directory
 export const createClient = () => {
   const cookieStore = cookies()
 
@@ -14,10 +15,39 @@ export const createClient = () => {
           return cookieStore.get(name)?.value
         },
         set(name: string, value: string, options: CookieOptions) {
-          cookieStore.set({ name, value, ...options })
+          try {
+            cookieStore.set({ name, value, ...options })
+          } catch (error) {
+            // Handle cookie setting error
+          }
         },
         remove(name: string, options: CookieOptions) {
-          cookieStore.set({ name, value: '', ...options })
+          try {
+            cookieStore.set({ name, value: '', ...options })
+          } catch (error) {
+            // Handle cookie removal error
+          }
+        },
+      },
+    }
+  )
+}
+
+// For use in pages directory
+export const createClientForPages = (context: { req: any; res: any }) => {
+  return createServerClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return context.req.cookies[name]
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          context.res.setHeader('Set-Cookie', `${name}=${value}; Path=/; HttpOnly`)
+        },
+        remove(name: string, options: CookieOptions) {
+          context.res.setHeader('Set-Cookie', `${name}=; Path=/; HttpOnly; Max-Age=0`)
         },
       },
     }

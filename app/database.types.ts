@@ -6,29 +6,181 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
+      daily_coverage: {
+        Row: {
+          actual_coverage: number
+          coverage_status: Database["public"]["Enums"]["coverage_status_enum"]
+          created_at: string
+          date: string
+          id: string
+          overtime_hours: number
+          period_id: string
+          supervisor_count: number
+          updated_at: string
+        }
+        Insert: {
+          actual_coverage?: number
+          coverage_status?: Database["public"]["Enums"]["coverage_status_enum"]
+          created_at?: string
+          date: string
+          id?: string
+          overtime_hours?: number
+          period_id: string
+          supervisor_count?: number
+          updated_at?: string
+        }
+        Update: {
+          actual_coverage?: number
+          coverage_status?: Database["public"]["Enums"]["coverage_status_enum"]
+          created_at?: string
+          date?: string
+          id?: string
+          overtime_hours?: number
+          period_id?: string
+          supervisor_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_coverage_period_id_fkey"
+            columns: ["period_id"]
+            isOneToOne: false
+            referencedRelation: "staffing_requirements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_patterns: {
+        Row: {
+          created_at: string
+          employee_id: string
+          end_date: string | null
+          id: string
+          pattern_id: string
+          rotation_start_date: string
+          start_date: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          employee_id: string
+          end_date?: string | null
+          id?: string
+          pattern_id: string
+          rotation_start_date: string
+          start_date: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          employee_id?: string
+          end_date?: string | null
+          id?: string
+          pattern_id?: string
+          rotation_start_date?: string
+          start_date?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_patterns_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_patterns_pattern_id_fkey"
+            columns: ["pattern_id"]
+            isOneToOne: false
+            referencedRelation: "shift_patterns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_shift_preferences: {
+        Row: {
+          created_at: string
+          effective_date: string
+          employee_id: string
+          expiry_date: string | null
+          id: string
+          preference_level: number
+          shift_type_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          effective_date: string
+          employee_id: string
+          expiry_date?: string | null
+          id?: string
+          preference_level?: number
+          shift_type_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          effective_date?: string
+          employee_id?: string
+          expiry_date?: string | null
+          id?: string
+          preference_level?: number
+          shift_type_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_shift_preferences_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_shift_preferences_shift_type_id_fkey"
+            columns: ["shift_type_id"]
+            isOneToOne: false
+            referencedRelation: "shift_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employees: {
         Row: {
+          allow_overtime: boolean
+          created_at: string
           default_shift_type_id: string | null
-          employee_role: string
+          employee_role: Database["public"]["Enums"]["employee_role_enum"]
           id: string
-          user_role: string
+          max_weekly_hours: number
+          updated_at: string
+          user_role: Database["public"]["Enums"]["user_role_enum"]
           weekly_hours_scheduled: number | null
         }
         Insert: {
+          allow_overtime?: boolean
+          created_at?: string
           default_shift_type_id?: string | null
-          employee_role: string
+          employee_role: Database["public"]["Enums"]["employee_role_enum"]
           id: string
-          user_role: string
+          max_weekly_hours?: number
+          updated_at?: string
+          user_role: Database["public"]["Enums"]["user_role_enum"]
           weekly_hours_scheduled?: number | null
         }
         Update: {
+          allow_overtime?: boolean
+          created_at?: string
           default_shift_type_id?: string | null
-          employee_role?: string
+          employee_role?: Database["public"]["Enums"]["employee_role_enum"]
           id?: string
-          user_role?: string
+          max_weekly_hours?: number
+          updated_at?: string
+          user_role?: Database["public"]["Enums"]["user_role_enum"]
           weekly_hours_scheduled?: number | null
         }
         Relationships: [
@@ -53,6 +205,7 @@ export interface Database {
           avatar_url: string | null
           full_name: string | null
           id: string
+          role: string
           updated_at: string | null
           username: string | null
           website: string | null
@@ -61,6 +214,7 @@ export interface Database {
           avatar_url?: string | null
           full_name?: string | null
           id: string
+          role?: string
           updated_at?: string | null
           username?: string | null
           website?: string | null
@@ -69,36 +223,73 @@ export interface Database {
           avatar_url?: string | null
           full_name?: string | null
           id?: string
+          role?: string
           updated_at?: string | null
           username?: string | null
           website?: string | null
         }
         Relationships: []
       }
-      schedules: {
+      scheduler_metrics: {
         Row: {
-          day_of_week: string
-          employee_id: string
+          coverage_deficit: number
+          created_at: string
+          error_message: string | null
           id: string
-          schedule_status: string
-          shift_id: string
-          week_start_date: string
+          last_run_status: string
+          overtime_violations: number
+          pattern_errors: number
+          schedule_generation_time: number
         }
         Insert: {
-          day_of_week: string
-          employee_id: string
+          coverage_deficit?: number
+          created_at?: string
+          error_message?: string | null
           id?: string
-          schedule_status?: string
-          shift_id: string
-          week_start_date: string
+          last_run_status: string
+          overtime_violations?: number
+          pattern_errors?: number
+          schedule_generation_time?: number
         }
         Update: {
-          day_of_week?: string
+          coverage_deficit?: number
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          last_run_status?: string
+          overtime_violations?: number
+          pattern_errors?: number
+          schedule_generation_time?: number
+        }
+        Relationships: []
+      }
+      schedules: {
+        Row: {
+          created_at: string
+          date: string
+          employee_id: string
+          id: string
+          shift_id: string
+          status: Database["public"]["Enums"]["schedule_status_enum"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          employee_id: string
+          id?: string
+          shift_id: string
+          status?: Database["public"]["Enums"]["schedule_status_enum"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
           employee_id?: string
           id?: string
-          schedule_status?: string
           shift_id?: string
-          week_start_date?: string
+          status?: Database["public"]["Enums"]["schedule_status_enum"]
+          updated_at?: string
         }
         Relationships: [
           {
@@ -117,51 +308,99 @@ export interface Database {
           },
         ]
       }
+      shift_patterns: {
+        Row: {
+          created_at: string
+          days_off: number
+          days_on: number
+          id: string
+          name: string
+          pattern_type: Database["public"]["Enums"]["shift_pattern_type_enum"]
+          shift_duration: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          days_off: number
+          days_on: number
+          id?: string
+          name: string
+          pattern_type: Database["public"]["Enums"]["shift_pattern_type_enum"]
+          shift_duration: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          days_off?: number
+          days_on?: number
+          id?: string
+          name?: string
+          pattern_type?: Database["public"]["Enums"]["shift_pattern_type_enum"]
+          shift_duration?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       shift_types: {
         Row: {
-          created_at: string | null
+          created_at: string
           description: string | null
           id: string
           name: string
+          updated_at: string
         }
         Insert: {
-          created_at?: string | null
+          created_at?: string
           description?: string | null
           id?: string
           name: string
+          updated_at?: string
         }
         Update: {
-          created_at?: string | null
+          created_at?: string
           description?: string | null
           id?: string
           name?: string
+          updated_at?: string
         }
         Relationships: []
       }
       shifts: {
         Row: {
-          duration_category: string
+          created_at: string
+          duration_category:
+            | Database["public"]["Enums"]["duration_category_enum"]
+            | null
           duration_hours: number
           end_time: string
           id: string
           shift_type_id: string
           start_time: string
+          updated_at: string
         }
         Insert: {
-          duration_category: string
+          created_at?: string
+          duration_category?:
+            | Database["public"]["Enums"]["duration_category_enum"]
+            | null
           duration_hours: number
           end_time: string
           id?: string
           shift_type_id: string
           start_time: string
+          updated_at?: string
         }
         Update: {
-          duration_category?: string
+          created_at?: string
+          duration_category?:
+            | Database["public"]["Enums"]["duration_category_enum"]
+            | null
           duration_hours?: number
           end_time?: string
           id?: string
           shift_type_id?: string
           start_time?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -175,93 +414,180 @@ export interface Database {
       }
       staffing_requirements: {
         Row: {
+          created_at: string
           end_time: string
           id: string
           minimum_employees: number
           period_name: string
+          shift_supervisor_required: boolean
           start_time: string
+          updated_at: string
         }
         Insert: {
+          created_at?: string
           end_time: string
           id?: string
           minimum_employees: number
           period_name: string
+          shift_supervisor_required?: boolean
           start_time: string
+          updated_at?: string
         }
         Update: {
+          created_at?: string
           end_time?: string
           id?: string
           minimum_employees?: number
           period_name?: string
+          shift_supervisor_required?: boolean
           start_time?: string
+          updated_at?: string
         }
         Relationships: []
       }
       time_off_requests: {
         Row: {
-          id: string
-          employee_id: string
-          start_date: string
-          end_date: string
-          type: 'Vacation' | 'Sick' | 'Personal' | 'Training'
-          status: 'Pending' | 'Approved' | 'Declined'
-          notes: string | null
-          reviewed_by: string | null
-          reviewed_at: string | null
-          submitted_at: string
           created_at: string
+          employee_id: string
+          end_date: string
+          id: string
+          notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          start_date: string
+          status: Database["public"]["Enums"]["time_off_status_enum"]
+          submitted_at: string
+          type: Database["public"]["Enums"]["time_off_type_enum"]
           updated_at: string
         }
         Insert: {
-          id?: string
-          employee_id: string
-          start_date: string
-          end_date: string
-          type: 'Vacation' | 'Sick' | 'Personal' | 'Training'
-          status?: 'Pending' | 'Approved' | 'Declined'
-          notes?: string | null
-          reviewed_by?: string | null
-          reviewed_at?: string | null
-          submitted_at?: string
           created_at?: string
+          employee_id: string
+          end_date: string
+          id?: string
+          notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_date: string
+          status?: Database["public"]["Enums"]["time_off_status_enum"]
+          submitted_at?: string
+          type: Database["public"]["Enums"]["time_off_type_enum"]
           updated_at?: string
         }
         Update: {
-          id?: string
-          employee_id?: string
-          start_date?: string
-          end_date?: string
-          type?: 'Vacation' | 'Sick' | 'Personal' | 'Training'
-          status?: 'Pending' | 'Approved' | 'Declined'
-          notes?: string | null
-          reviewed_by?: string | null
-          reviewed_at?: string | null
-          submitted_at?: string
           created_at?: string
+          employee_id?: string
+          end_date?: string
+          id?: string
+          notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_date?: string
+          status?: Database["public"]["Enums"]["time_off_status_enum"]
+          submitted_at?: string
+          type?: Database["public"]["Enums"]["time_off_type_enum"]
           updated_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "time_off_requests_employee_id_fkey"
-            columns: ["employee_id"]
-            isOneToOne: false
-            referencedRelation: "employees"
-            referencedColumns: ["id"]
-          }
-        ]
+        Relationships: []
       }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      get_user_role: {
+      calculate_period_coverage: {
+        Args: {
+          p_date: string
+          p_period_id: string
+        }
+        Returns: number
+      }
+      calculate_weekly_hours: {
+        Args: {
+          p_employee_id: string
+          p_date: string
+        }
+        Returns: number
+      }
+      get_pattern_violations: {
+        Args: {
+          start_date: string
+        }
+        Returns: {
+          employee_id: string
+          violation_type: string
+          violation_date: string
+          details: string
+        }[]
+      }
+      get_time_off_requests: {
         Args: Record<PropertyKey, never>
-        Returns: string
+        Returns: {
+          id: string
+          employee_id: string
+          start_date: string
+          end_date: string
+          type: Database["public"]["Enums"]["time_off_type_enum"]
+          status: Database["public"]["Enums"]["time_off_status_enum"]
+          notes: string
+          reviewed_by: string
+          reviewed_at: string
+          submitted_at: string
+          created_at: string
+          updated_at: string
+          employee_email: string
+          employee_full_name: string
+          employee_role: Database["public"]["Enums"]["employee_role_enum"]
+        }[]
+      }
+      update_employee_and_profile: {
+        Args: {
+          p_employee_id: string
+          p_full_name: string
+          p_username: string
+          p_employee_role: Database["public"]["Enums"]["employee_role_enum"]
+          p_weekly_hours_scheduled: number
+          p_default_shift_type_id?: string
+          p_allow_overtime?: boolean
+          p_max_weekly_hours?: number
+        }
+        Returns: {
+          allow_overtime: boolean
+          created_at: string
+          default_shift_type_id: string | null
+          employee_role: Database["public"]["Enums"]["employee_role_enum"]
+          id: string
+          max_weekly_hours: number
+          updated_at: string
+          user_role: Database["public"]["Enums"]["user_role_enum"]
+          weekly_hours_scheduled: number | null
+        }
+      }
+      validate_schedule_against_pattern: {
+        Args: {
+          p_employee_id: string
+          p_date: string
+        }
+        Returns: boolean
       }
     }
     Enums: {
-      [_ in never]: never
+      coverage_status_enum: "Under" | "Met" | "Over"
+      day_of_week_enum:
+        | "Monday"
+        | "Tuesday"
+        | "Wednesday"
+        | "Thursday"
+        | "Friday"
+        | "Saturday"
+        | "Sunday"
+      duration_category_enum: "4 hours" | "10 hours" | "12 hours"
+      employee_role_enum: "Dispatcher" | "Shift Supervisor" | "Management"
+      schedule_status_enum: "Draft" | "Published"
+      shift_pattern_type_enum: "4x10" | "3x12_1x4" | "Custom"
+      time_off_status_enum: "Pending" | "Approved" | "Declined"
+      time_off_type_enum: "Vacation" | "Sick" | "Personal" | "Training"
+      user_role_enum: "Employee" | "Manager" | "Admin"
     }
     CompositeTypes: {
       [_ in never]: never

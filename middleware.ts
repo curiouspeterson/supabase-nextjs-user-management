@@ -38,12 +38,12 @@ export async function middleware(request: NextRequest) {
 
   // If no session and trying to access protected route, redirect to login
   if (!session && !request.nextUrl.pathname.startsWith('/login')) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    return NextResponse.redirect(new URL('/login', request.nextUrl.origin))
   }
 
   // If session exists and trying to access login, redirect to home
   if (session && request.nextUrl.pathname.startsWith('/login')) {
-    return NextResponse.redirect(new URL('/', request.url))
+    return NextResponse.redirect(new URL('/', request.nextUrl.origin))
   }
 
   return response

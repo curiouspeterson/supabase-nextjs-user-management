@@ -4,8 +4,9 @@ import { useState, useCallback, useEffect } from 'react'
 import { useErrorHandler } from '@/lib/hooks/use-error-handler'
 import { useNetworkError } from '@/lib/hooks/use-network-error'
 import { rateLimiter } from '@/lib/rate-limiter'
-import { errorAnalytics } from '@/lib/error-analytics'
+import { errorAnalytics, AnalyticsError } from '@/lib/error-analytics'
 import { AppError } from '@/lib/errors'
+import { ErrorSeverity, ErrorCategory, ErrorRecoveryStrategy } from '@/lib/types/error'
 
 interface ErrorState {
   hasError: boolean
@@ -47,6 +48,22 @@ export function useErrorMonitoring(componentName: string, config: MonitorConfig 
     operation: () => Promise<T>,
     context: string = 'unknown'
   ): Promise<T> => {
+    // Helper function to transform AppError to AnalyticsError
+    const transformError = (error: AppError, context: string): AnalyticsError => {
+      return {
+        ...error,
+        severity: error.severity || ErrorSeverity.HIGH,
+        category: error.category || ErrorCategory.UNKNOWN,
+        metadata: {
+          component: componentName,
+          context,
+          timestamp: new Date().toISOString(),
+          ...error
+        },
+        recoveryStrategy: error.recoveryStrategy || ErrorRecoveryStrategy.RETRY
+      }
+    }
+
     try {
       // Check rate limit if key provided
       if (config.rateLimitKey) {
@@ -63,7 +80,8 @@ export function useErrorMonitoring(componentName: string, config: MonitorConfig 
     } catch (error) {
       // Track error metrics
       if (error instanceof AppError) {
-        errorAnalytics.trackError(error, `${componentName}.${context}`)
+        const analyticsError = transformError(error, context)
+        errorAnalytics.trackError(analyticsError)
       }
 
       // Update error state

@@ -2,13 +2,12 @@
 
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { resetGlobalError } from './actions';
 
 export default function Error({
   error,
-  reset,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
 }) {
   useEffect(() => {
     // Log the error to an error reporting service
@@ -31,7 +30,7 @@ export default function Error({
           <div className="flex justify-center gap-4">
             <Button
               variant="default"
-              onClick={() => reset()}
+              onClick={() => resetGlobalError()}
             >
               Try again
             </Button>

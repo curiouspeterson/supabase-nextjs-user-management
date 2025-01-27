@@ -8,6 +8,12 @@ import { Employee } from '@/utils/scheduling/types'
 import { format } from 'date-fns'
 import { toast } from '@/components/ui/use-toast'
 
+interface EmployeeWithProfile extends Employee {
+  profiles: {
+    full_name: string | null
+  }
+}
+
 interface FormData {
   employeeId: string
   shiftId: string
@@ -26,7 +32,7 @@ export default function NewSchedulePage() {
     scheduleStatus: 'Draft'
   })
   
-  const [employees, setEmployees] = useState<Employee[]>([])
+  const [employees, setEmployees] = useState<EmployeeWithProfile[]>([])
   const [shifts, setShifts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -39,8 +45,13 @@ export default function NewSchedulePage() {
         setLoading(true);
         const { data, error } = await supabase
           .from('employees')
-          .select('*')
-          .order('full_name');
+          .select(`
+            *,
+            profiles (
+              full_name
+            )
+          `)
+          .order('profiles(full_name)');
 
         if (error) throw error;
         setEmployees(data || []);
@@ -85,7 +96,7 @@ export default function NewSchedulePage() {
     }
 
     fetchData()
-  }, [])
+  }, [supabase])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -166,7 +177,7 @@ export default function NewSchedulePage() {
               <option value="">Select an employee</option>
               {employees.map(employee => (
                 <option key={employee.id} value={employee.id}>
-                  {employee.full_name}
+                  {employee.profiles?.full_name || 'Unnamed'}
                 </option>
               ))}
             </select>

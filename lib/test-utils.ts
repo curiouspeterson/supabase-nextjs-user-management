@@ -1,6 +1,7 @@
 import type { Toast } from '@/types/toast'
 import type { SupabaseClient, User, Session } from '@supabase/supabase-js'
-import { ErrorSeverity, ErrorCategory, AppError } from './error-analytics'
+import { ErrorSeverity, ErrorCategory, ErrorRecoveryStrategy } from './types/error'
+import { AppError } from './errors'
 import { Employee, Shift, Schedule } from '@/services/scheduler/types'
 
 /**
@@ -38,7 +39,16 @@ export const createMockError = (
   category: ErrorCategory = ErrorCategory.UNKNOWN,
   metadata: Record<string, any> = {}
 ): AppError => {
-  return new AppError(message, code, severity, category, metadata)
+  return new AppError(
+    message,
+    code,
+    500, // statusCode
+    true, // shouldLog
+    severity,
+    category,
+    metadata,
+    ErrorRecoveryStrategy.RETRY
+  )
 }
 
 /**
@@ -135,11 +145,17 @@ export const createDefaultMockClient = (role: string = 'employee'): Partial<Supa
       onAuthStateChange: jest.fn((callback) => {
         callback('SIGNED_IN', mockSession)
         return {
-          data: { subscription: { unsubscribe: jest.fn() } }
+          data: {
+            subscription: {
+              id: 'mock-subscription-id',
+              unsubscribe: jest.fn(),
+              callback
+            }
+          }
         }
       }),
       signOut: jest.fn().mockResolvedValue({ error: null }),
-    },
+    } as unknown as SupabaseClient['auth'],
     from: jest.fn().mockReturnValue({
       select: jest.fn().mockReturnValue({
         eq: jest.fn().mockReturnValue({
@@ -319,12 +335,10 @@ export const mockAuthUser = (overrides = {}) => ({
 
 export const mockEmployee = (overrides?: Partial<Employee>): Employee => ({
   id: 'test-employee-1',
-  first_name: 'John',
-  last_name: 'Doe',
-  email: 'john.doe@example.com',
+  user_id: 'test-user-1',
   employee_role: 'Dispatcher',
-  allow_overtime: false,
-  max_weekly_hours: 40,
+  weekly_hours_scheduled: 40,
+  default_shift_type_id: 'test-shift-type-1',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   ...overrides
@@ -332,11 +346,11 @@ export const mockEmployee = (overrides?: Partial<Employee>): Employee => ({
 
 export const mockShift = (overrides?: Partial<Shift>): Shift => ({
   id: 'test-shift-1',
-  name: 'Day Shift',
+  shift_type_id: 'test-shift-type-1',
   start_time: '07:00:00',
   end_time: '17:00:00',
   duration_hours: 10,
-  is_overnight: false,
+  duration_category: '10 hours',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   ...overrides
@@ -347,6 +361,7 @@ export const mockSchedule = (overrides?: Partial<Schedule>): Schedule => ({
   employee_id: 'test-employee-1',
   shift_id: 'test-shift-1',
   date: '2025-01-01',
+  status: 'Draft',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   ...overrides

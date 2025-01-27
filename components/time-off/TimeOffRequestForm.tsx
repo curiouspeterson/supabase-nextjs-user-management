@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, FormEvent, useRef } from 'react'
+import { useState, FormEvent, useRef, useEffect } from 'react'
 import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,12 +20,18 @@ interface TimeOffRequestFormProps {
 }
 
 interface TimeOffRequest {
+  id: string
+  employee_id: string
   start_date: string
   end_date: string
-  type: string
+  type: 'Vacation' | 'Sick' | 'Personal' | 'Training'
   notes?: string
-  user_id: string
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'Pending' | 'Approved' | 'Declined'
+  reviewed_by?: string
+  reviewed_at?: string
+  submitted_at: string
+  created_at: string
+  updated_at: string
 }
 
 interface FormErrors {
@@ -35,19 +41,74 @@ interface FormErrors {
   general?: string
 }
 
+const TIME_OFF_TYPES = [
+  { value: 'Vacation', label: 'Vacation' },
+  { value: 'Sick', label: 'Sick Leave' },
+  { value: 'Personal', label: 'Personal Leave' },
+  { value: 'Training', label: 'Training' }
+] as const;
+
+type TimeOffType = typeof TIME_OFF_TYPES[number]['value'];
+
 export default function TimeOffRequestForm({ userId }: TimeOffRequestFormProps) {
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errors, setErrors] = useState<FormErrors>({})
   const [formData, setFormData] = useState<Partial<TimeOffRequest>>({
-    type: '',
     notes: ''
   })
   const [isSelectOpen, setIsSelectOpen] = useState(false)
+  const [employeeId, setEmployeeId] = useState<string>()
   const { user } = useUser()
   const { handleError } = useErrorHandler()
   const supabase = createClient()
   const formRef = useRef<HTMLFormElement>(null)
+
+  const MAX_VACATION_DAYS = 20; // Maximum vacation days per year
+
+  useEffect(() => {
+    const fetchEmployeeId = async () => {
+      const currentUserId = userId || user?.id;
+      if (!currentUserId) {
+        console.error('No user ID available');
+        toast({
+          title: 'Error',
+          description: 'User not found. Please sign in again.',
+          variant: 'destructive'
+        });
+        return;
+      }
+      
+      const { data: employee, error } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('user_id', currentUserId)
+        .single();
+
+      if (error) {
+        console.error('Error fetching employee:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to fetch employee record. Please try again later.',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      if (employee) {
+        setEmployeeId(employee.id);
+      } else {
+        console.error('No employee record found');
+        toast({
+          title: 'Error',
+          description: 'Employee record not found. Please contact your administrator.',
+          variant: 'destructive'
+        });
+      }
+    };
+
+    fetchEmployeeId();
+  }, [userId, user?.id, supabase, toast]);
 
   const validateRequest = (request: Partial<TimeOffRequest>): FormErrors => {
     const errors: FormErrors = {}
@@ -80,121 +141,154 @@ export default function TimeOffRequestForm({ userId }: TimeOffRequestFormProps) 
     return errors
   }
 
-  const checkVacationDays = async (start_date: string, end_date: string, type: string) => {
-    if (type.toLowerCase() !== 'vacation') return
+  const checkVacationDays = async (start_date: string, end_date: string, type: TimeOffType) => {
+    if (type !== 'Vacation') return;
+    if (!employeeId) {
+      throw new ValidationError('Employee record not found');
+    }
 
-    const start = new Date(start_date)
-    const end = new Date(end_date)
-    const diffTime = Math.abs(end.getTime() - start.getTime())
-    const requestedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    const start = new Date(start_date);
+    const end = new Date(end_date);
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    const requestedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
+    const yearStart = new Date(start.getFullYear(), 0, 1);
+    const yearEnd = new Date(start.getFullYear(), 11, 31);
 
     const { data: vacationData, error } = await supabase
-      .from('vacation_days')
-      .select('total_days, used_days')
-      .eq('user_id', userId || user?.id)
-      .single()
+      .from('time_off_requests')
+      .select('start_date, end_date')
+      .eq('employee_id', employeeId)
+      .eq('type', 'Vacation')
+      .eq('status', 'Approved')
+      .gte('start_date', yearStart.toISOString())
+      .lte('end_date', yearEnd.toISOString());
 
     if (error) {
-      throw new DatabaseError('Failed to check vacation days')
+      throw new DatabaseError('Failed to check vacation days');
     }
 
-    if (vacationData && vacationData.used_days + requestedDays > vacationData.total_days) {
-      throw new ValidationError('Insufficient vacation days remaining')
+    let usedDays = 0;
+    if (vacationData) {
+      for (const request of vacationData) {
+        const reqStart = new Date(request.start_date);
+        const reqEnd = new Date(request.end_date);
+        const reqDiffTime = Math.abs(reqEnd.getTime() - reqStart.getTime());
+        usedDays += Math.ceil(reqDiffTime / (1000 * 60 * 60 * 24)) + 1;
+      }
     }
-  }
+
+    if (usedDays + requestedDays > MAX_VACATION_DAYS) {
+      throw new ValidationError(`Insufficient vacation days remaining. You have used ${usedDays} days out of ${MAX_VACATION_DAYS} annual days.`);
+    }
+  };
 
   const checkOverlappingRequests = async (start_date: string, end_date: string) => {
-    const currentUserId = userId || user?.id
-    if (!currentUserId) {
-      throw new ValidationError('User not found')
+    if (!employeeId) {
+      throw new ValidationError('Employee record not found');
     }
 
     const { data: existingRequests, error } = await supabase
       .from('time_off_requests')
       .select('start_date, end_date')
-      .eq('user_id', currentUserId)
-      .or(`start_date.gte.${start_date},end_date.lte.${end_date}`)
+      .eq('employee_id', employeeId)
+      .or(`start_date.gte.${start_date},end_date.lte.${end_date}`);
 
     if (error) {
-      throw new DatabaseError('Failed to check existing time off requests')
+      throw new DatabaseError('Failed to check existing time off requests');
     }
 
     if (existingRequests && existingRequests.length > 0) {
-      throw new ValidationError('You already have time off scheduled during this period')
+      throw new ValidationError('You already have time off scheduled during this period');
     }
-  }
+  };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
+    e.preventDefault();
 
-    // Set submitting state immediately
-    setIsSubmitting(true)
-    setErrors({})
+    if (!employeeId) {
+      toast({
+        title: 'Error',
+        description: 'Employee record not found',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrors({});
 
     try {
-      // Validate form data
-      const validationErrors = validateRequest(formData)
+      const validationErrors = validateRequest(formData);
       if (Object.keys(validationErrors).length > 0) {
-        const firstError = Object.values(validationErrors)[0]
-        setErrors(validationErrors)
-        setIsSubmitting(false)
+        const firstError = Object.values(validationErrors)[0];
+        setErrors(validationErrors);
+        setIsSubmitting(false);
         toast({
           title: 'Error',
           description: firstError,
           variant: 'destructive'
-        })
-        return
+        });
+        return;
       }
 
-      // Check vacation days if applicable
-      if (formData.start_date && formData.end_date && formData.type) {
-        await checkVacationDays(formData.start_date, formData.end_date, formData.type)
+      // Check that all required fields are present
+      if (!formData.start_date || !formData.end_date || !formData.type) {
+        toast({
+          title: 'Error',
+          description: 'Please fill in all required fields',
+          variant: 'destructive'
+        });
+        setIsSubmitting(false);
+        return;
       }
+
+      // Validate vacation days if applicable
+      await checkVacationDays(formData.start_date, formData.end_date, formData.type as TimeOffType);
 
       // Check for overlapping requests
-      if (formData.start_date && formData.end_date) {
-        await checkOverlappingRequests(formData.start_date, formData.end_date)
-      }
+      await checkOverlappingRequests(formData.start_date, formData.end_date);
 
-      // Submit form data
+      // Prepare the request data with all required fields
+      const requestData = {
+        employee_id: employeeId,
+        start_date: formData.start_date,
+        end_date: formData.end_date,
+        type: formData.type as TimeOffType,
+        status: 'Pending' as const,
+        notes: formData.notes || null
+      };
+
       const { error: submitError } = await supabase
         .from('time_off_requests')
-        .insert([
-          {
-            ...formData,
-            user_id: userId || user?.id,
-            status: 'pending'
-          }
-        ])
+        .insert(requestData);
 
       if (submitError) {
-        throw new DatabaseError('Unable to submit request. Please try again later.')
+        throw new DatabaseError('Unable to submit request. Please try again later.');
       }
 
       toast({
         title: 'Success',
         description: 'Time off request submitted successfully'
-      })
-      handleReset()
+      });
+      handleReset();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to submit time off request'
-      setErrors(prev => ({ ...prev, general: message }))
-      setIsSubmitting(false)
+      const message = err instanceof Error ? err.message : 'Failed to submit time off request';
+      setErrors(prev => ({ ...prev, general: message }));
+      setIsSubmitting(false);
       toast({
         title: 'Error',
         description: message,
         variant: 'destructive'
-      })
-      handleError(err, 'TimeOffRequestForm.handleSubmit')
+      });
+      handleError(err, 'TimeOffRequestForm.handleSubmit');
     } finally {
-      // Always reset submitting state
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   const handleReset = () => {
     setFormData({
-      type: '',
       notes: ''
     })
     setErrors({})
@@ -277,27 +371,26 @@ export default function TimeOffRequestForm({ userId }: TimeOffRequestFormProps) 
             aria-expanded={isSelectOpen}
             role="combobox"
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-            value={formData.type}
+            value={formData.type || ''}
             onChange={(e) => {
-              setFormData({ ...formData, type: e.target.value })
+              const value = e.target.value as TimeOffType;
+              setFormData(prev => ({ ...prev, type: value }));
               if (errors.type) {
-                setErrors(prev => ({ ...prev, type: undefined }))
+                setErrors(prev => ({ ...prev, type: undefined }));
               }
             }}
-            onFocus={() => setIsSelectOpen(true)}
-            onBlur={() => setIsSelectOpen(false)}
           >
-            <option value="">Select type</option>
-            <option value="vacation">Vacation</option>
-            <option value="sick">Sick Leave</option>
-            <option value="personal">Personal Leave</option>
+            <option value="" disabled>Select type</option>
+            {TIME_OFF_TYPES.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
           </select>
+          {errors.type && (
+            <div id="type-error" role="alert" aria-live="polite" className="text-sm text-red-500">
+              {errors.type}
+            </div>
+          )}
         </div>
-        {errors.type && (
-          <div role="alert" aria-live="polite" className="text-sm text-red-500">
-            {errors.type}
-          </div>
-        )}
       </div>
       <div className="space-y-2">
         <Label htmlFor="notes">Notes</Label>

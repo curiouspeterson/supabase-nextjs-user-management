@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 
-type Role = 'manager' | 'supervisor' | 'employee';
+type Role = 'Manager' | 'Admin' | 'Employee';
 
 interface UseRoleAccessReturn {
   hasAccess: boolean;

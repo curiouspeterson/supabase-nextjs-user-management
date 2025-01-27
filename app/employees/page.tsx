@@ -8,8 +8,12 @@ import { EmployeeDialog } from './employee-dialog'
 import { DeleteDialog } from './delete-dialog'
 
 type Employee = Database['public']['Tables']['employees']['Row'] & {
-  profiles: Pick<Database['public']['Tables']['profiles']['Row'], 'full_name' | 'avatar_url' | 'updated_at'>
+  profiles: Pick<
+    Database['public']['Tables']['profiles']['Row'], 
+    'full_name' | 'avatar_url' | 'updated_at' | 'username'
+  >
   shift_types?: Pick<Database['public']['Tables']['shift_types']['Row'], 'name' | 'description'>
+  email?: string
 }
 
 export default function EmployeesPage() {
@@ -58,10 +62,13 @@ export default function EmployeesPage() {
           user_role,
           weekly_hours_scheduled,
           default_shift_type_id,
+          allow_overtime,
+          max_weekly_hours,
           profiles:profiles!left (
             full_name,
             avatar_url,
-            updated_at
+            updated_at,
+            username
           ),
           shift_types:shift_types!left (
             name,
@@ -90,7 +97,7 @@ export default function EmployeesPage() {
         email: userEmailMap.get(employee.id) || ''
       })) || []
 
-      setEmployees(employeesWithEmail)
+      setEmployees(employeesWithEmail as Employee[])
     } catch (err) {
       setError('An error occurred while loading the page')
       console.error('Error in fetchData:', err)

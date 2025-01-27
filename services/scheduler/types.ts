@@ -1,6 +1,6 @@
 import { Database } from '@/types/supabase';
 
-export type ShiftDurationCategory = '4 hours' | '8 hours' | '10 hours' | '12 hours';
+export type ShiftDurationCategory = '4 hours' | '8 hours' | '10 hours' | '12 hours' | null;
 export type EmployeeRole = 'Dispatcher' | 'Shift Supervisor' | 'Manager';
 export type ScheduleStatus = 'Draft' | 'Published' | 'Approved';
 export type TimeOffType = 'Vacation' | 'Sick Leave' | 'Training';
@@ -34,10 +34,11 @@ export interface Employee {
   employee_role: EmployeeRole;
   weekly_hours_scheduled: number;
   default_shift_type_id: string | null;
-  allow_overtime: boolean;
-  max_weekly_hours: number;
   created_at: string;
   updated_at: string;
+  full_name?: string;
+  avatar_url?: string | null;
+  username?: string | null;
 }
 
 export interface ShiftPattern {

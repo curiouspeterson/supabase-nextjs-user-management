@@ -32,12 +32,12 @@ interface TimeOffRequest {
   employee_id: string
   start_date: string
   end_date: string
-  reason: string
+  type: 'Vacation' | 'Sick' | 'Personal' | 'Training'
   status: RequestStatus
-  employee: {
-    id: string
-    user_role: string
-  }
+  notes: string
+  created_at: string
+  updated_at: string
+  employee_role: 'Dispatcher' | 'Management' | 'Shift Supervisor'
 }
 
 function getStatusVariant(status: RequestStatus) {
@@ -78,41 +78,6 @@ export default function TimeOffPage() {
         }
 
         console.log('Debug: Starting request fetch for user:', user.id)
-        
-        // Check available tables
-        const { data: tables, error: tablesError } = await supabase
-          .from('information_schema.tables')
-          .select('table_name')
-          .eq('table_schema', 'public')
-        
-        console.log('Debug: Available tables:', tables)
-        if (tablesError) {
-          console.error('Tables query error:', tablesError)
-        }
-        
-        // First try just the base table
-        const { data: baseData, error: baseError } = await supabase
-          .from('time_off_requests')
-          .select('*')
-        
-        if (baseError) {
-          console.error('Base query error:', baseError)
-          throw baseError
-        }
-
-        console.log('Debug: Base table data:', baseData)
-        
-        // Try querying employees table directly
-        const { data: employeesData, error: employeesError } = await supabase
-          .from('employees')
-          .select('*')
-          .eq('id', user.id)
-          .single()
-        
-        console.log('Debug: Employee data:', employeesData)
-        if (employeesError) {
-          console.error('Employees query error:', employeesError)
-        }
         
         // Use the stored function
         const { data, error: fetchError } = await supabase
@@ -186,7 +151,7 @@ export default function TimeOffPage() {
                 <Card key={request.id} role="article">
                   <CardHeader>
                     <CardTitle>
-                      Employee ID: {request.employee?.id}
+                      Employee ID: {request.employee_id}
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
                       {new Date(request.start_date).toLocaleDateString()} -{' '}
@@ -194,7 +159,7 @@ export default function TimeOffPage() {
                     </p>
                   </CardHeader>
                   <CardContent>
-                    <p>{request.reason}</p>
+                    <p>{request.notes}</p>
                     <div className="mt-4">
                       <Badge variant={getStatusVariant(request.status)}>
                         {request.status}

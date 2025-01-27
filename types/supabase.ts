@@ -18,6 +18,9 @@ export type Database = {
           id: string
           period_id: string
           updated_at: string
+          required_coverage: number
+          supervisor_count: number
+          overtime_hours: number
         }
         Insert: {
           actual_coverage?: number
@@ -27,6 +30,9 @@ export type Database = {
           id?: string
           period_id: string
           updated_at?: string
+          required_coverage?: number
+          supervisor_count?: number
+          overtime_hours?: number
         }
         Update: {
           actual_coverage?: number
@@ -36,6 +42,9 @@ export type Database = {
           id?: string
           period_id?: string
           updated_at?: string
+          required_coverage?: number
+          supervisor_count?: number
+          overtime_hours?: number
         }
         Relationships: [
           {
@@ -390,6 +399,42 @@ export type Database = {
           status?: Database["public"]["Enums"]["time_off_status_enum"]
           submitted_at?: string
           type?: Database["public"]["Enums"]["time_off_type_enum"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      scheduler_metrics: {
+        Row: {
+          id: string
+          coverage_deficit: number
+          overtime_violations: number
+          pattern_errors: number
+          schedule_generation_time: number
+          last_run_status: 'success' | 'warning' | 'error'
+          error_message: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          coverage_deficit?: number
+          overtime_violations?: number
+          pattern_errors?: number
+          schedule_generation_time?: number
+          last_run_status?: 'success' | 'warning' | 'error'
+          error_message?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          coverage_deficit?: number
+          overtime_violations?: number
+          pattern_errors?: number
+          schedule_generation_time?: number
+          last_run_status?: 'success' | 'warning' | 'error'
+          error_message?: string | null
+          created_at?: string
           updated_at?: string
         }
         Relationships: []

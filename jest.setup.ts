@@ -343,45 +343,40 @@ jest.mock('next/navigation', () => ({
 // Mock next/image
 jest.mock('next/image', () => ({
   __esModule: true,
-  default: function Image({ src, alt, ...props }: any) {
+  default: function Image({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={src} alt={alt} {...props} />;
+    return React.createElement('img', { src, alt, ...props });
   },
 }));
 
-// Mock console methods to ignore certain warnings
-const originalConsole = { ...console };
-const ignoredMessages = [
-  'Not implemented: HTMLFormElement.prototype.requestSubmit',
-  'Warning: An update to',
-  'inside a test was not wrapped in act',
-  'Error submitting time off request:',
-  'Invalid prop',
-  'componentWillReceiveProps',
-];
+// Setup console mocking in an IIFE to avoid global scope pollution
+(() => {
+  type ConsoleMethod = keyof Pick<Console, 'error' | 'warn' | 'info' | 'log'>;
+  
+  const consoleRef = { ...console } as Console;
+  const ignoredMessages = [
+    'Not implemented: HTMLFormElement.prototype.requestSubmit',
+    'Warning: An update to',
+    'Warning: Cannot update a component',
+    'Warning: componentWillReceiveProps',
+    'Warning: componentWillMount'
+  ];
 
-beforeAll(() => {
-  global.console = {
-    ...console,
-    error: jest.fn((...args) => {
-      if (typeof args[0] === 'string' && ignoredMessages.some(msg => args[0].includes(msg))) {
-        return;
+  // Override console methods
+  const mockConsole = (method: ConsoleMethod) => {
+    const originalMethod = consoleRef[method];
+    // Preserve the original method's type signature
+    (console[method] as typeof originalMethod) = (...args: any[]) => {
+      const message = args.join(' ');
+      if (!ignoredMessages.some(ignored => message.includes(ignored))) {
+        originalMethod.apply(console, args);
       }
-      originalConsole.error.call(console, ...args);
-    }),
-    warn: jest.fn((...args) => {
-      if (typeof args[0] === 'string' && ignoredMessages.some(msg => args[0].includes(msg))) {
-        return;
-      }
-      originalConsole.warn.call(console, ...args);
-    }),
-    log: jest.fn(),
+    };
   };
-});
 
-afterAll(() => {
-  global.console = originalConsole;
-});
+  // Apply mocks to relevant console methods
+  (['error', 'warn', 'info', 'log'] as ConsoleMethod[]).forEach(mockConsole);
+})();
 
 // Mock file with native Blob
 class MockFile extends Blob {
@@ -460,35 +455,34 @@ class MockHeaders {
 }
 
 // Mock FormData
-class MockFormData {
-  private data: Map<string, FormDataEntryValue[]> = new Map();
+class MockFormData implements FormData {
+  private data: Map<string, FormDataEntryValue[]>;
+
+  constructor(form?: HTMLFormElement) {
+    this.data = new Map();
+  }
 
   append(name: string, value: string | Blob, fileName?: string): void {
     const values = this.data.get(name) || [];
-    if (value instanceof Blob && fileName) {
-      const file = new File([value], fileName, { type: value.type });
+    if (value instanceof Blob) {
+      const file = new File([value], fileName || 'blob', { 
+        type: value.type,
+        lastModified: Date.now()
+      });
       values.push(file);
     } else {
-      values.push(value as string);
+      values.push(value);
     }
     this.data.set(name, values);
   }
 
-  set(name: string, value: string | Blob, fileName?: string): void {
-    if (value instanceof Blob && fileName) {
-      const file = new File([value], fileName, { type: value.type });
-      this.data.set(name, [file]);
-    } else {
-      this.data.set(name, [value as string]);
-    }
+  delete(name: string): void {
+    this.data.delete(name);
   }
 
   get(name: string): FormDataEntryValue | null {
     const values = this.data.get(name);
-    if (!values || values.length === 0) {
-      return null;
-    }
-    return values[0];
+    return values?.[0] || null;
   }
 
   getAll(name: string): FormDataEntryValue[] {
@@ -499,12 +493,26 @@ class MockFormData {
     return this.data.has(name);
   }
 
-  delete(name: string): void {
-    this.data.delete(name);
+  set(name: string, value: string | Blob, fileName?: string): void {
+    if (value instanceof Blob) {
+      const file = new File([value], fileName || 'blob', {
+        type: value.type,
+        lastModified: Date.now()
+      });
+      this.data.set(name, [file]);
+    } else {
+      this.data.set(name, [value]);
+    }
+  }
+
+  forEach(callbackfn: (value: FormDataEntryValue, key: string, parent: FormData) => void): void {
+    Array.from(this.data.entries()).forEach(([key, values]) => {
+      values.forEach(value => callbackfn(value, key, this));
+    });
   }
 
   *entries(): IterableIterator<[string, FormDataEntryValue]> {
-    for (const [key, values] of this.data.entries()) {
+    for (const [key, values] of Array.from(this.data.entries())) {
       for (const value of values) {
         yield [key, value];
       }
@@ -518,14 +526,6 @@ class MockFormData {
   *values(): IterableIterator<FormDataEntryValue> {
     for (const values of this.data.values()) {
       yield* values;
-    }
-  }
-
-  forEach(callbackfn: (value: FormDataEntryValue, key: string, parent: FormData) => void): void {
-    for (const [key, values] of this.data.entries()) {
-      for (const value of values) {
-        callbackfn(value, key, this as unknown as FormData);
-      }
     }
   }
 

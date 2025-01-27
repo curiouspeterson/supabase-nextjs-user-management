@@ -9,7 +9,8 @@ import { useRoleAccess, RoleGuard } from '@/hooks/useRoleAccess'
 
 export default function SchedulesPage() {
   const router = useRouter()
-  const { canGenerateSchedule, canCreateSchedule } = useRoleAccess()
+  const { hasAccess: canGenerateSchedule } = useRoleAccess(['Admin', 'Manager'])
+  const { hasAccess: canCreateSchedule } = useRoleAccess(['Admin', 'Manager'])
   const [schedules, setSchedules] = useState<ScheduleWithRelations[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -91,7 +92,7 @@ export default function SchedulesPage() {
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Schedule Management</h1>
         <div className="flex gap-4">
-          <RoleGuard allowedRoles={['admin', 'manager']}>
+          <RoleGuard requiredRoles={['Admin', 'Manager']}>
             <button
               onClick={handleGenerateSchedule}
               disabled={generating || !canGenerateSchedule}
@@ -107,7 +108,7 @@ export default function SchedulesPage() {
               Create Manual Schedule
             </button>
           </RoleGuard>
-          <RoleGuard allowedRoles={['admin', 'manager']}>
+          <RoleGuard requiredRoles={['Admin', 'Manager']}>
             <button
               onClick={() => router.push('/schedules/stats')}
               className="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
@@ -188,7 +189,7 @@ export default function SchedulesPage() {
                       key={schedule.id}
                       className="text-sm bg-blue-100 p-1 rounded mb-1"
                     >
-                      {schedule.employees.full_name} - {schedule.shifts.shift_types.name}
+                      {schedule.employees.profiles?.full_name || 'Unnamed'} - {schedule.shifts.shift_types.name}
                     </div>
                   ))}
                 </div>

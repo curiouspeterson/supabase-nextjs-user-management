@@ -18,12 +18,14 @@ import { ShiftTemplateDialog } from '@/components/shifts/shift-template-dialog'
 import { signOut } from '../login/actions'
 import { useToast } from '@/components/ui/use-toast'
 
+type DurationCategory = "4 hours" | "10 hours" | "12 hours";
+
 interface Shift {
   id: string
   start_time: string
   end_time: string
   duration_hours: number
-  duration_category: string
+  duration_category: DurationCategory | null
   shift_type_id: string
 }
 

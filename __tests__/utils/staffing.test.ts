@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { getStaffingRequirement, checkStaffingRequirements } from '@/utils/schedule'
+import { getStaffingRequirement, checkStaffingRequirements } from '@/utils/schedule/actions'
 import { mockSupabaseClient, mockCreateClient } from '../utils/test-utils'
 
 jest.mock('@/utils/supabase/client', () => ({

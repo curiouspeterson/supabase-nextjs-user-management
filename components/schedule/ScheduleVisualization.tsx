@@ -4,13 +4,20 @@ import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { ScheduleViewProps, ViewMode } from './types';
 import { Schedule } from '@/services/scheduler/types';
-import { ShiftBlock } from './ShiftBlock';
-import { CoverageIndicator } from './CoverageIndicator';
-import { TimeSlot } from './TimeSlot';
-import { ScheduleControls } from './ScheduleControls';
+import ShiftBlock from './ShiftBlock';
+import CoverageIndicator from './CoverageIndicator';
+import TimeSlot from './TimeSlot';
+import ScheduleControls from './ScheduleControls';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+interface ScheduleVisualizationProps extends ScheduleViewProps {
+  startDate: Date;
+  schedules: Schedule[];
+  shifts: any[];
+  onRefresh: () => Promise<void>;
+}
 
 export function ScheduleVisualization({
   startDate,
@@ -21,10 +28,12 @@ export function ScheduleVisualization({
   coverage,
   onAssignShift,
   onRemoveShift,
-  isEditable = false
-}: ScheduleViewProps) {
+  isEditable = false,
+  onRefresh
+}: ScheduleVisualizationProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [currentDate, setCurrentDate] = useState(startDate);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Calculate view range based on mode
   const viewRange = useMemo(() => {
@@ -65,16 +74,21 @@ export function ScheduleVisualization({
     return map;
   }, [visibleSchedules, shifts]);
 
-  const handleRefresh = useCallback(() => {
-    // Trigger a refresh of the schedule data
-    // This would typically be handled by the parent component
-  }, []);
+  const handleRefresh = async () => {
+    setIsLoading(true);
+    try {
+      await onRefresh();
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="flex flex-col w-full h-full">
         <ScheduleControls
           viewMode={viewMode}
+          currentDate={currentDate}
           onViewModeChange={setViewMode}
           onDateChange={setCurrentDate}
           onRefresh={handleRefresh}

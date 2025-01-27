@@ -2,13 +2,13 @@
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { resetShiftsError } from './actions'
+import { Button } from '@/components/ui/button'
 
 export default function Error({
   error,
-  reset,
 }: {
   error: Error & { digest?: string }
-  reset: () => void
 }) {
   const router = useRouter()
 
@@ -30,18 +30,18 @@ export default function Error({
           {error.message}
         </p>
         <div className="mt-4 space-x-4">
-          <button
-            onClick={() => reset()}
-            className="rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
+          <Button
+            onClick={() => resetShiftsError()}
+            variant="default"
           >
             Try again
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => router.replace('/login')}
-            className="rounded bg-gray-500 px-4 py-2 text-white hover:bg-gray-600"
+            variant="secondary"
           >
             Back to Login
-          </button>
+          </Button>
         </div>
       </div>
     </div>

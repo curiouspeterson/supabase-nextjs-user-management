@@ -3,13 +3,12 @@
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { AlertCircle } from 'lucide-react';
+import { resetPatternsError } from './actions';
 
 export default function PatternsError({
   error,
-  reset,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
 }) {
   useEffect(() => {
     console.error('Patterns page error:', error);
@@ -23,7 +22,7 @@ export default function PatternsError({
         <p className="text-muted-foreground">
           {error.message || 'Failed to load shift patterns. Please try again.'}
         </p>
-        <Button onClick={reset}>Try again</Button>
+        <Button onClick={() => resetPatternsError()}>Try again</Button>
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { createBrowserClient } from '@supabase/ssr'
-import { Database } from '@/types/supabase'
+import { type Database } from '@/app/database.types'
+import { CookieOptions } from '@supabase/ssr'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -13,17 +14,17 @@ export const createClient = () => {
       SUPABASE_ANON_KEY,
       {
         cookies: {
-          get(name: string) {
+          get(key: string) {
             const cookie = document.cookie
               .split('; ')
-              .find((row) => row.startsWith(`${name}=`))
-            return cookie ? cookie.split('=')[1] : undefined
+              .find((row) => row.startsWith(`${key}=`))
+            return cookie ? decodeURIComponent(cookie.split('=')[1]) : ''
           },
-          set(name: string, value: string, options: { path?: string; domain?: string; sameSite?: 'lax' | 'strict' | 'none'; secure?: boolean }) {
-            document.cookie = `${name}=${value}; path=${options.path || '/'}${options.domain ? `; domain=${options.domain}` : ''}${options.sameSite ? `; samesite=${options.sameSite}` : ''}${options.secure ? '; secure' : ''}`
+          set(key: string, value: string, options: CookieOptions) {
+            document.cookie = `${key}=${encodeURIComponent(value)}; path=${options.path || '/'}${options.domain ? `; domain=${options.domain}` : ''}${options.sameSite ? `; samesite=${options.sameSite}` : ''}${options.secure ? '; secure' : ''}`
           },
-          remove(name: string, options: { path?: string; domain?: string }) {
-            document.cookie = `${name}=; path=${options.path || '/'}${options.domain ? `; domain=${options.domain}` : ''}; expires=Thu, 01 Jan 1970 00:00:01 GMT`
+          remove(key: string, options: CookieOptions) {
+            document.cookie = `${key}=; path=${options.path || '/'}${options.domain ? `; domain=${options.domain}` : ''}; expires=Thu, 01 Jan 1970 00:00:01 GMT`
           }
         }
       }

@@ -17,7 +17,7 @@ const customJestConfig = {
     '^@/types/(.*)$': '<rootDir>/types/$1',
   },
   transform: {
-    '^.+\\.(t|j)sx?$': ['babel-jest', { presets: ['next/babel'] }],
+    '^.+\\.(t|j)sx?$': ['babel-jest', { configFile: './babel.jest.js' }],
   },
   transformIgnorePatterns: [
     '/node_modules/(?!(@supabase|jose|lucide-react)/)',

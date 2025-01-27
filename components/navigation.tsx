@@ -29,6 +29,27 @@ export function Navigation({ className }: NavigationProps) {
   const router = useRouter()
   const { handleError } = useErrorHandler()
 
+  const getUserRole = useCallback(async () => {
+    if (!user) {
+      setRole(null)
+      return
+    }
+
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      if (error) throw error
+      setRole(profile?.role as Role)
+    } catch (error) {
+      console.error('Error fetching user role:', error)
+      setRole(null)
+    }
+  }, [user, supabase])
+
   const setupAuthListener = useCallback(async (): Promise<AuthSubscription> => {
     try {
       const {
@@ -53,28 +74,7 @@ export function Navigation({ className }: NavigationProps) {
       handleError(new AuthError('Failed to setup auth listener'), 'Navigation.setupAuthListener')
       return { unsubscribe: () => {} }
     }
-  }, [supabase, router, handleError])
-
-  const getUserRole = useCallback(async () => {
-    if (!user) {
-      setRole(null)
-      return
-    }
-
-    try {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single()
-
-      if (error) throw error
-      setRole(profile?.role as Role)
-    } catch (error) {
-      console.error('Error fetching user role:', error)
-      setRole(null)
-    }
-  }, [user, supabase])
+  }, [supabase, router, handleError, getUserRole])
 
   useEffect(() => {
     let subscription: AuthSubscription | null = null

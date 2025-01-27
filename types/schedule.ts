@@ -11,9 +11,15 @@ export interface ShiftWithType extends Shift {
   shift_types: ShiftType
 }
 
+export interface EmployeeWithProfile extends Employee {
+  profiles: {
+    full_name: string | null
+  }
+}
+
 export interface ScheduleWithRelations extends Schedule {
   shifts: ShiftWithType
-  employees: Employee
+  employees: EmployeeWithProfile
 }
 
 // Input types for API

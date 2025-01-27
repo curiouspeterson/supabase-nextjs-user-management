@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useRef } from 'react';
 import { useDrop } from 'react-dnd';
 import { format } from 'date-fns';
 import type { 
@@ -34,31 +34,43 @@ export default function TimeSlot({
   isEditable,
   onAssignShift
 }: TimeSlotProps) {
+  const ref = useRef<HTMLDivElement>(null);
   const [{ isOver, canDrop }, drop] = useDrop<
     DragItem,
     void,
     { isOver: boolean; canDrop: boolean }
   >({
     accept: 'EMPLOYEE',
-    drop: async (item) => {
+    drop: (item) => {
       if (onAssignShift) {
         // Find the most appropriate shift starting at this hour
         const availableShift = shifts.find(s => {
-          const shiftHour = parseInt(s.start_time.split(':')[0]);
+          const [shiftHour] = s.start_time.split(':').map(Number);
           return shiftHour === hour;
         });
 
         if (availableShift) {
-          await onAssignShift(item.employeeId, availableShift.id, date);
+          // Call onAssignShift and handle any errors
+          onAssignShift(item.employeeId, availableShift.id, date).catch(error => {
+            console.error('Error assigning shift:', error);
+          });
         }
       }
     },
-    canDrop: () => isEditable,
+    canDrop: () => isEditable && !schedules.some(s => {
+      const shift = shifts.find(sh => sh.id === s.shift_id);
+      if (!shift) return false;
+      const [shiftHour] = shift.start_time.split(':').map(Number);
+      return shiftHour === hour;
+    }),
     collect: (monitor) => ({
       isOver: monitor.isOver(),
       canDrop: monitor.canDrop()
     })
   });
+
+  // Connect the drop ref to our element ref
+  drop(ref);
 
   // Find schedules that start in this time slot
   const timeSlotSchedules = schedules.filter(schedule => {
@@ -71,12 +83,11 @@ export default function TimeSlot({
 
   return (
     <div
-      ref={drop}
+      ref={ref}
       className={`
-        h-16 border-b border-r p-1 relative
+        h-16 border-b border-gray-200 p-2
         ${isOver && canDrop ? 'bg-blue-50' : ''}
-        ${canDrop ? 'cursor-pointer' : ''}
-        ${isEditable ? 'hover:bg-gray-50' : ''}
+        ${canDrop ? 'bg-gray-50' : ''}
       `}
     >
       {/* Current hour indicator */}

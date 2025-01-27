@@ -35,17 +35,22 @@ import { Database } from '@/app/database.types'
 const formSchema = z.object({
   full_name: z.string().min(1, 'Full name is required'),
   email: z.string().email('Invalid email').min(1, 'Email is required'),
+  username: z.string().min(1, 'Username is required'),
   employee_role: z.enum(['Dispatcher', 'Shift Supervisor', 'Management']),
-  user_role: z.enum(['Employee', 'Manager', 'Admin']),
   weekly_hours_scheduled: z.coerce
     .number()
     .min(0, 'Hours must be 0 or greater')
     .max(168, 'Hours cannot exceed 168 per week'),
   default_shift_type_id: z.string().min(1, 'Default shift type is required'),
+  allow_overtime: z.boolean().default(false),
+  max_weekly_hours: z.number().min(0).max(168).default(40)
 })
 
 type Employee = Database['public']['Tables']['employees']['Row'] & {
-  profiles: Pick<Database['public']['Tables']['profiles']['Row'], 'full_name' | 'avatar_url' | 'updated_at'>
+  profiles: Pick<
+    Database['public']['Tables']['profiles']['Row'], 
+    'full_name' | 'avatar_url' | 'updated_at' | 'username'
+  >
   email?: string
   shift_types?: Pick<Database['public']['Tables']['shift_types']['Row'], 'name' | 'description'>
 }
@@ -67,24 +72,31 @@ export function EmployeeDialog({
 }: EmployeeDialogProps) {
   const [loading, setLoading] = useState(false)
   const [shiftTypes, setShiftTypes] = useState<Database['public']['Tables']['shift_types']['Row'][]>([])
-  const supabase = createClient()
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       full_name: employee?.profiles?.full_name || '',
       email: employee?.email || '',
+      username: employee?.profiles?.username || '',
       employee_role: (employee?.employee_role || 'Dispatcher') as 'Dispatcher' | 'Shift Supervisor' | 'Management',
-      user_role: (employee?.user_role || 'Employee') as 'Employee' | 'Manager' | 'Admin',
       weekly_hours_scheduled: employee?.weekly_hours_scheduled || 40,
       default_shift_type_id: employee?.default_shift_type_id || '',
+      allow_overtime: employee?.allow_overtime || false,
+      max_weekly_hours: employee?.max_weekly_hours || 40
     },
   })
 
   // Load available shift types
   useEffect(() => {
     async function loadShiftTypes() {
-      const { data, error } = await supabase
+      const client = createClient()
+      if (!client) {
+        alert('Error initializing Supabase client')
+        return
+      }
+
+      const { data, error } = await client
         .from('shift_types')
         .select('*')
         .order('name')
@@ -106,7 +118,7 @@ export function EmployeeDialog({
     }
     
     loadShiftTypes()
-  }, [supabase, form])
+  }, [form])
 
   // Reset form when employee changes
   useEffect(() => {
@@ -115,10 +127,12 @@ export function EmployeeDialog({
       form.reset({
         full_name: employee.profiles?.full_name || '',
         email: employee.email || '',
+        username: employee.profiles?.username || '',
         employee_role: (employee.employee_role || 'Dispatcher') as 'Dispatcher' | 'Shift Supervisor' | 'Management',
-        user_role: (employee.user_role || 'Employee') as 'Employee' | 'Manager' | 'Admin',
         weekly_hours_scheduled: employee.weekly_hours_scheduled || 40,
-        default_shift_type_id: employee.default_shift_type_id || ''
+        default_shift_type_id: employee.default_shift_type_id || '',
+        allow_overtime: employee?.allow_overtime || false,
+        max_weekly_hours: employee?.max_weekly_hours || 40
       })
     } else {
       // For new employees, try to set Day Shift as default
@@ -126,10 +140,12 @@ export function EmployeeDialog({
       form.reset({
         full_name: '',
         email: '',
+        username: '',
         employee_role: 'Dispatcher',
-        user_role: 'Employee',
         weekly_hours_scheduled: 40,
-        default_shift_type_id: dayShift?.id || ''
+        default_shift_type_id: dayShift?.id || '',
+        allow_overtime: false,
+        max_weekly_hours: 40
       })
     }
   }, [employee, form, shiftTypes])
@@ -137,16 +153,22 @@ export function EmployeeDialog({
   async function onSubmit(values: z.infer<typeof formSchema>) {
     try {
       setLoading(true)
+      const client = createClient()
+      if (!client) {
+        throw new Error('Could not initialize Supabase client')
+      }
 
       if (employee) {
         // Update existing employee
-        const { error } = await supabase.rpc('update_employee_and_profile', {
+        const { error } = await client.rpc('update_employee_and_profile', {
           p_employee_id: employee.id,
           p_full_name: values.full_name,
+          p_username: values.username,
           p_employee_role: values.employee_role,
-          p_user_role: values.user_role,
           p_weekly_hours_scheduled: values.weekly_hours_scheduled,
-          p_default_shift_type_id: values.default_shift_type_id
+          p_default_shift_type_id: values.default_shift_type_id,
+          p_allow_overtime: values.allow_overtime,
+          p_max_weekly_hours: values.max_weekly_hours
         })
 
         if (error) {
@@ -222,6 +244,23 @@ export function EmployeeDialog({
             />
             <FormField
               control={form.control}
+              name="username"
+              render={({ field }: { field: FormField }) => (
+                <FormItem>
+                  <FormLabel>Username</FormLabel>
+                  <FormControl>
+                    <Input 
+                      {...field} 
+                      disabled={mode === 'edit'}
+                      placeholder={mode === 'edit' ? 'Username cannot be changed' : 'Enter username'}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
               name="employee_role"
               render={({ field }) => (
                 <FormItem>
@@ -239,31 +278,6 @@ export function EmployeeDialog({
                       <SelectItem value="Dispatcher">Dispatcher</SelectItem>
                       <SelectItem value="Shift Supervisor">Shift Supervisor</SelectItem>
                       <SelectItem value="Management">Management</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="user_role"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>User Role</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a user role" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="Employee">Employee</SelectItem>
-                      <SelectItem value="Manager">Manager</SelectItem>
-                      <SelectItem value="Admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -312,6 +326,49 @@ export function EmployeeDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="allow_overtime"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Allow Overtime</FormLabel>
+                  <Select
+                    onValueChange={(value) => field.onChange(value === 'true')}
+                    defaultValue={field.value ? 'true' : 'false'}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select allow overtime" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="true">Yes</SelectItem>
+                      <SelectItem value="false">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="max_weekly_hours"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Max Weekly Hours</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={168}
+                      placeholder="40"
+                      {...field}
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

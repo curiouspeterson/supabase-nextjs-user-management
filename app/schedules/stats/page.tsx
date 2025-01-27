@@ -250,4 +250,4 @@ function ScheduleStatsPage() {
 }
 
 // Wrap the component with role-based access control
-export default withRoleAccess(ScheduleStatsPage, ['admin', 'manager']) 
+export default withRoleAccess(ScheduleStatsPage, ['Admin', 'Manager']) 

@@ -9,6 +9,12 @@ import { format, addMonths } from 'date-fns'
 import { withRoleAccess } from '@/hooks/useRoleAccess'
 import { toast } from '@/components/ui/use-toast'
 
+interface EmployeeWithProfile extends Employee {
+  profiles: {
+    full_name: string | null
+  }
+}
+
 interface FormData {
   startDate: string
   endDate: string
@@ -31,7 +37,7 @@ function GenerateSchedulePage() {
     maximumConsecutiveDays: 6
   })
   
-  const [employees, setEmployees] = useState<Employee[]>([])
+  const [employees, setEmployees] = useState<EmployeeWithProfile[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
@@ -44,8 +50,13 @@ function GenerateSchedulePage() {
         setLoading(true)
         const { data, error } = await supabase
           .from('employees')
-          .select('*')
-          .order('full_name')
+          .select(`
+            *,
+            profiles (
+              full_name
+            )
+          `)
+          .order('profiles(full_name)')
 
         if (error) throw error
         setEmployees(data || [])
@@ -62,7 +73,7 @@ function GenerateSchedulePage() {
     }
 
     loadEmployees()
-  }, [supabase, toast])
+  }, [supabase])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -192,7 +203,7 @@ function GenerateSchedulePage() {
                   >
                     {employees.map(employee => (
                       <option key={employee.id} value={employee.id}>
-                        {employee.full_name}
+                        {employee.profiles?.full_name || 'Unnamed'}
                       </option>
                     ))}
                   </select>
@@ -213,7 +224,7 @@ function GenerateSchedulePage() {
                   >
                     {employees.map(employee => (
                       <option key={employee.id} value={employee.id}>
-                        {employee.full_name}
+                        {employee.profiles?.full_name || 'Unnamed'}
                       </option>
                     ))}
                   </select>
@@ -333,4 +344,4 @@ function GenerateSchedulePage() {
 }
 
 // Wrap the component with role-based access control
-export default withRoleAccess(GenerateSchedulePage, ['admin', 'manager']) 
+export default withRoleAccess(GenerateSchedulePage, ['Admin', 'Manager']) 

@@ -47,6 +47,8 @@ export enum ErrorCategory {
   PERFORMANCE = 'PERFORMANCE',
   /** Security errors */
   SECURITY = 'SECURITY',
+  /** Data-related errors */
+  DATA = 'DATA',
   /** Unknown errors */
   UNKNOWN = 'UNKNOWN'
 }

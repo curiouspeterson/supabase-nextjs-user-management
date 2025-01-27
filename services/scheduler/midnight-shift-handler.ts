@@ -88,7 +88,7 @@ export class MidnightShiftHandler {
         if (!coverage.has(segment.date)) {
           coverage.set(segment.date, {
             date: segment.date,
-            periods: new Map()
+            periods: {}
           });
         }
 
@@ -115,18 +115,16 @@ export class MidnightShiftHandler {
           if (shiftStart < reqEnd && shiftEnd > reqStart) {
             // Periods overlap, update coverage
             const periodKey = `${req.start_time}-${req.end_time}`;
-            if (!dailyCoverage.periods.has(periodKey)) {
-              dailyCoverage.periods.set(periodKey, {
-                start_time: req.start_time,
-                end_time: req.end_time,
+            if (!dailyCoverage.periods[periodKey]) {
+              dailyCoverage.periods[periodKey] = {
                 required: req.minimum_employees,
                 actual: 0,
-                supervisors: 0
-              });
+                supervisors: 0,
+                overtime: 0
+              };
             }
 
-            const periodCoverage = dailyCoverage.periods.get(periodKey)!;
-            periodCoverage.actual++;
+            dailyCoverage.periods[periodKey].actual++;
           }
         });
       }
@@ -144,15 +142,15 @@ export class MidnightShiftHandler {
 
       // Update coverage records in database
       for (const [date, dailyCoverage] of coverage.entries()) {
-        for (const [periodKey, periodCoverage] of dailyCoverage.periods.entries()) {
+        for (const periodKey in dailyCoverage.periods) {
+          const periodCoverage = dailyCoverage.periods[periodKey];
           await this.supabase
             .from('daily_coverage')
             .upsert({
               date,
-              period_start: periodCoverage.start_time,
-              period_end: periodCoverage.end_time,
+              period_id: periodKey,
               actual_coverage: periodCoverage.actual,
-              supervisor_count: periodCoverage.supervisors,
+              coverage_status: periodCoverage.actual >= periodCoverage.required ? 'Met' : 'Under',
               updated_at: new Date().toISOString()
             })
             .select();

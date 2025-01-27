@@ -1,8 +1,8 @@
-import { ErrorAnalytics } from '../error-analytics'
+import { ErrorMetrics, ErrorTrend } from '../types/error'
 
 interface StorageData {
-  analytics: ErrorAnalytics
-  trends: any[]
+  analytics: Record<string, ErrorMetrics>
+  trends: Record<string, ErrorTrend[]>
 }
 
 export class StorageAdapter {

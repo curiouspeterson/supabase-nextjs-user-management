@@ -1,10 +1,11 @@
 import { createAdminClient } from '@/utils/supabase/admin'
-import { NextResponse } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 
-export async function GET(request: Request) {
+export const dynamic = 'force-dynamic'
+
+export async function GET(request: NextRequest) {
   try {
-    const url = new URL(request.url)
-    const userIds = url.searchParams.get('ids')?.split(',') || []
+    const userIds = request.nextUrl.searchParams.get('ids')?.split(',') || []
 
     if (!userIds.length) {
       return NextResponse.json(

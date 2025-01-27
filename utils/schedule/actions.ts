@@ -1,78 +1,10 @@
-import { Database } from '@/app/database.types'
-import { createClient as createSupabaseClient } from '@/utils/supabase/client'
-import { cookies } from 'next/headers'
+'use server'
+
+import { createClient as createSupabaseClient } from '@/utils/supabase/server'
 import { SupabaseClient } from '@supabase/supabase-js'
-
-export type Shift = Database['public']['Tables']['shifts']['Row']
-export type Schedule = Database['public']['Tables']['schedules']['Row']
-export type Employee = Database['public']['Tables']['employees']['Row']
-export type TimeOffRequest = Database['public']['Tables']['time_off_requests']['Row']
-export type StaffingRequirement = Database['public']['Tables']['staffing_requirements']['Row']
-export type DayOfWeek = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday'
-
-const DAYS_OF_WEEK: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as DayOfWeek[]
-
-// Helper function to get the start of the week (Monday) for a given date
-export function getWeekStart(date: Date): Date {
-  const day = date.getDay()
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1) // adjust when day is Sunday
-  return new Date(date.setDate(diff))
-}
-
-// Helper function to format a date as YYYY-MM-DD
-export function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0]
-}
-
-// Helper function to parse time string (HH:mm:ss) to minutes since midnight
-export function timeToMinutes(time: string): number {
-  const [hours, minutes] = time.split(':').map(Number)
-  return hours * 60 + minutes
-}
-
-// Helper function to check if two time ranges overlap
-export function timeRangesOverlap(
-  start1: string,
-  end1: string,
-  start2: string,
-  end2: string
-): boolean {
-  const start1Min = timeToMinutes(start1)
-  const end1Min = timeToMinutes(end1)
-  const start2Min = timeToMinutes(start2)
-  const end2Min = timeToMinutes(end2)
-
-  // Handle cases where end time is on the next day (e.g., "23:00" to "05:00")
-  const range1CrossesMidnight = end1Min <= start1Min
-  const range2CrossesMidnight = end2Min <= start2Min
-
-  if (!range1CrossesMidnight && !range2CrossesMidnight) {
-    // Neither range crosses midnight
-    return start1Min < end2Min && start2Min < end1Min
-  } else if (range1CrossesMidnight && range2CrossesMidnight) {
-    // Both ranges cross midnight
-    return true
-  } else if (range1CrossesMidnight) {
-    // Only range1 crosses midnight
-    return start2Min < end1Min || start2Min >= start1Min
-  } else {
-    // Only range2 crosses midnight
-    return start1Min < end2Min || start1Min >= start2Min
-  }
-}
-
-// Helper function to calculate total hours between two times
-export function calculateHours(start: string, end: string): number {
-  const startMin = timeToMinutes(start)
-  const endMin = timeToMinutes(end)
-  
-  if (endMin <= startMin) {
-    // Shift crosses midnight
-    return (24 * 60 - startMin + endMin) / 60
-  } else {
-    return (endMin - startMin) / 60
-  }
-}
+import { Database } from '@/types/supabase'
+import { formatDate, timeRangesOverlap, calculateHours, DAYS_OF_WEEK } from './helpers'
+import type { Employee, Shift } from './helpers'
 
 // Helper function to check if an employee is available for a shift
 export async function isEmployeeAvailable(
@@ -101,8 +33,7 @@ export async function isEmployeeAvailable(
     .from('schedules')
     .select('*, shifts(*)')
     .eq('employee_id', employeeId)
-    .eq('week_start_date', formatDate(getWeekStart(date)))
-    .eq('day_of_week', DAYS_OF_WEEK[date.getDay()])
+    .eq('date', formatDate(date))
 
   if (existingShifts) {
     for (const schedule of existingShifts) {
@@ -115,12 +46,17 @@ export async function isEmployeeAvailable(
   }
 
   // Check weekly hours limit
-  const weekStart = getWeekStart(date)
+  const weekStart = new Date(date)
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1) // Start from Monday
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekEnd.getDate() + 6)
+  
   const { data: weeklySchedules } = await supabase
     .from('schedules')
     .select('*, shifts(*)')
     .eq('employee_id', employeeId)
-    .eq('week_start_date', formatDate(weekStart))
+    .gte('date', formatDate(weekStart))
+    .lte('date', formatDate(weekEnd))
 
   let totalHours = 0
   if (weeklySchedules) {
@@ -170,8 +106,7 @@ export async function checkStaffingRequirements(
   const { data: schedules, error } = await supabase
     .from('schedules')
     .select('*, shifts(*)')
-    .eq('week_start_date', formatDate(getWeekStart(date)))
-    .eq('day_of_week', DAYS_OF_WEEK[date.getDay()])
+    .eq('date', formatDate(date))
 
   if (error || !schedules) return false
 
@@ -226,7 +161,6 @@ export async function generateDraftSchedule(weekStart: Date): Promise<void> {
   for (let i = 0; i < 7; i++) {
     const currentDate = new Date(weekStart)
     currentDate.setDate(currentDate.getDate() + i)
-    const dayOfWeek = DAYS_OF_WEEK[currentDate.getDay()]
 
     // For each shift
     for (const shift of shifts) {
@@ -242,59 +176,22 @@ export async function generateDraftSchedule(weekStart: Date): Promise<void> {
       const currentlyStaffed = (await supabase
         .from('schedules')
         .select('*')
-        .eq('week_start_date', formatDate(weekStart))
-        .eq('day_of_week', dayOfWeek)
+        .eq('date', formatDate(currentDate))
         .eq('shift_id', shift.id)).data?.length || 0
 
-      // Assign employees to meet minimum staffing
-      for (const employee of availableEmployees) {
-        if (currentlyStaffed >= minRequired) break
-
-        // Create schedule entry
+      // If we need more staff and have available employees, assign them
+      if (currentlyStaffed < minRequired && availableEmployees.length > 0) {
+        // For now, just assign the first available employee
+        const employee = availableEmployees[0]
         await supabase
           .from('schedules')
           .insert({
-            week_start_date: formatDate(weekStart),
-            day_of_week: dayOfWeek,
-            shift_id: shift.id,
             employee_id: employee.id,
-            schedule_status: 'Draft'
-          } as Database['public']['Tables']['schedules']['Insert'])
+            shift_id: shift.id,
+            date: formatDate(currentDate),
+            status: 'Draft'
+          })
       }
     }
   }
-}
-
-export function startOfWeek(date: Date): Date {
-  const d = new Date(date)
-  const day = d.getDay()
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-  d.setDate(diff)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-export function getWeekDates(startDate: Date): Date[] {
-  const dates: Date[] = []
-  const currentDate = new Date(startDate)
-
-  for (let i = 0; i < 7; i++) {
-    dates.push(new Date(currentDate))
-    currentDate.setDate(currentDate.getDate() + 1)
-  }
-
-  return dates
-}
-
-export function getDayOfWeek(date: Date): DayOfWeek {
-  const days: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-  return days[date.getDay()]
-}
-
-export function formatTime(time: string): string {
-  const [hours, minutes] = time.split(':')
-  const hour = parseInt(hours, 10)
-  const ampm = hour >= 12 ? 'PM' : 'AM'
-  const formattedHour = hour % 12 || 12
-  return `${formattedHour}:${minutes} ${ampm}`
 } 
