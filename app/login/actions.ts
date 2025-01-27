@@ -68,18 +68,22 @@ export async function signup(
   const supabase = createClient()
   const adminClient = createAdminClient()
 
+  // Verify adminClient is properly initialized
+  if (!adminClient) {
+    console.error('Admin client not properly initialized')
+    return { error: 'Server configuration error', success: false }
+  }
+
   try {
-    // Step 1: Create auth user
-    const { data: authData, error: signUpError } = await supabase.auth.signUp({
+    // Step 1: Create auth user with admin client to bypass email confirmation
+    const { data: authData, error: signUpError } = await adminClient.auth.admin.createUser({
       email,
       password,
-      options: {
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
-        data: {
-          username: email.split('@')[0],
-          full_name: email.split('@')[0],
-          user_role: 'Employee'
-        }
+      email_confirm: true,
+      user_metadata: {
+        username: email.split('@')[0],
+        full_name: email.split('@')[0],
+        user_role: 'Employee'
       }
     })
 
@@ -93,8 +97,10 @@ export async function signup(
       return { error: 'Failed to create user account', success: false }
     }
 
+    console.log('Auth user created successfully:', authData.user.id)
+
     // Step 2: Create profile record
-    const { error: profileError } = await adminClient
+    const { data: profileData, error: profileError } = await adminClient
       .from('profiles')
       .upsert([{
         id: authData.user.id,
@@ -104,16 +110,23 @@ export async function signup(
       }], { 
         onConflict: 'id'
       })
+      .select()
+      .single()
 
     if (profileError) {
       console.error('Profile creation error:', profileError)
       // Cleanup: Delete auth user if profile creation fails
-      await adminClient.auth.admin.deleteUser(authData.user.id)
+      const { error: deleteError } = await adminClient.auth.admin.deleteUser(authData.user.id)
+      if (deleteError) {
+        console.error('Failed to cleanup auth user after profile creation error:', deleteError)
+      }
       return { error: 'Failed to create user profile', success: false }
     }
 
+    console.log('Profile created successfully:', profileData)
+
     // Step 3: Create employee record
-    const { error: employeeError } = await adminClient
+    const { data: employeeData, error: employeeError } = await adminClient
       .from('employees')
       .upsert([{
         id: authData.user.id,
@@ -124,14 +137,22 @@ export async function signup(
       }], {
         onConflict: 'id'
       })
+      .select()
+      .single()
 
     if (employeeError) {
       console.error('Employee creation error:', employeeError)
       // Cleanup: Delete auth user and profile if employee creation fails
-      await adminClient.auth.admin.deleteUser(authData.user.id)
+      const { error: deleteError } = await adminClient.auth.admin.deleteUser(authData.user.id)
+      if (deleteError) {
+        console.error('Failed to cleanup auth user after employee creation error:', deleteError)
+      }
       return { error: 'Failed to create employee record', success: false }
     }
 
+    console.log('Employee record created successfully:', employeeData)
+
+    // Since we created the user with email_confirm: true, they can now sign in normally
     revalidatePath('/', 'layout')
     return { error: null, success: true }
   } catch (error) {

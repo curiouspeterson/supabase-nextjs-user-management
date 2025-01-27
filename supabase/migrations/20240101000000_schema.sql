@@ -420,6 +420,10 @@ ALTER TABLE "public"."daily_coverage" ENABLE ROW LEVEL SECURITY;
 GRANT USAGE ON SCHEMA "public" TO "postgres", "anon", "authenticated", "service_role";
 GRANT ALL ON ALL TABLES IN SCHEMA "public" TO "postgres", "anon", "authenticated", "service_role";
 
+-- Grant information schema access
+GRANT USAGE ON SCHEMA information_schema TO authenticated;
+GRANT SELECT ON ALL TABLES IN SCHEMA information_schema TO authenticated;
+
 -- Set default privileges
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" 
 GRANT ALL ON TABLES TO "postgres", "anon", "authenticated", "service_role";
@@ -428,4 +432,58 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public"
 GRANT ALL ON SEQUENCES TO "postgres", "anon", "authenticated", "service_role";
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" 
-GRANT ALL ON FUNCTIONS TO "postgres", "anon", "authenticated", "service_role"; 
+GRANT ALL ON FUNCTIONS TO "postgres", "anon", "authenticated", "service_role";
+
+-- Add time off requests function
+CREATE OR REPLACE FUNCTION public.get_time_off_requests()
+RETURNS TABLE (
+    id uuid,
+    employee_id uuid,
+    start_date date,
+    end_date date,
+    type time_off_type_enum,
+    status time_off_status_enum,
+    notes text,
+    reviewed_by uuid,
+    reviewed_at timestamptz,
+    submitted_at timestamptz,
+    created_at timestamptz,
+    updated_at timestamptz,
+    employee_email text,
+    employee_full_name text,
+    employee_role employee_role_enum
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        tor.id,
+        tor.employee_id,
+        tor.start_date::date,
+        tor.end_date::date,
+        tor.type,
+        tor.status,
+        tor.notes,
+        tor.reviewed_by,
+        tor.reviewed_at,
+        tor.submitted_at,
+        tor.created_at,
+        tor.updated_at,
+        auth.email() as employee_email,
+        p.full_name as employee_full_name,
+        e.employee_role
+    FROM public.time_off_requests tor
+    JOIN public.employees e ON e.id = tor.employee_id
+    LEFT JOIN public.profiles p ON p.id = e.id
+    WHERE 
+        -- Allow users to see their own requests
+        tor.employee_id = auth.uid()
+        -- Or allow managers/admins to see all requests
+        OR EXISTS (
+            SELECT 1 
+            FROM public.employees e2
+            WHERE e2.id = auth.uid() 
+            AND e2.user_role IN ('Manager', 'Admin')
+        )
+    ORDER BY tor.created_at DESC;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER; 

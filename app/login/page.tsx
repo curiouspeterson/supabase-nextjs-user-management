@@ -55,11 +55,27 @@ export default function LoginPage({
         }
 
         if (success) {
-          toast({
-            title: 'Success',
-            description: 'Check your email to confirm your account',
-            variant: 'default'
-          })
+          // Account created, now try to sign in
+          const { error: loginError, success: loginSuccess } = await login(email, password)
+          if (loginError) {
+            setError(loginError)
+            toast({
+              title: 'Error',
+              description: 'Account created but failed to sign in automatically. Please try signing in.',
+              variant: 'destructive'
+            })
+            setIsSignUp(false) // Switch to sign in form
+            return
+          }
+
+          if (loginSuccess) {
+            router.replace('/shifts')
+            toast({
+              title: 'Success',
+              description: 'Account created and signed in successfully',
+              variant: 'default'
+            })
+          }
         }
       } else {
         // Handle sign in
@@ -79,7 +95,7 @@ export default function LoginPage({
           router.replace('/shifts')
           toast({
             title: 'Success',
-            description: 'Logged in successfully',
+            description: 'Signed in successfully',
             variant: 'default'
           })
         }

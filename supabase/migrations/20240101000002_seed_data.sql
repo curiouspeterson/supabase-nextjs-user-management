@@ -18,9 +18,9 @@ VALUES
     ('b1cc1eeb-cd84-5237-bd77-6e442f1fbd38', '09:00', '19:00', 10), -- 10hr
     ('b1cc1eeb-cd84-5237-bd77-6e442f1fbd38', '09:00', '21:00', 12), -- 12hr
     -- Swing Shift variants
-    ('c2dd2ffc-de95-6348-ce88-7f553f2fce49', '13:00', '17:00', 4),  -- 4hr
-    ('c2dd2ffc-de95-6348-ce88-7f553f2fce49', '13:00', '23:00', 10), -- 10hr
-    ('c2dd2ffc-de95-6348-ce88-7f553f2fce49', '13:00', '01:00', 12), -- 12hr
+    ('c2dd2ffc-de95-6348-ce88-7f553f2fce49', '15:00', '19:00', 4),  -- 4hr
+    ('c2dd2ffc-de95-6348-ce88-7f553f2fce49', '15:00', '01:00', 10), -- 10hr
+    ('c2dd2ffc-de95-6348-ce88-7f553f2fce49', '15:00', '03:00', 12), -- 12hr
     -- Night Shift variants
     ('d3ee3ffd-ef06-7459-df99-8f664f3fdf50', '21:00', '01:00', 4),  -- 4hr
     ('d3ee3ffd-ef06-7459-df99-8f664f3fdf50', '21:00', '07:00', 10), -- 10hr
@@ -34,10 +34,10 @@ INSERT INTO public.staffing_requirements (
     minimum_employees,
     shift_supervisor_required
 ) VALUES
-    ('Morning', '05:00', '09:00', 6, true),    -- 5 employees + 1 supervisor
-    ('Daytime', '09:00', '21:00', 8, true),    -- 7 employees + 1 supervisor
-    ('Evening', '21:00', '01:00', 7, true),    -- 6 employees + 1 supervisor
-    ('Night', '01:00', '05:00', 6, true);      -- 5 employees + 1 supervisor
+    ('Early Morning', '05:00', '09:00', 6, true),    -- 5 employees + 1 supervisor
+    ('Day', '09:00', '17:00', 8, true),    -- 7 employees + 1 supervisor
+    ('Evening', '17:00', '21:00', 7, true),    -- 6 employees + 1 supervisor
+    ('Night', '21:00', '05:00', 6, true);      -- 5 employees + 1 supervisor
 
 -- Insert shift patterns
 INSERT INTO public.shift_patterns (name, pattern_type, days_on, days_off, shift_duration)

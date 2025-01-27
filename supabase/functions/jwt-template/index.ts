@@ -5,7 +5,7 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
+import { serve } from "https://deno.land/std@0.204.0/http/server.ts"
 
 console.log("Hello from Functions!")
 
@@ -22,9 +22,14 @@ const jwtTemplate = {
 }
 
 serve(async (req) => {
+  const { name } = await req.json()
+  const data = {
+    message: `Hello ${name}!`,
+  }
+
   return new Response(
-    JSON.stringify(jwtTemplate),
-    { headers: { 'Content-Type': 'application/json' } },
+    JSON.stringify(data),
+    { headers: { "Content-Type": "application/json" } },
   )
 })
 

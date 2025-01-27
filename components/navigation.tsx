@@ -171,7 +171,7 @@ export function Navigation({ className }: NavigationProps) {
     },
   ]
 
-  const handleSignOut = async () => {
+  const handleSignOut = useCallback(async () => {
     if (isSigningOut) return
     
     try {
@@ -187,7 +187,7 @@ export function Navigation({ className }: NavigationProps) {
       handleError(error, 'Navigation.handleSignOut')
       setIsSigningOut(false)
     }
-  }
+  }, [supabase, handleError, isSigningOut])
 
   return (
     <div className={cn('flex items-center justify-between w-full', className)}>

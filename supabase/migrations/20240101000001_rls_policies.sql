@@ -19,7 +19,7 @@ create policy "employees_read_all_managers"
 on public.employees
 for select
 to authenticated
-using (coalesce(current_setting('request.jwt.claims', true)::json->'user_metadata'->>'user_role', '') = 'Manager');
+using (coalesce(current_setting('request.jwt.claims', true)::json->'user_metadata'->>'user_role', '') IN ('Manager', 'Admin'));
 
 create policy "employees_update_self"
 on public.employees
@@ -31,7 +31,7 @@ create policy "employees_update_managers"
 on public.employees
 for update
 to authenticated
-using (coalesce(current_setting('request.jwt.claims', true)::json->'user_metadata'->>'user_role', '') = 'Manager');
+using (coalesce(current_setting('request.jwt.claims', true)::json->'user_metadata'->>'user_role', '') IN ('Manager', 'Admin'));
 
 -- Profiles table policies
 create policy "profiles_read_self"
@@ -44,7 +44,7 @@ create policy "profiles_read_all_managers"
 on public.profiles
 for select
 to authenticated
-using (coalesce(current_setting('request.jwt.claims', true)::json->'user_metadata'->>'user_role', '') = 'Manager');
+using (coalesce(current_setting('request.jwt.claims', true)::json->'user_metadata'->>'user_role', '') IN ('Manager', 'Admin'));
 
 create policy "profiles_update_self"
 on public.profiles
@@ -56,7 +56,7 @@ create policy "profiles_update_managers"
 on public.profiles
 for update
 to authenticated
-using (coalesce(current_setting('request.jwt.claims', true)::json->'user_metadata'->>'user_role', '') = 'Manager');
+using (coalesce(current_setting('request.jwt.claims', true)::json->'user_metadata'->>'user_role', '') IN ('Manager', 'Admin'));
 
 -- Shifts table policies
 create policy "shifts_read"

@@ -1,5 +1,5 @@
 import { createClient } from '@/utils/supabase/server'
-import { TimeOffRequestForm } from '@/components/time-off/TimeOffRequestForm'
+import TimeOffRequestForm from '@/components/time-off/TimeOffRequestForm'
 import { Database } from '@/app/database.types'
 
 type TimeOffRequest = Database['public']['Tables']['time_off_requests']['Row']
