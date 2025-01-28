@@ -1,12 +1,12 @@
-import { Metadata } from 'next'
+import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Employees | 911 Dispatch Management',
-  description: 'Manage dispatch center employees, roles, and certifications',
+  title: 'Employee Management | Schedule Master',
+  description: 'Manage employees, roles, and team assignments'
 }
 
 export default function EmployeesLayout({
-  children,
+  children
 }: {
   children: React.ReactNode
 }) {

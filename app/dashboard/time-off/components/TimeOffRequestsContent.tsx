@@ -1,120 +1,127 @@
 'use client'
 
-import { createClient } from '@/utils/supabase/client'
-import { formatDistanceToNow } from 'date-fns'
-import type { Database } from '@/types/supabase'
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { format } from 'date-fns'
 import { toast } from '@/components/ui/use-toast'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Card } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Badge } from '@/components/ui/badge'
+import { AlertCircle } from 'lucide-react'
+import { useHealthMonitor } from '@/hooks/use-health-monitor'
+import { fetchTimeOffRequests } from '@/services/time-off'
+import type { TimeOffRequest } from '@/services/time-off/types'
 
-type TimeOffRequestRow = Database['public']['Tables']['time_off_requests']['Row']
+const TYPE_LABELS = {
+  'VACATION': 'Vacation',
+  'SICK': 'Sick Leave',
+  'PERSONAL': 'Personal',
+  'BEREAVEMENT': 'Bereavement',
+  'JURY_DUTY': 'Jury Duty',
+  'UNPAID': 'Unpaid Leave'
+} as const
 
-interface TimeOffRequest extends TimeOffRequestRow {
-  user_id: string
-  reason: string
-}
+const STATUS_VARIANTS = {
+  'PENDING': 'default',
+  'APPROVED': 'success',
+  'REJECTED': 'destructive'
+} as const
 
-export function TimeOffRequestsContent() {
-  const [requests, setRequests] = useState<TimeOffRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+export default function TimeOffRequestsContent() {
+  const { trackError } = useHealthMonitor()
+  const [selectedRequest, setSelectedRequest] = useState<TimeOffRequest | null>(null)
+
+  const { data: requests, error, isLoading } = useQuery({
+    queryKey: ['timeOffRequests'],
+    queryFn: fetchTimeOffRequests,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+  })
 
   useEffect(() => {
-    const fetchRequests = async () => {
-      try {
-        const supabase = createClient()
-
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-
-        if (!user) {
-          setError('Please sign in to view your time off requests.')
-          return
-        }
-
-        const { data: requestsData, error: requestsError } = await supabase
-          .from('time_off_requests')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('start_date', { ascending: false })
-
-        if (requestsError) {
-          throw requestsError
-        }
-
-        if (!requestsData) {
-          setRequests([])
-          return
-        }
-
-        // Transform the data to include required fields
-        const transformedRequests: TimeOffRequest[] = requestsData.map(request => ({
-          ...request,
-          user_id: request.employee_id, // Map employee_id to user_id
-          reason: request.notes || '', // Map notes to reason
-        }))
-
-        setRequests(transformedRequests)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'An error occurred while fetching requests')
-        toast({
-          title: 'Error',
-          description: 'Failed to fetch time off requests',
-          variant: 'destructive',
-        })
-      } finally {
-        setLoading(false)
-      }
+    if (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load time off requests'
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive'
+      })
+      trackError('TIME_OFF', 'FETCH_REQUESTS', { error: errorMessage })
     }
-
-    fetchRequests()
-  }, [toast])
-
-  if (loading) {
-    return <div>Loading...</div>
-  }
+  }, [error, toast, trackError])
 
   if (error) {
-    return <div>{error}</div>
+    return (
+      <Alert variant="destructive">
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription>
+          Failed to load time off requests. Please try again later.
+        </AlertDescription>
+      </Alert>
+    )
   }
 
-  if (requests.length === 0) {
-    return <div>No time off requests found.</div>
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-24 w-full" />
+        ))}
+      </div>
+    )
   }
 
   return (
     <div className="space-y-4">
-      {requests.map((request: TimeOffRequest) => (
-        <div key={request.id} className="p-4 border rounded-lg">
-          <div className="flex justify-between items-start mb-4">
+      {requests?.map(request => (
+        <Card
+          key={request.id}
+          className="p-4 hover:shadow-md transition-shadow cursor-pointer"
+          onClick={() => setSelectedRequest(request)}
+          role="button"
+          tabIndex={0}
+        >
+          <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-semibold">
-                {formatDistanceToNow(new Date(request.start_date), { addSuffix: true })}
+              <h3 className="font-medium">
+                {request.employee?.full_name || 'Unknown Employee'}
               </h3>
               <p className="text-sm text-gray-500">
-                {new Date(request.start_date).toLocaleDateString()} - {new Date(request.end_date).toLocaleDateString()}
+                {TYPE_LABELS[request.type || 'PERSONAL']} • 
+                {format(new Date(request.start_date), 'MMM d, yyyy')} - 
+                {format(new Date(request.end_date), 'MMM d, yyyy')}
               </p>
+              {request.notes && (
+                <p className="mt-2 text-sm text-gray-600">
+                  {request.notes}
+                </p>
+              )}
             </div>
-            <span
-              className={`px-2 py-1 text-sm rounded ${
-                request.status === 'Approved'
-                  ? 'bg-green-100 text-green-800'
-                  : request.status === 'Declined'
-                  ? 'bg-red-100 text-red-800'
-                  : 'bg-yellow-100 text-yellow-800'
-              }`}
-            >
-              {request.status}
-            </span>
+            <div className="flex items-center gap-2">
+              <Badge variant={STATUS_VARIANTS[request.status || 'PENDING']}>
+                {request.status || 'PENDING'}
+              </Badge>
+              {request.is_paid && (
+                <Badge variant="outline">Paid</Badge>
+              )}
+            </div>
           </div>
-          <div>
-            <p className="text-sm text-gray-600">
-              <span className="font-medium">Type:</span> {request.type}
-            </p>
-            <p className="text-sm text-gray-600">{request.reason}</p>
-          </div>
-        </div>
+        </Card>
       ))}
+
+      {requests?.length === 0 && (
+        <div className="text-center py-8 text-gray-500">
+          No time off requests found
+        </div>
+      )}
+
+      {selectedRequest && (
+        <TimeOffRequestDialog
+          request={selectedRequest}
+          onClose={() => setSelectedRequest(null)}
+        />
+      )}
     </div>
   )
 } 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
-import { createServerClient } from '@/utils/supabase/server'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
 import { ApiError, DatabaseError, AuthError, ValidationError } from '@/lib/errors'
@@ -52,23 +52,7 @@ export async function GET(request: Request) {
       ...validatedQuery,
     })
 
-    const supabase = createServerClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient(cookies())
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -79,97 +63,72 @@ export async function GET(request: Request) {
       throw new AuthError('No authenticated user found')
     }
 
-    // Begin transaction
-    const { error: beginError } = await supabase.rpc('begin_transaction')
-    if (beginError) {
-      throw new DatabaseError('Failed to begin transaction', { cause: beginError })
-    }
-
-    try {
-      // Build query
-      let query = supabase
-        .from('employees')
-        .select('*', { count: 'exact' })
-        .range(
-          (validatedQuery.page - 1) * validatedQuery.limit,
-          validatedQuery.page * validatedQuery.limit - 1
-        )
-
-      // Apply filters
-      if (validatedQuery.department_id) {
-        query = query.eq('department_id', validatedQuery.department_id)
-      }
-      if (validatedQuery.role) {
-        query = query.eq('user_role', validatedQuery.role)
-      }
-      if (validatedQuery.search) {
-        query = query.or(`full_name.ilike.%${validatedQuery.search}%,email.ilike.%${validatedQuery.search}%`)
-      }
-
-      // Execute query
-      const { data: users, count, error: fetchError } = await query
-      if (fetchError) {
-        throw new DatabaseError('Failed to fetch users', { cause: fetchError })
-      }
-
-      // Mask sensitive data
-      const maskedUsers = await Promise.all(
-        (users ?? []).map(async (userData) => {
-          const { data: masked, error: maskError } = await supabase.rpc(
-            'mask_user_data',
-            {
-              p_viewer_id: user.id,
-              p_user_data: userData,
-            }
-          )
-          if (maskError) {
-            logger.warn('Failed to mask user data', {
-              requestId,
-              userId: userData.id,
-              error: maskError,
-            })
-            return null
-          }
-          return masked
-        })
+    // Build query
+    let query = supabase
+      .from('employees')
+      .select('*', { count: 'exact' })
+      .range(
+        (validatedQuery.page - 1) * validatedQuery.limit,
+        validatedQuery.page * validatedQuery.limit - 1
       )
 
-      // Filter out any users that failed to mask
-      const filteredUsers = maskedUsers.filter(Boolean)
-
-      // Commit transaction
-      const { error: commitError } = await supabase.rpc('commit_transaction')
-      if (commitError) {
-        throw new DatabaseError('Failed to commit transaction', { cause: commitError })
-      }
-
-      logger.info('Successfully fetched users', {
-        requestId,
-        count: filteredUsers.length,
-        total: count,
-      })
-
-      return NextResponse.json({
-        data: filteredUsers,
-        pagination: {
-          page: validatedQuery.page,
-          limit: validatedQuery.limit,
-          total: count,
-          pages: Math.ceil((count ?? 0) / validatedQuery.limit),
-        },
-      })
-
-    } catch (error) {
-      // Rollback transaction on error
-      const { error: rollbackError } = await supabase.rpc('rollback_transaction')
-      if (rollbackError) {
-        logger.error('Failed to rollback transaction', {
-          requestId,
-          error: rollbackError,
-        })
-      }
-      throw error
+    // Apply filters
+    if (validatedQuery.department_id) {
+      query = query.eq('department_id', validatedQuery.department_id)
     }
+    if (validatedQuery.role) {
+      query = query.eq('user_role', validatedQuery.role)
+    }
+    if (validatedQuery.search) {
+      query = query.or(`full_name.ilike.%${validatedQuery.search}%,email.ilike.%${validatedQuery.search}%`)
+    }
+
+    // Execute query
+    const { data: users, count, error: fetchError } = await query
+    if (fetchError) {
+      throw new DatabaseError('Failed to fetch users', { cause: fetchError })
+    }
+
+    // Mask sensitive data
+    const maskedUsers = await Promise.all(
+      (users ?? []).map(async (userData) => {
+        const { data: masked, error: maskError } = await supabase.rpc(
+          'mask_user_data',
+          {
+            p_viewer_id: user.id,
+            p_user_data: userData,
+          }
+        )
+        if (maskError) {
+          logger.warn('Failed to mask user data', {
+            requestId,
+            userId: userData.id,
+            error: maskError,
+          })
+          return null
+        }
+        return masked
+      })
+    )
+
+    // Filter out any users that failed to mask
+    const filteredUsers = maskedUsers.filter(Boolean)
+
+    logger.info('Successfully fetched users', {
+      requestId,
+      count: filteredUsers.length,
+      total: count,
+    })
+
+    return NextResponse.json({
+      data: filteredUsers,
+      pagination: {
+        page: validatedQuery.page,
+        limit: validatedQuery.limit,
+        total: count,
+        pages: Math.ceil((count ?? 0) / validatedQuery.limit),
+      },
+    })
 
   } catch (error) {
     logger.error('Error fetching users', {
@@ -246,23 +205,7 @@ export async function POST(request: Request) {
       count: validatedData.ids.length,
     })
 
-    const supabase = createServerClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient(cookies())
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -273,74 +216,49 @@ export async function POST(request: Request) {
       throw new AuthError('No authenticated user found')
     }
 
-    // Begin transaction
-    const { error: beginError } = await supabase.rpc('begin_transaction')
-    if (beginError) {
-      throw new DatabaseError('Failed to begin transaction', { cause: beginError })
+    // Fetch users
+    const { data: users, error: fetchError } = await supabase
+      .from('employees')
+      .select('*')
+      .in('id', validatedData.ids)
+
+    if (fetchError) {
+      throw new DatabaseError('Failed to fetch users', { cause: fetchError })
     }
 
-    try {
-      // Fetch users
-      const { data: users, error: fetchError } = await supabase
-        .from('employees')
-        .select('*')
-        .in('id', validatedData.ids)
-
-      if (fetchError) {
-        throw new DatabaseError('Failed to fetch users', { cause: fetchError })
-      }
-
-      // Mask sensitive data
-      const maskedUsers = await Promise.all(
-        (users ?? []).map(async (userData) => {
-          const { data: masked, error: maskError } = await supabase.rpc(
-            'mask_user_data',
-            {
-              p_viewer_id: user.id,
-              p_user_data: userData,
-            }
-          )
-          if (maskError) {
-            logger.warn('Failed to mask user data', {
-              requestId,
-              userId: userData.id,
-              error: maskError,
-            })
-            return null
+    // Mask sensitive data
+    const maskedUsers = await Promise.all(
+      (users ?? []).map(async (userData) => {
+        const { data: masked, error: maskError } = await supabase.rpc(
+          'mask_user_data',
+          {
+            p_viewer_id: user.id,
+            p_user_data: userData,
           }
-          return masked
-        })
-      )
-
-      // Filter out any users that failed to mask
-      const filteredUsers = maskedUsers.filter(Boolean)
-
-      // Commit transaction
-      const { error: commitError } = await supabase.rpc('commit_transaction')
-      if (commitError) {
-        throw new DatabaseError('Failed to commit transaction', { cause: commitError })
-      }
-
-      logger.info('Successfully fetched users by IDs', {
-        requestId,
-        count: filteredUsers.length,
+        )
+        if (maskError) {
+          logger.warn('Failed to mask user data', {
+            requestId,
+            userId: userData.id,
+            error: maskError,
+          })
+          return null
+        }
+        return masked
       })
+    )
 
-      return NextResponse.json({
-        data: filteredUsers,
-      })
+    // Filter out any users that failed to mask
+    const filteredUsers = maskedUsers.filter(Boolean)
 
-    } catch (error) {
-      // Rollback transaction on error
-      const { error: rollbackError } = await supabase.rpc('rollback_transaction')
-      if (rollbackError) {
-        logger.error('Failed to rollback transaction', {
-          requestId,
-          error: rollbackError,
-        })
-      }
-      throw error
-    }
+    logger.info('Successfully fetched users by IDs', {
+      requestId,
+      count: filteredUsers.length,
+    })
+
+    return NextResponse.json({
+      data: filteredUsers,
+    })
 
   } catch (error) {
     logger.error('Error fetching users by IDs', {

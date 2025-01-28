@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { createServerClient } from '@/utils/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
 import { ApiError, DatabaseError, AuthError } from '@/lib/errors'
@@ -24,7 +24,7 @@ const env = envSchema.parse({
 const createEmployeeSchema = z.object({
   full_name: z.string().min(1, 'Full name is required'),
   username: z.string().min(1, 'Username is required'),
-  employee_role: z.enum(['Employee', 'Shift Supervisor', 'Management']),
+  employee_role: z.enum(['Dispatcher', 'Shift Supervisor', 'Management']),
   weekly_hours_scheduled: z.number().min(0).max(168),
   default_shift_type_id: z.string().optional(),
 })
@@ -66,13 +66,33 @@ function generateSecurePassword(): string {
   return password.split('').sort(() => Math.random() - 0.5).join('')
 }
 
+export async function GET() {
+  try {
+    const supabase = createClient(cookies())
+    
+    const { data, error } = await supabase
+      .from('employees')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+
+    return NextResponse.json(data)
+  } catch (error) {
+    logger.error('Failed to fetch employees:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch employees' },
+      { status: 500 }
+    )
+  }
+}
+
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID()
   
   try {
-    // Parse and validate request body
-    const body = await request.json()
-    const validatedData = createEmployeeSchema.parse(body)
+    const json = await request.json()
+    const validatedData = createEmployeeSchema.parse(json)
     
     logger.info('Creating new employee', {
       requestId,
@@ -80,23 +100,7 @@ export async function POST(request: Request) {
       role: validatedData.employee_role
     })
 
-    const supabase = createServerClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient(cookies())
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -146,13 +150,13 @@ export async function POST(request: Request) {
     }
 
     // Create employee record
-    const { error: createEmployeeError } = await supabase.from('employees').insert({
+    const { data: employeeRecord, error: createEmployeeError } = await supabase.from('employees').insert({
       id: userData.user.id,
       employee_role: validatedData.employee_role,
       weekly_hours_scheduled: validatedData.weekly_hours_scheduled,
       default_shift_type_id: validatedData.default_shift_type_id,
       user_role: validatedData.employee_role === 'Management' ? 'Admin' : 'Employee',
-    })
+    }).select().single()
 
     if (createEmployeeError) {
       throw new DatabaseError('Failed to create employee record', { cause: createEmployeeError })
@@ -163,17 +167,7 @@ export async function POST(request: Request) {
       employeeId: userData.user.id
     })
 
-    return NextResponse.json(
-      {
-        message: 'Employee created successfully',
-        data: {
-          id: userData.user.id,
-          email: `${validatedData.username}@${env.EMAIL_DOMAIN}`,
-        },
-      },
-      { status: 201 }
-    )
-
+    return NextResponse.json(employeeRecord)
   } catch (error) {
     logger.error('Error creating employee', {
       requestId,

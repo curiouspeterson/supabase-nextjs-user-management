@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
-import { createServerClient } from '@/utils/supabase/server'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
 import { ApiError, DatabaseError, AuthError, ValidationError } from '@/lib/errors'
@@ -61,23 +61,7 @@ export async function POST(request: Request) {
       type: validatedData.request_type,
     })
 
-    const supabase = createServerClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient(cookies())
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -88,80 +72,55 @@ export async function POST(request: Request) {
       throw new AuthError('No authenticated user found')
     }
 
-    // Begin transaction
-    const { error: beginError } = await supabase.rpc('begin_transaction')
-    if (beginError) {
-      throw new DatabaseError('Failed to begin transaction', { cause: beginError })
+    // Validate request using database function
+    const { data: validation, error: validationError } = await supabase.rpc(
+      'validate_time_off_request',
+      {
+        p_user_id: user.id,
+        p_start_date: validatedData.start_date,
+        p_end_date: validatedData.end_date,
+        p_request_type: validatedData.request_type,
+        p_reason: validatedData.reason,
+      }
+    )
+
+    if (validationError) {
+      throw new DatabaseError('Failed to validate request', { cause: validationError })
     }
 
-    try {
-      // Validate request using database function
-      const { data: validation, error: validationError } = await supabase.rpc(
-        'validate_time_off_request',
-        {
-          p_user_id: user.id,
-          p_start_date: validatedData.start_date,
-          p_end_date: validatedData.end_date,
-          p_request_type: validatedData.request_type,
-          p_reason: validatedData.reason,
-        }
-      )
-
-      if (validationError) {
-        throw new DatabaseError('Failed to validate request', { cause: validationError })
-      }
-
-      if (!validation.valid) {
-        throw new ValidationError('Invalid time-off request', {
-          errors: validation.errors,
-          conflicts: validation.conflicts,
-        })
-      }
-
-      // Insert time-off request
-      const { error: insertError } = await supabase
-        .from('time_off_requests')
-        .insert({
-          employee_id: user.id,
-          start_date: validatedData.start_date,
-          end_date: validatedData.end_date,
-          request_type: validatedData.request_type,
-          reason: validatedData.reason,
-          status: 'Pending',
-          created_by: user.id,
-          updated_by: user.id,
-        })
-
-      if (insertError) {
-        throw new DatabaseError('Failed to create time-off request', { cause: insertError })
-      }
-
-      // Commit transaction
-      const { error: commitError } = await supabase.rpc('commit_transaction')
-      if (commitError) {
-        throw new DatabaseError('Failed to commit transaction', { cause: commitError })
-      }
-
-      logger.info('Successfully created time-off request', {
-        requestId,
-        userId: user.id,
+    if (!validation.valid) {
+      throw new ValidationError('Invalid time-off request', {
+        errors: validation.errors,
+        conflicts: validation.conflicts,
       })
-
-      return NextResponse.json({
-        message: 'Time-off request created successfully',
-      })
-
-    } catch (error) {
-      // Rollback transaction on error
-      const { error: rollbackError } = await supabase.rpc('rollback_transaction')
-      if (rollbackError) {
-        logger.error('Failed to rollback transaction', {
-          requestId,
-          error: rollbackError,
-        })
-      }
-      throw error
     }
+
+    // Insert time-off request
+    const { error: insertError } = await supabase
+      .from('time_off_requests')
+      .insert({
+        employee_id: user.id,
+        start_date: validatedData.start_date,
+        end_date: validatedData.end_date,
+        request_type: validatedData.request_type,
+        reason: validatedData.reason,
+        status: 'Pending',
+        created_by: user.id,
+        updated_by: user.id,
+      })
+
+    if (insertError) {
+      throw new DatabaseError('Failed to create time-off request', { cause: insertError })
+    }
+
+    logger.info('Successfully created time-off request', {
+      requestId,
+      userId: user.id,
+    })
+
+    return NextResponse.json({
+      message: 'Time-off request created successfully',
+    })
 
   } catch (error) {
     logger.error('Error creating time-off request', {
@@ -243,7 +202,7 @@ export async function GET(request: Request) {
       NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     })
 
-    const supabase = createServerClient(
+    const supabase = createClient(
       env.NEXT_PUBLIC_SUPABASE_URL,
       env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
@@ -429,7 +388,7 @@ export async function PUT(request: Request) {
       status: validatedData.status,
     })
 
-    const supabase = createServerClient(
+    const supabase = createClient(
       env.NEXT_PUBLIC_SUPABASE_URL,
       env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
@@ -470,55 +429,30 @@ export async function PUT(request: Request) {
       throw new AuthError('Insufficient permissions to manage time-off requests')
     }
 
-    // Begin transaction
-    const { error: beginError } = await supabase.rpc('begin_transaction')
-    if (beginError) {
-      throw new DatabaseError('Failed to begin transaction', { cause: beginError })
-    }
-
-    try {
-      // Update time-off request
-      const { error: updateError } = await supabase
-        .from('time_off_requests')
-        .update({
-          status: validatedData.status,
-          manager_notes: validatedData.manager_notes,
-          updated_at: new Date().toISOString(),
-          updated_by: user.id,
-        })
-        .eq('id', id)
-
-      if (updateError) {
-        throw new DatabaseError('Failed to update time-off request', { cause: updateError })
-      }
-
-      // Commit transaction
-      const { error: commitError } = await supabase.rpc('commit_transaction')
-      if (commitError) {
-        throw new DatabaseError('Failed to commit transaction', { cause: commitError })
-      }
-
-      logger.info('Successfully updated time-off request', {
-        requestId,
-        timeOffRequestId: id,
+    // Update time-off request
+    const { error: updateError } = await supabase
+      .from('time_off_requests')
+      .update({
         status: validatedData.status,
+        manager_notes: validatedData.manager_notes,
+        updated_at: new Date().toISOString(),
+        updated_by: user.id,
       })
+      .eq('id', id)
 
-      return NextResponse.json({
-        message: 'Time-off request updated successfully',
-      })
-
-    } catch (error) {
-      // Rollback transaction on error
-      const { error: rollbackError } = await supabase.rpc('rollback_transaction')
-      if (rollbackError) {
-        logger.error('Failed to rollback transaction', {
-          requestId,
-          error: rollbackError,
-        })
-      }
-      throw error
+    if (updateError) {
+      throw new DatabaseError('Failed to update time-off request', { cause: updateError })
     }
+
+    logger.info('Successfully updated time-off request', {
+      requestId,
+      timeOffRequestId: id,
+      status: validatedData.status,
+    })
+
+    return NextResponse.json({
+      message: 'Time-off request updated successfully',
+    })
 
   } catch (error) {
     logger.error('Error updating time-off request', {
@@ -610,7 +544,7 @@ export async function DELETE(request: Request) {
       timeOffRequestId: id,
     })
 
-    const supabase = createServerClient(
+    const supabase = createClient(
       env.NEXT_PUBLIC_SUPABASE_URL,
       env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
@@ -651,49 +585,24 @@ export async function DELETE(request: Request) {
       throw new AuthError('Insufficient permissions to delete time-off requests')
     }
 
-    // Begin transaction
-    const { error: beginError } = await supabase.rpc('begin_transaction')
-    if (beginError) {
-      throw new DatabaseError('Failed to begin transaction', { cause: beginError })
+    // Delete time-off request
+    const { error: deleteError } = await supabase
+      .from('time_off_requests')
+      .delete()
+      .eq('id', id)
+
+    if (deleteError) {
+      throw new DatabaseError('Failed to delete time-off request', { cause: deleteError })
     }
 
-    try {
-      // Delete time-off request
-      const { error: deleteError } = await supabase
-        .from('time_off_requests')
-        .delete()
-        .eq('id', id)
+    logger.info('Successfully deleted time-off request', {
+      requestId,
+      timeOffRequestId: id,
+    })
 
-      if (deleteError) {
-        throw new DatabaseError('Failed to delete time-off request', { cause: deleteError })
-      }
-
-      // Commit transaction
-      const { error: commitError } = await supabase.rpc('commit_transaction')
-      if (commitError) {
-        throw new DatabaseError('Failed to commit transaction', { cause: commitError })
-      }
-
-      logger.info('Successfully deleted time-off request', {
-        requestId,
-        timeOffRequestId: id,
-      })
-
-      return NextResponse.json({
-        message: 'Time-off request deleted successfully',
-      })
-
-    } catch (error) {
-      // Rollback transaction on error
-      const { error: rollbackError } = await supabase.rpc('rollback_transaction')
-      if (rollbackError) {
-        logger.error('Failed to rollback transaction', {
-          requestId,
-          error: rollbackError,
-        })
-      }
-      throw error
-    }
+    return NextResponse.json({
+      message: 'Time-off request deleted successfully',
+    })
 
   } catch (error) {
     logger.error('Error deleting time-off request', {

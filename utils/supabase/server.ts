@@ -54,7 +54,7 @@ const handleCookieError = async (
 }
 
 // For use in app directory
-export const createClient = () => {
+export function createClient() {
   const cookieStore = cookies()
 
   return createServerClient<Database>(
@@ -63,53 +63,20 @@ export const createClient = () => {
     {
       cookies: {
         get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+        set(name: string, value: string, options: any) {
           try {
-            return cookieStore.get(name)?.value
+            cookieStore.set({ name, value, ...options })
           } catch (error) {
-            handleCookieError(error as Error, 'get', name)
-            return undefined
+            // Handle cookie error
           }
         },
-        set(name: string, value: string, options: CookieOptions) {
+        remove(name: string, options: any) {
           try {
-            // Validate cookie value
-            const sanitizedValue = validateCookieValue(value)
-            
-            // Merge with default options
-            const cookieOptions = mergeCookieOptions(options)
-            
-            cookieStore.set({
-              name,
-              value: sanitizedValue,
-              ...cookieOptions,
-            })
+            cookieStore.set({ name, value: '', ...options })
           } catch (error) {
-            handleCookieError(error as Error, 'set', name)
-            throw new AuthenticationError(
-              AuthErrorType.COOKIE_SET,
-              'Failed to set cookie',
-              'SET_FAILED',
-              { name, error }
-            )
-          }
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            const cookieOptions = mergeCookieOptions(options)
-            cookieStore.set({
-              name,
-              value: '',
-              ...cookieOptions,
-              'Max-Age': '0',
-            })
-          } catch (error) {
-            handleCookieError(error as Error, 'remove', name)
-            throw new AuthenticationError(
-              AuthErrorType.COOKIE_REMOVE,
-              'Failed to remove cookie',
-              'REMOVE_FAILED',
-              { name, error }
-            )
+            // Handle cookie error
           }
         },
       },
@@ -239,4 +206,11 @@ export function createServiceClient() {
       },
     }
   )
+}
+
+export class AuthenticationError extends Error {
+  constructor(message: string = 'Authentication required') {
+    super(message)
+    this.name = 'AuthenticationError'
+  }
 }

@@ -9,12 +9,16 @@ import { createClient } from '@/utils/supabase/client'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import type { Employee, EmployeeRole } from '@/services/scheduler/types'
 import { useRouter } from 'next/navigation'
 import { useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { AppError } from '@/lib/types/error'
+import { useToast } from '@/components/ui/use-toast'
+import { useEmployeeStore } from '@/lib/stores/employee-store'
+import { useErrorBoundary } from '@/lib/hooks/use-error-boundary'
+import { employeeSchema } from '@/lib/validations/employee'
 
 const employeeSchema = z.object({
   full_name: z.string().min(1, 'Full name is required'),
@@ -27,10 +31,9 @@ const employeeSchema = z.object({
 type EmployeeFormValues = z.infer<typeof employeeSchema>
 
 interface EmployeeDialogProps {
-  isOpen: boolean
-  onClose: () => void
   employee?: Employee
-  onEmployeeUpdated: () => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }
 
 const mapRoleToDatabase = (role: EmployeeRole): 'Dispatcher' | 'Shift Supervisor' | 'Management' => {
@@ -90,232 +93,127 @@ function generateSecurePassword(length = 16): string {
   return password.split('').sort(() => Math.random() - 0.5).join('');
 }
 
-export function EmployeeDialog({ isOpen, onClose, employee, onEmployeeUpdated }: EmployeeDialogProps) {
+export function EmployeeDialog({ employee, open, onOpenChange }: EmployeeDialogProps) {
   const router = useRouter()
-  const {
-    register,
-    handleSubmit,
-    reset,
-    setValue,
-    formState: { errors, isSubmitting },
-  } = useForm<EmployeeFormValues>({
+  const { toast } = useToast()
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { addEmployee, updateEmployee } = useEmployeeStore()
+  const { handleError } = useErrorBoundary()
+
+  const form = useForm({
     resolver: zodResolver(employeeSchema),
     defaultValues: {
-      full_name: '',
-      username: '',
-      employee_role: 'Employee',
-      weekly_hours_scheduled: 40,
-      default_shift_type_id: undefined,
-    },
-  })
-
-  useEffect(() => {
-    if (employee) {
-      setValue('full_name', employee.full_name || '')
-      setValue('username', employee.username || '')
-      setValue('employee_role', mapLegacyRole(employee.employee_role))
-      setValue('weekly_hours_scheduled', employee.weekly_hours_scheduled)
-      setValue('default_shift_type_id', employee.default_shift_type_id || undefined)
-    } else {
-      reset()
+      firstName: '',
+      lastName: '',
+      email: '',
+      role: 'EMPLOYEE',
+      status: 'ACTIVE'
     }
-  }, [employee, setValue, reset])
-
-  const supabase = createClient()
-  const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    emailDomain: '',
   })
 
-  const createEmployeeMutation = useMutation({
-    mutationFn: async (data: typeof formData) => {
-      try {
-        // Generate secure password
-        const temporaryPassword = generateSecurePassword()
+  // Reset form when dialog opens/closes
+  useEffect(() => {
+    if (open && employee) {
+      form.reset(employee)
+    } else if (!open) {
+      form.reset()
+    }
+  }, [open, employee, form])
 
-        // Get email template
-        const { data: template, error: templateError } = await supabase
-          .rpc('get_email_template', {
-            p_type: 'EMPLOYEE_INVITATION'
-          })
+  // Validate form data before submission
+  const validateFormData = useCallback((data: any) => {
+    try {
+      return employeeSchema.parse(data)
+    } catch (error) {
+      handleError(error)
+      return null
+    }
+  }, [handleError])
 
-        if (templateError) {
-          throw new AppError('Failed to get email template', 500)
-        }
+  const onSubmit = useCallback(async (data: any) => {
+    try {
+      setIsSubmitting(true)
 
-        // Create user in auth
-        const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
-          email: `${data.email}@${data.emailDomain}`,
-          password: temporaryPassword,
-          email_confirm: true,
+      // Validate form data
+      const validatedData = validateFormData(data)
+      if (!validatedData) return
+
+      if (employee) {
+        await updateEmployee({
+          ...employee,
+          ...validatedData
         })
-
-        if (authError) {
-          throw new AppError('Failed to create user account', 500)
-        }
-
-        // Create employee record
-        const { error: employeeError } = await supabase
-          .from('employees')
-          .insert({
-            id: authUser.id,
-            first_name: data.firstName,
-            last_name: data.lastName,
-            email: `${data.email}@${data.emailDomain}`,
-            employee_role: 'EMPLOYEE',
-          })
-
-        if (employeeError) {
-          // Cleanup auth user if employee creation fails
-          await supabase.auth.admin.deleteUser(authUser.id)
-          throw new AppError('Failed to create employee record', 500)
-        }
-
-        // Log email
-        const { data: emailLog, error: logError } = await supabase
-          .rpc('log_email', {
-            p_template_id: template.id,
-            p_template_version: template.version,
-            p_recipient_email: `${data.email}@${data.emailDomain}`,
-            p_recipient_name: `${data.firstName} ${data.lastName}`,
-            p_subject: template.subject,
-            p_metadata: {
-              employee_id: authUser.id,
-              password_generated_at: new Date().toISOString(),
-            },
-          })
-
-        if (logError) {
-          console.error('Failed to log email:', logError)
-        }
-
-        // Send welcome email
-        const response = await fetch('/api/email/send', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            template: template.id,
-            recipient: {
-              email: `${data.email}@${data.emailDomain}`,
-              name: `${data.firstName} ${data.lastName}`,
-            },
-            variables: {
-              company_name: process.env.NEXT_PUBLIC_COMPANY_NAME || 'Our Company',
-              employee_name: `${data.firstName} ${data.lastName}`,
-              email: `${data.email}@${data.emailDomain}`,
-              password: temporaryPassword,
-            },
-            logId: emailLog,
-          }),
-        })
-
-        if (!response.ok) {
-          console.error('Failed to send email:', await response.text())
-        }
-
-        return { success: true }
-      } catch (error) {
-        console.error('Error creating employee:', error)
-        throw error
+        toast({ title: 'Employee updated successfully' })
+      } else {
+        await addEmployee(validatedData)
+        toast({ title: 'Employee added successfully' })
       }
-    },
-    onError: (error) => {
-      toast.error('Failed to create employee', {
-        description: error instanceof AppError ? error.message : 'An unexpected error occurred',
-      })
-    },
-    onSuccess: () => {
-      toast.success('Employee created successfully')
-      onClose()
-      router.refresh()
-      setFormData({
-        firstName: '',
-        lastName: '',
-        email: '',
-        emailDomain: '',
-      })
-    },
-  })
 
-  const onSubmit = (values: EmployeeFormValues) => {
-    createEmployeeMutation.mutate(formData)
-  }
+      onOpenChange(false)
+    } catch (error) {
+      handleError(error)
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'An error occurred',
+        variant: 'destructive'
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [employee, updateEmployee, addEmployee, validateFormData, handleError, toast, onOpenChange])
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{employee ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div>
-            <Label htmlFor="full_name">Full Name</Label>
-            <Input
-              id="full_name"
-              {...register('full_name')}
-              className={errors.full_name ? 'border-red-500' : ''}
-            />
-            {errors.full_name && (
-              <p className="text-sm text-red-500">{errors.full_name.message}</p>
-            )}
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label htmlFor="firstName">First Name</label>
+              <Input
+                id="firstName"
+                {...form.register('firstName')}
+                error={form.formState.errors.firstName?.message}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="lastName">Last Name</label>
+              <Input
+                id="lastName"
+                {...form.register('lastName')}
+                error={form.formState.errors.lastName?.message}
+              />
+            </div>
           </div>
 
-          <div>
-            <Label htmlFor="username">Username</Label>
+          <div className="space-y-2">
+            <label htmlFor="email">Email</label>
             <Input
-              id="username"
-              {...register('username')}
-              className={errors.username ? 'border-red-500' : ''}
+              id="email"
+              type="email"
+              {...form.register('email')}
+              error={form.formState.errors.email?.message}
             />
-            {errors.username && (
-              <p className="text-sm text-red-500">{errors.username.message}</p>
-            )}
-          </div>
-
-          <div>
-            <Label htmlFor="employee_role">Role</Label>
-            <Select
-              onValueChange={(value) => setValue('employee_role', value as EmployeeRole)}
-              defaultValue={employee ? mapLegacyRole(employee.employee_role) : 'Employee'}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Employee">Employee</SelectItem>
-                <SelectItem value="Shift Supervisor">Shift Supervisor</SelectItem>
-                <SelectItem value="Management">Management</SelectItem>
-              </SelectContent>
-            </Select>
-            {errors.employee_role && (
-              <p className="text-sm text-red-500">{errors.employee_role.message}</p>
-            )}
-          </div>
-
-          <div>
-            <Label htmlFor="weekly_hours_scheduled">Weekly Hours</Label>
-            <Input
-              id="weekly_hours_scheduled"
-              type="number"
-              {...register('weekly_hours_scheduled', { valueAsNumber: true })}
-              className={errors.weekly_hours_scheduled ? 'border-red-500' : ''}
-            />
-            {errors.weekly_hours_scheduled && (
-              <p className="text-sm text-red-500">{errors.weekly_hours_scheduled.message}</p>
-            )}
           </div>
 
           <div className="flex justify-end space-x-2">
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Creating...' : employee ? 'Save Changes' : 'Add Employee'}
+            <Button
+              type="submit"
+              disabled={isSubmitting || !form.formState.isDirty}
+            >
+              {isSubmitting ? 'Saving...' : employee ? 'Update' : 'Add'}
             </Button>
           </div>
         </form>

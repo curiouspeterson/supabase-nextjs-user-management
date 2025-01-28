@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useRef, useEffect, useMemo, useState } from 'react';
 import { useDrag, DragSourceMonitor } from 'react-dnd';
 import { format } from 'date-fns';
 import type { 
@@ -8,6 +8,8 @@ import type {
   Employee, 
   Shift 
 } from '@/services/scheduler/types';
+import { useScheduleStore } from '@/lib/stores/schedule-store';
+import { cn } from '@/lib/utils';
 
 interface DragItem {
   type: 'SHIFT';
@@ -22,6 +24,9 @@ interface ShiftBlockProps {
   employee: Employee;
   isEditable: boolean;
   onRemove?: () => Promise<void>;
+  startTime?: string;
+  className?: string;
+  overlappingShifts?: Shift[];
 }
 
 export default function ShiftBlock({
@@ -29,10 +34,15 @@ export default function ShiftBlock({
   shift,
   employee,
   isEditable,
-  onRemove
+  onRemove,
+  startTime = '05:00',
+  className,
+  overlappingShifts = []
 }: ShiftBlockProps) {
   const ref = useRef<HTMLDivElement>(null);
-  
+  const { selectedShift, setSelectedShift } = useScheduleStore();
+  const [position, setPosition] = useState({ top: 0, height: 0 });
+
   const [{ isDragging }, dragRef] = useDrag<
     DragItem,
     void,
@@ -76,34 +86,63 @@ export default function ShiftBlock({
     }
   };
 
+  // Calculate position based on start time and handle overlaps
+  useEffect(() => {
+    const shiftStart = new Date(`1970-01-01T${shift.start_time}`);
+    const shiftEnd = new Date(`1970-01-01T${shift.end_time}`);
+    const dayStart = new Date(`1970-01-01T${startTime}`);
+
+    // Calculate minutes from day start
+    const minutesFromStart = (shiftStart.getTime() - dayStart.getTime()) / 1000 / 60;
+    const duration = (shiftEnd.getTime() - shiftStart.getTime()) / 1000 / 60;
+
+    // Handle overlapping shifts
+    const overlapIndex = overlappingShifts.findIndex(s => s.id === shift.id);
+    const overlapOffset = overlapIndex > 0 ? overlapIndex * 10 : 0; // Offset overlapping shifts
+
+    setPosition({
+      top: (minutesFromStart / 30) * 40, // 40px per 30 minutes
+      height: (duration / 30) * 40
+    });
+  }, [shift, startTime, overlappingShifts]);
+
+  const shiftStyle = useMemo(() => ({
+    top: `${position.top}px`,
+    height: `${position.height}px`,
+    left: overlappingShifts.length > 1 ? `${overlappingShifts.findIndex(s => s.id === shift.id) * 10}px` : '0',
+    width: overlappingShifts.length > 1 ? 'calc(100% - 10px)' : '100%',
+    zIndex: overlappingShifts.findIndex(s => s.id === shift.id) + 1
+  }), [position, shift, overlappingShifts]);
+
   return (
     <div
       ref={ref}
-      className={`
-        relative p-2 rounded-md border
-        ${getBgColor()}
-        ${isDragging ? 'opacity-50' : 'opacity-100'}
-        ${isEditable ? 'cursor-move' : ''}
-        transition-all duration-200
-      `}
-      style={{
-        height: `${Math.max(duration * 4, 4)}rem`
-      }}
+      className={cn(
+        'absolute left-0 w-full rounded-md border bg-background p-2 shadow-sm transition-all hover:shadow-md',
+        selectedShift?.id === shift.id && 'ring-2 ring-primary',
+        className
+      )}
+      style={shiftStyle}
+      onClick={() => setSelectedShift(shift)}
+      role="button"
+      tabIndex={0}
+      aria-label={`Shift from ${format(new Date(`1970-01-01T${shift.start_time}`), 'h:mm a')} to ${format(new Date(`1970-01-01T${shift.end_time}`), 'h:mm a')}`}
     >
-      {/* Employee name */}
-      <div className="text-sm font-medium truncate">
-        {employee.employee_role}
-      </div>
-
-      {/* Shift times */}
-      <div className="text-xs text-gray-600">
-        {format(new Date(`2000-01-01T${shift.start_time}`), 'h:mma')} -
-        {format(new Date(`2000-01-01T${shift.end_time}`), 'h:mma')}
-      </div>
-
-      {/* Duration badge */}
-      <div className="absolute bottom-2 right-2 text-xs px-2 py-1 rounded-full bg-white bg-opacity-50">
-        {shift.duration_category}
+      <div className="flex flex-col space-y-1">
+        <div className="text-xs font-medium">
+          {format(new Date(`1970-01-01T${shift.start_time}`), 'h:mm a')} - 
+          {format(new Date(`1970-01-01T${shift.end_time}`), 'h:mm a')}
+        </div>
+        {employee && (
+          <div className="text-xs text-muted-foreground">
+            {employee.first_name} {employee.last_name}
+          </div>
+        )}
+        {overlappingShifts.length > 1 && (
+          <div className="text-xs text-warning">
+            {overlappingShifts.length - 1} overlapping {overlappingShifts.length - 1 === 1 ? 'shift' : 'shifts'}
+          </div>
+        )}
       </div>
 
       {/* Remove button */}

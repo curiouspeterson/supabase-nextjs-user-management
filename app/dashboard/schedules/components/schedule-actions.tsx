@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -19,148 +19,141 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Schedule } from '@/lib/types/schedule';
 import { AppError } from '@/lib/types/error';
+import { useToast } from '@/components/ui/use-toast';
+import { useScheduleStore } from '@/lib/stores/schedule-store';
+import { useAppState } from '@/lib/hooks/use-app-state';
+import type { ScheduleAction } from '@/types';
 
 interface ScheduleActionsProps {
   schedule: Schedule;
+  onAction: (action: ScheduleAction) => Promise<void>;
 }
 
-export function ScheduleActions({ schedule }: ScheduleActionsProps) {
+export function ScheduleActions({ schedule, onAction }: ScheduleActionsProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-  const supabase = createClient();
+  const { toast: useToastToast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [currentAction, setCurrentAction] = useState<ScheduleAction | null>(null);
+  
+  const { addSchedule, updateSchedule, removeSchedule } = useScheduleStore();
+  const { appState, persistState } = useAppState();
 
-  // Optimistic update helper
-  const updateScheduleCache = useCallback(
-    (scheduleId: string, updates: Partial<Schedule>) => {
-      queryClient.setQueryData<Schedule>(
-        ['schedule', scheduleId],
-        (old) => old ? { ...old, ...updates } : undefined
-      );
-
-      queryClient.setQueryData<Schedule[]>(
-        ['schedules'],
-        (old) => old?.map(s => s.id === scheduleId ? { ...s, ...updates } : s)
-      );
-    },
-    [queryClient]
-  );
-
-  // Publish mutation with optimistic updates
-  const publishMutation = useMutation({
-    mutationFn: async (scheduleId: string) => {
-      // Get current state for potential rollback
-      const previousState = await supabase
-        .from('schedules')
-        .select('*')
-        .eq('id', scheduleId)
-        .single()
-        .then(({ data }) => data);
-
-      if (!previousState) {
-        throw new AppError('Schedule not found', 404);
-      }
-
-      // Track operation
-      const { data: operation, error: trackError } = await supabase
-        .rpc('track_schedule_operation', {
-          p_schedule_id: scheduleId,
-          p_operation: 'PUBLISH',
-          p_previous_state: previousState,
-          p_new_state: { ...previousState, status: 'published' }
+  // Persist state on app state changes
+  useEffect(() => {
+    const handleAppStateChange = () => {
+      if (appState === 'active') {
+        persistState('scheduleActions', {
+          showConfirm,
+          currentAction,
+          scheduleId: schedule.id
         });
-
-      if (trackError) {
-        throw new AppError('Failed to track operation', 500);
       }
+    };
+    
+    return () => {
+      handleAppStateChange();
+    };
+  }, [appState, showConfirm, currentAction, schedule.id, persistState]);
 
-      // Publish schedule
-      const { error } = await supabase
-        .from('schedules')
-        .update({ status: 'published' })
-        .eq('id', scheduleId);
-
-      if (error) {
-        // Mark operation as failed
-        await supabase
-          .rpc('complete_schedule_operation', {
-            p_operation_id: operation,
-            p_status: 'failed',
-            p_error_details: error.message
-          });
-        throw new AppError('Failed to publish schedule', 500);
-      }
-
-      // Mark operation as completed
-      await supabase
-        .rpc('complete_schedule_operation', {
-          p_operation_id: operation,
-          p_status: 'completed'
-        });
-
-      return { scheduleId, operation };
-    },
-    onMutate: async (scheduleId) => {
-      // Cancel outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ['schedule', scheduleId] });
-      await queryClient.cancelQueries({ queryKey: ['schedules'] });
-
-      // Optimistically update the schedule
-      updateScheduleCache(scheduleId, { status: 'published' });
-
-      // Return context for rollback
-      return { scheduleId };
-    },
-    onError: (error, _, context) => {
-      if (context) {
-        // Rollback the optimistic update
-        updateScheduleCache(context.scheduleId, { status: 'draft' });
-      }
-      toast.error('Failed to publish schedule', {
-        description: error instanceof AppError ? error.message : 'An unexpected error occurred'
-      });
-    },
-    onSuccess: () => {
-      toast.success('Schedule published successfully');
-      setIsConfirmOpen(false);
-    },
-    onSettled: () => {
-      // Refetch to ensure consistency
-      queryClient.invalidateQueries({ queryKey: ['schedules'] });
-      queryClient.invalidateQueries({ queryKey: ['schedule', schedule.id] });
+  // Restore state on mount
+  useEffect(() => {
+    const restored = persistState.get('scheduleActions');
+    if (restored && restored.scheduleId === schedule.id) {
+      setShowConfirm(restored.showConfirm);
+      setCurrentAction(restored.currentAction);
     }
-  });
+  }, [schedule.id, persistState]);
 
-  const handlePublish = useCallback(() => {
-    publishMutation.mutate(schedule.id);
-  }, [publishMutation, schedule.id]);
+  const handleAction = useCallback(async (action: ScheduleAction) => {
+    try {
+      setIsLoading(true);
+      setCurrentAction(action);
+      
+      if (action === 'delete') {
+        setShowConfirm(true);
+        return;
+      }
+
+      await onAction(action);
+      
+      switch (action) {
+        case 'publish':
+          updateSchedule({ ...schedule, status: 'published' });
+          useToastToast({ title: 'Schedule published successfully' });
+          break;
+        case 'unpublish':
+          updateSchedule({ ...schedule, status: 'draft' });
+          useToastToast({ title: 'Schedule unpublished successfully' });
+          break;
+        case 'delete':
+          removeSchedule(schedule.id);
+          useToastToast({ title: 'Schedule deleted successfully' });
+          break;
+        default:
+          throw new Error(`Invalid action: ${action}`);
+      }
+    } catch (error) {
+      useToastToast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'An error occurred',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsLoading(false);
+      setCurrentAction(null);
+      setShowConfirm(false);
+    }
+  }, [schedule, onAction, updateSchedule, removeSchedule, useToastToast]);
 
   return (
-    <div className="flex items-center gap-4">
-      <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
-        <AlertDialogTrigger asChild>
+    <>
+      <div className="flex space-x-2">
+        {schedule.status === 'draft' && (
           <Button
             variant="default"
-            disabled={schedule.status === 'published' || publishMutation.isPending}
+            onClick={() => handleAction('publish')}
+            disabled={isLoading}
           >
-            {publishMutation.isPending ? 'Publishing...' : 'Publish Schedule'}
+            Publish
           </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Publish Schedule</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to publish this schedule? This will make it visible to all employees.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handlePublish}>
-              Publish
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+        )}
+        
+        {schedule.status === 'published' && (
+          <Button
+            variant="outline"
+            onClick={() => handleAction('unpublish')}
+            disabled={isLoading}
+          >
+            Unpublish
+          </Button>
+        )}
+
+        <Button
+          variant="destructive"
+          onClick={() => handleAction('delete')}
+          disabled={isLoading}
+        >
+          Delete
+        </Button>
+      </div>
+
+      <AlertDialog
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        title="Delete Schedule"
+        description="Are you sure you want to delete this schedule? This action cannot be undone."
+        action={
+          <Button
+            variant="destructive"
+            onClick={() => handleAction('delete')}
+            disabled={isLoading}
+          >
+            Delete
+          </Button>
+        }
+      />
+    </>
   );
 } 

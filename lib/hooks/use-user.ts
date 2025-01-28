@@ -4,9 +4,31 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { User, AuthError } from '@supabase/supabase-js'
 import { AppError, AuthError as CustomAuthError, NetworkError } from '@/lib/types/error'
+import { z } from 'zod'
+
+// Define schemas for type safety
+const UserRoleSchema = z.enum(['ADMIN', 'MANAGER', 'EMPLOYEE'])
+const ProfileStatusSchema = z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED', 'PENDING'])
+
+const UserProfileSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  role: UserRoleSchema,
+  status: ProfileStatusSchema,
+  full_name: z.string().nullable(),
+  avatar_url: z.string().nullable(),
+  metadata: z.record(z.unknown()).default({}),
+  preferences: z.record(z.unknown()).default({}),
+  last_active: z.string().datetime().nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime()
+})
+
+type UserProfile = z.infer<typeof UserProfileSchema>
 
 interface UserState {
   user: User | null
+  profile: UserProfile | null
   loading: boolean
   error: AppError | null
   lastSync: Date | null
@@ -16,6 +38,7 @@ interface UserState {
 
 const initialState: UserState = {
   user: null,
+  profile: null,
   loading: true,
   error: null,
   lastSync: null,
@@ -153,15 +176,37 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
     }
   }, [supabase, state.retryCount, shouldRetry, getRetryDelay, updateState])
 
+  // Function to get user profile
+  const getUserProfile = useCallback(async (userId: string) => {
+    try {
+      const { data, error } = await supabase.rpc('get_user_profile', {
+        p_user_id: userId
+      })
+
+      if (error) throw error
+
+      // Validate profile data
+      const profile = UserProfileSchema.parse(data[0])
+      return profile
+    } catch (error) {
+      console.error('Failed to get user profile:', error)
+      return null
+    }
+  }, [supabase])
+
   // Function to get initial user
   const getInitialUser = useCallback(async () => {
     try {
       const { data: { user }, error } = await supabase.auth.getUser()
       
       if (error) throw error
+
+      // Get user profile if we have a user
+      const profile = user ? await getUserProfile(user.id) : null
       
       updateState({ 
         user,
+        profile,
         loading: false,
         error: null,
         retryCount: 0,
@@ -172,12 +217,15 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
       await supabase.rpc('log_auth_event', {
         p_event_type: 'USER_SYNC',
         p_user_id: user?.id,
-        p_metadata: { timestamp: new Date().toISOString() }
+        p_metadata: { 
+          timestamp: new Date().toISOString(),
+          hasProfile: !!profile
+        }
       })
     } catch (error) {
       handleError(error as Error | AuthError)
     }
-  }, [supabase, updateState, handleError])
+  }, [supabase, updateState, handleError, getUserProfile])
 
   useEffect(() => {
     let mounted = true
@@ -197,8 +245,10 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
           case 'TOKEN_REFRESHED':
           case 'USER_UPDATED':
             if (session?.user?.id !== state.user?.id) {
+              const profile = await getUserProfile(session!.user.id)
               updateState({
                 user: session?.user ?? null,
+                profile,
                 loading: false,
                 error: null,
                 retryCount: 0,
@@ -211,6 +261,7 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
           case 'USER_DELETED':
             updateState({
               user: null,
+              profile: null,
               loading: false,
               error: null,
               retryCount: 0,
@@ -231,7 +282,8 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
           p_user_id: session?.user?.id,
           p_metadata: { 
             timestamp: new Date().toISOString(),
-            previousUserId: state.user?.id
+            previousUserId: state.user?.id,
+            hasProfile: !!state.profile
           },
           p_success: success,
           p_error_id: errorId,
@@ -249,7 +301,7 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
       mounted = false
       subscription.unsubscribe()
     }
-  }, [supabase, state.user?.id, updateState, handleError, getInitialUser])
+  }, [supabase, state.user?.id, state.profile, updateState, handleError, getInitialUser, getUserProfile])
 
   return state
 } 

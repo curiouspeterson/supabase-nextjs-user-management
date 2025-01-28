@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
-import { createServerClient } from '@/utils/supabase/server'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
 import { ApiError, DatabaseError, AuthError, ValidationError } from '@/lib/errors'
@@ -47,23 +47,7 @@ export async function POST(request: Request) {
       weeks: validatedData.weeks,
     })
 
-    const supabase = createServerClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient(cookies())
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -92,86 +76,61 @@ export async function POST(request: Request) {
     const startDate = startOfWeek(parseISO(validatedData.start_date))
     const endDate = addWeeks(startDate, validatedData.weeks)
 
-    // Begin transaction
-    const { error: beginError } = await supabase.rpc('begin_transaction')
-    if (beginError) {
-      throw new DatabaseError('Failed to begin transaction', { cause: beginError })
-    }
+    // Fetch required data with pagination and date range filtering
+    const batchSize = 100
+    const generator = new ScheduleGenerator(supabase)
 
-    try {
-      // Fetch required data with pagination and date range filtering
-      const batchSize = 100
-      const generator = new ScheduleGenerator(supabase)
+    // Initialize generator with date range
+    await generator.initialize({
+      startDate: format(startDate, 'yyyy-MM-dd'),
+      endDate: format(endDate, 'yyyy-MM-dd'),
+      departmentId: validatedData.department_id,
+      batchSize,
+    })
 
-      // Initialize generator with date range
-      await generator.initialize({
-        startDate: format(startDate, 'yyyy-MM-dd'),
-        endDate: format(endDate, 'yyyy-MM-dd'),
-        departmentId: validatedData.department_id,
-        batchSize,
-      })
+    // Generate schedules
+    const { schedules, errors } = await generator.generate()
 
-      // Generate schedules
-      const { schedules, errors } = await generator.generate()
-
-      if (errors.length > 0) {
-        // Log errors but continue if some schedules were generated
-        logger.warn('Some schedules could not be generated', {
-          requestId,
-          errors,
-        })
-      }
-
-      if (schedules.length === 0) {
-        throw new ValidationError('No schedules could be generated')
-      }
-
-      // Insert schedules in batches
-      for (let i = 0; i < schedules.length; i += batchSize) {
-        const batch = schedules.slice(i, i + batchSize)
-        const { error: insertError } = await supabase
-          .from('schedules')
-          .insert(batch.map(schedule => ({
-            ...schedule,
-            created_by: user.id,
-          })))
-
-        if (insertError) {
-          throw new DatabaseError('Failed to insert schedules', { cause: insertError })
-        }
-      }
-
-      // Commit transaction
-      const { error: commitError } = await supabase.rpc('commit_transaction')
-      if (commitError) {
-        throw new DatabaseError('Failed to commit transaction', { cause: commitError })
-      }
-
-      logger.info('Successfully generated schedules', {
+    if (errors.length > 0) {
+      // Log errors but continue if some schedules were generated
+      logger.warn('Some schedules could not be generated', {
         requestId,
-        count: schedules.length,
-        warnings: errors.length,
+        errors,
       })
-
-      return NextResponse.json({
-        message: 'Schedules generated successfully',
-        data: {
-          count: schedules.length,
-          warnings: errors.length > 0 ? errors : undefined,
-        },
-      })
-
-    } catch (error) {
-      // Rollback transaction on error
-      const { error: rollbackError } = await supabase.rpc('rollback_transaction')
-      if (rollbackError) {
-        logger.error('Failed to rollback transaction', {
-          requestId,
-          error: rollbackError,
-        })
-      }
-      throw error
     }
+
+    if (schedules.length === 0) {
+      throw new ValidationError('No schedules could be generated')
+    }
+
+    // Insert schedules in batches
+    for (let i = 0; i < schedules.length; i += batchSize) {
+      const batch = schedules.slice(i, i + batchSize)
+      const { error: insertError } = await supabase
+        .from('schedules')
+        .insert(batch.map(schedule => ({
+          ...schedule,
+          created_by: user.id,
+        })))
+
+      if (insertError) {
+        throw new DatabaseError('Failed to insert schedules', { cause: insertError })
+      }
+    }
+
+    logger.info('Successfully generated schedules', {
+      requestId,
+      count: schedules.length,
+      warnings: errors.length,
+    })
+
+    return NextResponse.json({
+      message: 'Schedules generated successfully',
+      data: {
+        count: schedules.length,
+        warnings: errors.length > 0 ? errors : undefined,
+      },
+    })
 
   } catch (error) {
     logger.error('Error generating schedules', {

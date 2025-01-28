@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useRef, useMemo, useCallback } from 'react';
 import { useDrop } from 'react-dnd';
 import { format } from 'date-fns';
+import { toast } from '@/components/ui/use-toast';
+import { useErrorBoundary } from 'react-error-boundary';
+import { useHealthMonitor } from '@/hooks/use-health-monitor';
 import type { 
   Schedule, 
   Employee, 
@@ -25,6 +28,14 @@ interface DragItem {
   employeeId: string;
 }
 
+// Memoized current hour check
+const useIsCurrentHour = (hour: number) => {
+  return useMemo(() => {
+    const now = new Date();
+    return now.getHours() === hour;
+  }, [hour]);
+};
+
 export default function TimeSlot({
   date,
   hour,
@@ -35,34 +46,70 @@ export default function TimeSlot({
   onAssignShift
 }: TimeSlotProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const { showBoundary } = useErrorBoundary();
+  const { trackError } = useHealthMonitor();
+  const isCurrentHourValue = useIsCurrentHour(hour);
+
+  // Memoize the drop handler
+  const handleDrop = useCallback(async (item: DragItem) => {
+    if (!onAssignShift) return;
+
+    try {
+      // Find the most appropriate shift starting at this hour
+      const availableShift = shifts.find(s => {
+        const [shiftHour] = s.start_time.split(':').map(Number);
+        return shiftHour === hour;
+      });
+
+      if (availableShift) {
+        await onAssignShift(item.employeeId, availableShift.id, date);
+        toast({
+          title: 'Shift Assigned',
+          description: 'The shift has been successfully assigned.',
+        });
+      } else {
+        toast({
+          title: 'No Available Shift',
+          description: 'No shift is available for this time slot.',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      toast({
+        title: 'Error Assigning Shift',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+      trackError('SCHEDULE', 'SHIFT_ASSIGNMENT', {
+        error: errorMessage,
+        employeeId: item.employeeId,
+        date: date.toISOString(),
+        hour,
+      });
+      showBoundary(error);
+    }
+  }, [onAssignShift, shifts, hour, date, toast, trackError, showBoundary]);
+
+  // Memoize the canDrop check
+  const canDropCheck = useCallback(() => {
+    if (!isEditable) return false;
+    return !schedules.some(s => {
+      const shift = shifts.find(sh => sh.id === s.shift_id);
+      if (!shift) return false;
+      const [shiftHour] = shift.start_time.split(':').map(Number);
+      return shiftHour === hour;
+    });
+  }, [isEditable, schedules, shifts, hour]);
+
   const [{ isOver, canDrop }, drop] = useDrop<
     DragItem,
     void,
     { isOver: boolean; canDrop: boolean }
   >({
     accept: 'EMPLOYEE',
-    drop: (item) => {
-      if (onAssignShift) {
-        // Find the most appropriate shift starting at this hour
-        const availableShift = shifts.find(s => {
-          const [shiftHour] = s.start_time.split(':').map(Number);
-          return shiftHour === hour;
-        });
-
-        if (availableShift) {
-          // Call onAssignShift and handle any errors
-          onAssignShift(item.employeeId, availableShift.id, date).catch(error => {
-            console.error('Error assigning shift:', error);
-          });
-        }
-      }
-    },
-    canDrop: () => isEditable && !schedules.some(s => {
-      const shift = shifts.find(sh => sh.id === s.shift_id);
-      if (!shift) return false;
-      const [shiftHour] = shift.start_time.split(':').map(Number);
-      return shiftHour === hour;
-    }),
+    drop: handleDrop,
+    canDrop: canDropCheck,
     collect: (monitor) => ({
       isOver: monitor.isOver(),
       canDrop: monitor.canDrop()
@@ -72,27 +119,35 @@ export default function TimeSlot({
   // Connect the drop ref to our element ref
   drop(ref);
 
-  // Find schedules that start in this time slot
-  const timeSlotSchedules = schedules.filter(schedule => {
-    const shift = shifts.find(s => s.id === schedule.shift_id);
-    if (!shift) return false;
-    
-    const shiftHour = parseInt(shift.start_time.split(':')[0]);
-    return shiftHour === hour;
-  });
+  // Memoize filtered schedules
+  const timeSlotSchedules = useMemo(() => 
+    schedules.filter(schedule => {
+      const shift = shifts.find(s => s.id === schedule.shift_id);
+      if (!shift) return false;
+      const shiftHour = parseInt(shift.start_time.split(':')[0]);
+      return shiftHour === hour;
+    }),
+    [schedules, shifts, hour]
+  );
 
   return (
     <div
       ref={ref}
       className={`
-        h-16 border-b border-gray-200 p-2
+        relative h-16 border-b border-gray-200 p-2
         ${isOver && canDrop ? 'bg-blue-50' : ''}
         ${canDrop ? 'bg-gray-50' : ''}
       `}
+      role="gridcell"
+      aria-label={`Time slot for ${format(date, 'MMM d')} at ${format(new Date().setHours(hour), 'ha')}`}
     >
       {/* Current hour indicator */}
-      {isCurrentHour(hour) && (
-        <div className="absolute inset-0 bg-yellow-100 opacity-20"></div>
+      {isCurrentHourValue && (
+        <div 
+          className="absolute inset-0 bg-yellow-100 opacity-20"
+          role="presentation"
+          aria-hidden="true"
+        />
       )}
 
       {/* Time slot label */}
@@ -119,9 +174,4 @@ export default function TimeSlot({
       })}
     </div>
   );
-}
-
-function isCurrentHour(hour: number): boolean {
-  const now = new Date();
-  return now.getHours() === hour;
 } 

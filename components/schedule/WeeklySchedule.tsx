@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useMemo } from 'react'
 import { addDays, format, startOfWeek } from 'date-fns'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
@@ -13,6 +13,9 @@ import type {
 import TimeSlot from './TimeSlot'
 import CoverageIndicator from './CoverageIndicator'
 import ScheduleControls from './ScheduleControls'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle } from 'lucide-react'
 
 interface WeeklyScheduleProps {
   schedules: Schedule[]
@@ -21,7 +24,14 @@ interface WeeklyScheduleProps {
   coverage: CoverageReport[]
   onAssignShift?: (employeeId: string, shiftId: string, date: Date) => Promise<void>
   onRemoveShift?: (scheduleId: string) => Promise<void>
+  startDate: Date
+  isEditable?: boolean
+  isLoading?: boolean
+  error?: Error | null
 }
+
+const HOURS = Array.from({ length: 24 }, (_, i) => i)
+const DAYS = Array.from({ length: 7 }, (_, i) => i)
 
 export default function WeeklySchedule({
   schedules,
@@ -29,16 +39,63 @@ export default function WeeklySchedule({
   shifts,
   coverage,
   onAssignShift,
-  onRemoveShift
+  onRemoveShift,
+  startDate,
+  isEditable = false,
+  isLoading = false,
+  error = null
 }: WeeklyScheduleProps) {
   const [currentDate, setCurrentDate] = useState(new Date())
-  const weekStart = startOfWeek(currentDate)
+  const weekStart = useMemo(() => startOfWeek(startDate), [startDate])
   
   // Generate array of dates for the week
   const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
   
-  // Generate array of hours for the day
-  const hours = Array.from({ length: 24 }, (_, i) => i)
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription>
+          {error.message || 'An error occurred while loading the schedule'}
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <div className="grid grid-cols-8 gap-4">
+          <div className="col-span-1" /> {/* Empty cell for time column */}
+          {DAYS.map(day => (
+            <Skeleton 
+              key={day} 
+              className="h-8 w-full"
+              role="presentation"
+              aria-label="Loading day header"
+            />
+          ))}
+        </div>
+        {HOURS.map(hour => (
+          <div key={hour} className="grid grid-cols-8 gap-4">
+            <Skeleton 
+              className="h-16 w-full"
+              role="presentation" 
+              aria-label={`Loading time slot for ${hour}:00`}
+            />
+            {DAYS.map(day => (
+              <Skeleton 
+                key={`${hour}-${day}`} 
+                className="h-16 w-full"
+                role="presentation"
+                aria-label={`Loading schedule slot for day ${day + 1} at ${hour}:00`}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -52,7 +109,7 @@ export default function WeeklySchedule({
           {/* Time column */}
           <div className="col-span-1">
             <div className="h-12"></div> {/* Header spacer */}
-            {hours.map(hour => (
+            {HOURS.map(hour => (
               <div key={hour} className="h-16 flex items-center justify-end pr-2 text-sm text-gray-600">
                 {format(new Date().setHours(hour), 'ha')}
               </div>
@@ -73,7 +130,7 @@ export default function WeeklySchedule({
               </div>
 
               {/* Time slots */}
-              {hours.map(hour => (
+              {HOURS.map(hour => (
                 <TimeSlot
                   key={`${date.toISOString()}-${hour}`}
                   date={date}

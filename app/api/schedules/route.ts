@@ -8,7 +8,7 @@ import {
   UpdateScheduleInput,
   BulkUpdateScheduleInput
 } from '@/types/schedule'
-import { createServerClient } from '@/utils/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
 import { ApiError, DatabaseError, AuthError, ValidationError } from '@/lib/errors'
@@ -18,7 +18,7 @@ import crypto from 'crypto'
 // GET /api/schedules
 export async function GET(request: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createClient(cookies())
     const { searchParams } = new URL(request.url)
     
     // Get query parameters
@@ -32,16 +32,15 @@ export async function GET(request: Request) {
     // Build query with expanded relations
     let query = supabase.from('schedules').select(`
       *,
-      shifts (
+      shifts:shifts (
         *,
-        shift_types (*)
+        shift_types:shift_types (*)
       ),
-      employees (
-        id, 
-        full_name,
-        employee_pattern,
-        weekly_hours_scheduled,
-        default_shift_type_id
+      employees:employees (
+        *,
+        profiles:profiles (
+          full_name
+        )
       )
     `)
     
@@ -119,7 +118,7 @@ export async function POST(request: Request) {
       weekStart: validatedData.week_start_date,
     })
 
-    const supabase = createServerClient(
+    const supabase = createClient(
       env.NEXT_PUBLIC_SUPABASE_URL,
       env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
@@ -429,7 +428,7 @@ export async function PUT(request: Request) {
       scheduleId: validatedData.id,
     })
 
-    const supabase = createServerClient(
+    const supabase = createClient(
       env.NEXT_PUBLIC_SUPABASE_URL,
       env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {

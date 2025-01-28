@@ -1,48 +1,36 @@
-import React from 'react';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
-import { ShiftPattern } from '@/services/scheduler/types';
-import PatternActions from './PatternActions';
-import { Metadata } from 'next';
+import { Suspense } from 'react'
+import { PatternList } from './components/pattern-list'
+import { PatternForm } from './components/pattern-form'
+import { LoadingSpinner } from '@/components/ui/loading-spinner'
+import { ErrorBoundary } from '@/components/error-boundary'
 
-export const metadata: Metadata = {
-  title: 'Shift Patterns | 911 Dispatch',
-  description: 'Manage shift patterns for dispatch scheduling',
-};
-
-async function getPatterns() {
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        },
-      },
-    }
-  );
-  
-  const { data: patterns, error } = await supabase
-    .from('shift_patterns')
-    .select('*')
-    .order('name');
-    
-  if (error) {
-    console.error('Error fetching patterns:', error);
-    return [];
-  }
-  
-  return patterns as ShiftPattern[];
-}
-
-export default async function PatternsPage() {
-  const patterns = await getPatterns();
-  
+export default function PatternsPage() {
   return (
-    <div className="container mx-auto py-8">
-      <PatternActions initialPatterns={patterns} />
+    <div className="container mx-auto py-6">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold">Shift Patterns</h1>
+        <p className="text-muted-foreground">
+          Create and manage shift patterns for scheduling
+        </p>
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <ErrorBoundary>
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold">Available Patterns</h2>
+            <Suspense fallback={<LoadingSpinner />}>
+              <PatternList />
+            </Suspense>
+          </div>
+        </ErrorBoundary>
+
+        <ErrorBoundary>
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold">Create Pattern</h2>
+            <PatternForm />
+          </div>
+        </ErrorBoundary>
+      </div>
     </div>
-  );
+  )
 } 
