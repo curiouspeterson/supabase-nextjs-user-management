@@ -2,6 +2,7 @@ import * as React from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from '@/components/ui/form'
 import * as z from 'zod'
+import { Database } from '@/types/supabase'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -33,21 +34,31 @@ const patternSchema = z.object({
 
 type PatternFormValues = z.infer<typeof patternSchema>
 
-function convertToPattern(formData: PatternFormValues): Omit<Pattern, 'id' | 'createdAt' | 'updatedAt'> {
+function convertToPattern(formData: PatternFormValues): Omit<Pattern, 'id' | 'created_at' | 'updated_at'> {
   // Convert the pattern string to shifts array
-  const shifts = formData.pattern.split('').map((day, index) => ({
-    startTime: `${(index * 24) % 168}:00`, // 168 hours in a week
-    endTime: `${((index * 24) + formData.shift_duration) % 168}:00`,
-    duration: formData.shift_duration,
-    type: day === '1' ? 'work' : 'off'
-  }))
+  const shifts = formData.pattern.split('').map((day, index) => {
+    const startHour = (index * 24) % 168 // 168 hours in a week
+    const endHour = (startHour + formData.shift_duration) % 168
+    
+    let duration_category: Database['public']['Enums']['duration_category_enum'] | null = null
+    if (formData.shift_duration <= 4) duration_category = '4 hours'
+    else if (formData.shift_duration <= 10) duration_category = '10 hours'
+    else if (formData.shift_duration <= 12) duration_category = '12 hours'
+    
+    return {
+      start_time: `${startHour.toString().padStart(2, '0')}:00:00`,
+      end_time: `${endHour.toString().padStart(2, '0')}:00:00`,
+      shift_type_id: day === '1' ? 'work' : 'off', // You'll need to use actual shift_type_ids from your database
+      duration_hours: formData.shift_duration,
+      duration_category
+    }
+  })
 
   return {
     name: formData.name,
     description: formData.description,
-    duration: formData.pattern.length * 24, // Duration in hours
     shifts,
-    status: PatternStatus.ACTIVE
+    status: 'Draft'
   }
 }
 

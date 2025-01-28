@@ -2,12 +2,14 @@
  * Employee-related type definitions
  */
 
-export enum EmployeeRole {
-  ADMIN = 'ADMIN',
-  MANAGER = 'MANAGER',
-  SUPERVISOR = 'SUPERVISOR',
-  EMPLOYEE = 'EMPLOYEE'
-}
+import { Database } from './supabase'
+
+export type Employee = Database['public']['Tables']['employees']['Row']
+export type EmployeeInsert = Database['public']['Tables']['employees']['Insert']
+export type EmployeeUpdate = Database['public']['Tables']['employees']['Update']
+
+export type EmployeeRole = Database['public']['Enums']['employee_role_enum']
+export type UserRole = Database['public']['Enums']['user_role_enum']
 
 export enum EmployeeStatus {
   ACTIVE = 'ACTIVE',

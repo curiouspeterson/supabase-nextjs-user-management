@@ -1,5 +1,9 @@
 import { SupabaseClient } from '@supabase/supabase-js'
-import type { Schedule, Pattern, Employee, Shift } from '@/types'
+import type { Schedule } from '@/types/schedule'
+import type { Pattern, PatternShift } from '@/types/pattern'
+import type { Employee } from '@/types/employee'
+import type { Shift } from '@/types/schedule'
+import { Database } from '@/types/supabase'
 
 export class ScheduleGenerator {
   private supabase: SupabaseClient
@@ -103,11 +107,13 @@ export class ScheduleGenerator {
     )
 
     return {
-      start_date: this.startDate,
-      end_date: this.endDate,
-      pattern_id: pattern.id,
-      status: 'DRAFT',
-      shifts
+      date: this.startDate,
+      employee_id: employees[0].id, // We'll need to implement proper employee assignment
+      shift_id: shifts[0].id, // We'll need to implement proper shift assignment
+      status: 'Draft',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      id: crypto.randomUUID()
     }
   }
 
@@ -133,18 +139,16 @@ export class ScheduleGenerator {
       )
 
       // Generate shifts for this day based on pattern
-      pattern.shifts.forEach((patternShift) => {
+      pattern.shifts.forEach((patternShift: PatternShift) => {
         const shift: Shift = {
-          date: currentDate.toISOString(),
           start_time: patternShift.start_time,
           end_time: patternShift.end_time,
-          role: patternShift.role,
-          employee_id: this.assignEmployee(
-            availableEmployees,
-            patternShift.role,
-            shifts
-          ),
-          status: 'PENDING'
+          shift_type_id: patternShift.shift_type_id,
+          duration_hours: patternShift.duration_hours,
+          duration_category: patternShift.duration_category,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          id: crypto.randomUUID()
         }
 
         shifts.push(shift)
@@ -177,7 +181,7 @@ export class ScheduleGenerator {
 
   private assignEmployee(
     availableEmployees: Employee[],
-    role: string,
+    role: Database['public']['Enums']['employee_role_enum'],
     existingShifts: Shift[]
   ): string {
     // Filter employees by role

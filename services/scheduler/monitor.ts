@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server';
 import { logger } from '@/lib/logger';
 import { AppError, DatabaseError } from '@/lib/errors';
+import type { Json } from '@/types/supabase';
 import type { 
   SchedulerMetrics, 
   HealthCheckResult,
@@ -37,6 +38,24 @@ export class SchedulerMonitor {
     this.environment = environment;
   }
 
+  private isValidThresholds(value: unknown): value is MonitoringThresholds {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as any;
+    
+    return (
+      obj.critical &&
+      typeof obj.critical.coverage_deficit === 'number' &&
+      typeof obj.critical.overtime_violations === 'number' &&
+      typeof obj.critical.pattern_errors === 'number' &&
+      typeof obj.critical.schedule_generation_time === 'number' &&
+      obj.warning &&
+      typeof obj.warning.coverage_deficit === 'number' &&
+      typeof obj.warning.overtime_violations === 'number' &&
+      typeof obj.warning.pattern_errors === 'number' &&
+      typeof obj.warning.schedule_generation_time === 'number'
+    );
+  }
+
   /**
    * Initialize monitoring thresholds from database
    */
@@ -54,7 +73,15 @@ export class SchedulerMonitor {
         throw new DatabaseError(`Failed to get monitoring thresholds: ${error.message}`);
       }
 
-      this.thresholds = config as MonitoringThresholds;
+      if (!config || !config.config_value) {
+        throw new DatabaseError('Monitoring thresholds configuration not found');
+      }
+
+      if (!this.isValidThresholds(config.config_value)) {
+        throw new DatabaseError('Invalid monitoring thresholds configuration format');
+      }
+
+      this.thresholds = config.config_value;
     } catch (error) {
       logger.error('Failed to initialize monitoring thresholds', {
         error,
@@ -69,55 +96,44 @@ export class SchedulerMonitor {
    */
   public async checkHealth(): Promise<HealthCheckResult> {
     try {
-      // Initialize thresholds if not already done
-      if (!this.thresholds) {
-        await this.initializeThresholds();
-      }
-
-      // Get current metrics and coverage
-      const [metrics, coverage] = await Promise.all([
-        this.getMetrics(),
-        this.getCoverageReport()
-      ]);
-
-      // Generate alerts based on thresholds
+      const metrics = await this.getMetrics();
+      const coverage = await this.getCoverageReport();
       const alerts: string[] = [];
-      const thresholds = this.thresholds!;
 
-      if (metrics.coverage_deficit >= thresholds.critical.coverage_deficit) {
-        alerts.push(`CRITICAL: Coverage deficit (${metrics.coverage_deficit}) exceeds critical threshold`);
-      } else if (metrics.coverage_deficit >= thresholds.warning.coverage_deficit) {
-        alerts.push(`WARNING: Coverage deficit (${metrics.coverage_deficit}) exceeds warning threshold`);
+      // Check thresholds
+      if (!this.thresholds) {
+        throw new AppError('Monitoring thresholds not initialized', 'MONITOR_CONFIG_ERROR');
       }
 
-      if (metrics.overtime_violations >= thresholds.critical.overtime_violations) {
-        alerts.push(`CRITICAL: Overtime violations (${metrics.overtime_violations}) exceed critical threshold`);
-      } else if (metrics.overtime_violations >= thresholds.warning.overtime_violations) {
-        alerts.push(`WARNING: Overtime violations (${metrics.overtime_violations}) exceed warning threshold`);
+      // Evaluate metrics against thresholds
+      if (metrics.coverage_deficit >= this.thresholds.critical.coverage_deficit) {
+        alerts.push(`Critical: Coverage deficit ${metrics.coverage_deficit} exceeds threshold ${this.thresholds.critical.coverage_deficit}`);
+      } else if (metrics.coverage_deficit >= this.thresholds.warning.coverage_deficit) {
+        alerts.push(`Warning: Coverage deficit ${metrics.coverage_deficit} exceeds threshold ${this.thresholds.warning.coverage_deficit}`);
       }
 
-      if (metrics.pattern_errors >= thresholds.critical.pattern_errors) {
-        alerts.push(`CRITICAL: Pattern errors (${metrics.pattern_errors}) exceed critical threshold`);
-      } else if (metrics.pattern_errors >= thresholds.warning.pattern_errors) {
-        alerts.push(`WARNING: Pattern errors (${metrics.pattern_errors}) exceed warning threshold`);
+      if (metrics.overtime_violations >= this.thresholds.critical.overtime_violations) {
+        alerts.push(`Critical: ${metrics.overtime_violations} overtime violations exceed threshold ${this.thresholds.critical.overtime_violations}`);
+      } else if (metrics.overtime_violations >= this.thresholds.warning.overtime_violations) {
+        alerts.push(`Warning: ${metrics.overtime_violations} overtime violations exceed threshold ${this.thresholds.warning.overtime_violations}`);
       }
 
-      if (metrics.schedule_generation_time >= thresholds.critical.schedule_generation_time) {
-        alerts.push(`CRITICAL: Schedule generation time (${metrics.schedule_generation_time}ms) exceeds critical threshold`);
-      } else if (metrics.schedule_generation_time >= thresholds.warning.schedule_generation_time) {
-        alerts.push(`WARNING: Schedule generation time (${metrics.schedule_generation_time}ms) exceeds warning threshold`);
+      if (metrics.pattern_errors >= this.thresholds.critical.pattern_errors) {
+        alerts.push(`Critical: ${metrics.pattern_errors} pattern errors exceed threshold ${this.thresholds.critical.pattern_errors}`);
+      } else if (metrics.pattern_errors >= this.thresholds.warning.pattern_errors) {
+        alerts.push(`Warning: ${metrics.pattern_errors} pattern errors exceed threshold ${this.thresholds.warning.pattern_errors}`);
       }
 
-      // Determine overall status
-      let status: 'healthy' | 'degraded' | 'critical' = 'healthy';
-      if (alerts.some(alert => alert.startsWith('CRITICAL'))) {
-        status = 'critical';
-      } else if (alerts.some(alert => alert.startsWith('WARNING'))) {
-        status = 'degraded';
+      if (metrics.schedule_generation_time >= this.thresholds.critical.schedule_generation_time) {
+        alerts.push(`Critical: Schedule generation time ${metrics.schedule_generation_time}ms exceeds threshold ${this.thresholds.critical.schedule_generation_time}ms`);
+      } else if (metrics.schedule_generation_time >= this.thresholds.warning.schedule_generation_time) {
+        alerts.push(`Warning: Schedule generation time ${metrics.schedule_generation_time}ms exceeds threshold ${this.thresholds.warning.schedule_generation_time}ms`);
       }
 
       const result: HealthCheckResult = {
-        status,
+        status: alerts.some(a => a.startsWith('Critical')) ? 'critical' : 
+                alerts.some(a => a.startsWith('Warning')) ? 'degraded' : 
+                'healthy',
         metrics,
         coverage,
         alerts
@@ -126,7 +142,7 @@ export class SchedulerMonitor {
       // Record health check result
       await this.supabase.rpc('record_scheduler_metrics', {
         p_metrics_type: 'health_check',
-        p_metrics_value: result,
+        p_metrics_value: this.toJson(result),
         p_environment: this.environment
       });
 
@@ -136,14 +152,7 @@ export class SchedulerMonitor {
         error,
         context: 'SchedulerMonitor.checkHealth'
       });
-
-      throw new AppError(
-        'Failed to complete health check',
-        'HEALTH_CHECK_ERROR',
-        {
-          originalError: error instanceof Error ? error.message : 'Unknown error'
-        }
-      );
+      throw new AppError('Health check failed', 'HEALTH_CHECK_ERROR');
     }
   }
 
@@ -152,17 +161,20 @@ export class SchedulerMonitor {
    */
   public async recordMetrics(metrics: Partial<SchedulerMetrics>): Promise<void> {
     try {
-      const { error } = await this.supabase
-        .from('scheduler_metrics')
-        .insert({
-          ...metrics,
-          created_at: new Date().toISOString()
-        });
-
-      if (error) throw error;
+      const result = await this.checkHealth();
+      
+      // Record health check result
+      await this.supabase.rpc('record_scheduler_metrics', {
+        p_metrics_type: 'health_check',
+        p_metrics_value: this.toJson(result),
+        p_environment: this.environment
+      });
     } catch (error) {
-      console.error('Failed to record scheduler metrics:', error);
-      throw new Error('Failed to record metrics');
+      logger.error('Failed to record scheduler metrics', {
+        error,
+        context: 'SchedulerMonitor.recordMetrics'
+      });
+      throw new AppError('Failed to record metrics', 'METRICS_RECORD_ERROR');
     }
   }
 
@@ -264,5 +276,35 @@ export class SchedulerMonitor {
 
       throw new AppError('Failed to get coverage report', 'COVERAGE_ERROR');
     }
+  }
+
+  private toJson(result: HealthCheckResult): Json {
+    const jsonResult = {
+      status: result.status,
+      metrics: {
+        coverage_deficit: result.metrics.coverage_deficit,
+        overtime_violations: result.metrics.overtime_violations,
+        pattern_errors: result.metrics.pattern_errors,
+        schedule_generation_time: result.metrics.schedule_generation_time,
+        last_run_status: result.metrics.last_run_status,
+        error_message: result.metrics.error_message
+      },
+      coverage: result.coverage.map(c => ({
+        date: c.date,
+        periods: Object.fromEntries(
+          Object.entries(c.periods).map(([key, value]) => [
+            key,
+            {
+              required: value.required,
+              actual: value.actual,
+              supervisors: value.supervisors,
+              overtime: value.overtime
+            }
+          ])
+        )
+      })),
+      alerts: result.alerts
+    };
+    return jsonResult as Json;
   }
 } 

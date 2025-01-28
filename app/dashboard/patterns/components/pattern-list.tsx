@@ -71,9 +71,9 @@ const PatternCard = memo(function PatternCard({ pattern }: PatternCardProps) {
   const router = useRouter()
 
   // Calculate days on and off from shifts
-  const daysOn = pattern.shifts.filter(shift => shift.type === 'work').length
-  const daysOff = pattern.shifts.filter(shift => shift.type === 'off').length
-  const shiftDuration = pattern.shifts[0]?.duration || 0
+  const daysOn = pattern.shifts.filter(shift => shift.shift_type_id === 'work').length
+  const daysOff = pattern.shifts.filter(shift => shift.shift_type_id === 'off').length
+  const shiftDuration = pattern.shifts[0]?.duration_hours || 0
 
   return (
     <Card
@@ -93,12 +93,12 @@ const PatternCard = memo(function PatternCard({ pattern }: PatternCardProps) {
             <div
               key={i}
               className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-                shift.type === 'work'
+                shift.shift_type_id === 'work'
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted text-muted-foreground'
               }`}
             >
-              {shift.type === 'work' ? shift.duration : '-'}
+              {shift.shift_type_id === 'work' ? shift.duration_hours : '-'}
             </div>
           ))}
         </div>

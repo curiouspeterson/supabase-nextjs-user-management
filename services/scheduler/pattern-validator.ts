@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger';
 import { AppError, DatabaseError } from '@/lib/errors';
 import { differenceInHours, parseISO } from 'date-fns';
 import { z } from 'zod';
+import type { Json } from '@/types/supabase';
 
 export interface ValidationError {
   type: 'consecutive_days' | 'pattern_violation' | 'insufficient_rest';
@@ -59,6 +60,19 @@ export class PatternValidator {
     this.environment = environment;
   }
 
+  private isValidConstraints(value: unknown): value is PatternConstraints {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as any;
+    
+    return (
+      typeof obj.max_consecutive_days === 'number' &&
+      typeof obj.min_rest_hours === 'number' &&
+      typeof obj.max_weekly_hours === 'number' &&
+      typeof obj.min_break_duration === 'number' &&
+      typeof obj.max_daily_hours === 'number'
+    );
+  }
+
   /**
    * Initialize pattern constraints from database
    */
@@ -66,7 +80,7 @@ export class PatternValidator {
     try {
       const { data: config, error } = await this.supabase.rpc(
         'get_scheduler_config',
-        { 
+        {
           p_config_key: 'pattern_constraints',
           p_environment: this.environment
         }
@@ -76,7 +90,15 @@ export class PatternValidator {
         throw new DatabaseError(`Failed to get pattern constraints: ${error.message}`);
       }
 
-      this.constraints = config as PatternConstraints;
+      if (!config || !config.config_value) {
+        throw new DatabaseError('Pattern constraints configuration not found');
+      }
+
+      if (!this.isValidConstraints(config.config_value)) {
+        throw new DatabaseError('Invalid pattern constraints configuration format');
+      }
+
+      this.constraints = config.config_value;
     } catch (error) {
       logger.error('Failed to initialize pattern constraints', {
         error,

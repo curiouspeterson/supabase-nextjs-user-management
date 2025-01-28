@@ -2,6 +2,7 @@ import * as React from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from '@/components/ui/form'
 import * as z from 'zod'
+import { Database } from '@/types/supabase'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -23,14 +24,14 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { useErrorBoundary } from 'react-error-boundary'
 import { createEmployee } from '@/services/employees'
-import { EmployeeRole, EmployeeStatus } from '@/types/employee'
+import type { EmployeeInsert } from '@/types/employee'
 
 const employeeSchema = z.object({
-  firstName: z.string().min(1, 'First name is required'),
-  lastName: z.string().min(1, 'Last name is required'),
-  email: z.string().email('Invalid email address'),
-  role: z.nativeEnum(EmployeeRole),
-  status: z.nativeEnum(EmployeeStatus)
+  id: z.string().uuid(),
+  employee_role: z.enum(['Dispatcher', 'Shift Supervisor', 'Management'] as const),
+  user_role: z.enum(['Employee', 'Manager', 'Admin'] as const),
+  weekly_hours_scheduled: z.number().nullable(),
+  default_shift_type_id: z.string().nullable()
 })
 
 type EmployeeFormValues = z.infer<typeof employeeSchema>
@@ -43,11 +44,11 @@ export function EmployeeForm() {
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema),
     defaultValues: {
-      firstName: '',
-      lastName: '',
-      email: '',
-      role: EmployeeRole.EMPLOYEE,
-      status: EmployeeStatus.ACTIVE
+      id: crypto.randomUUID(),
+      employee_role: 'Dispatcher',
+      user_role: 'Employee',
+      weekly_hours_scheduled: null,
+      default_shift_type_id: null
     }
   })
 
@@ -55,10 +56,7 @@ export function EmployeeForm() {
     try {
       setIsSubmitting(true)
 
-      await createEmployee({
-        ...data,
-        fullName: `${data.firstName} ${data.lastName}`
-      })
+      await createEmployee(data)
 
       toast({
         title: 'Employee created successfully',
@@ -81,53 +79,9 @@ export function EmployeeForm() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <FormField
-            control={form.control}
-            name="firstName"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>First Name</FormLabel>
-                <FormControl>
-                  <Input {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="lastName"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Last Name</FormLabel>
-                <FormControl>
-                  <Input {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-
         <FormField
           control={form.control}
-          name="email"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Email</FormLabel>
-              <FormControl>
-                <Input type="email" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={form.control}
-          name="role"
+          name="employee_role"
           render={({ field }) => (
             <FormItem>
               <FormLabel>Role</FormLabel>
@@ -141,10 +95,9 @@ export function EmployeeForm() {
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  <SelectItem value={EmployeeRole.EMPLOYEE}>Employee</SelectItem>
-                  <SelectItem value={EmployeeRole.SUPERVISOR}>Supervisor</SelectItem>
-                  <SelectItem value={EmployeeRole.MANAGER}>Manager</SelectItem>
-                  <SelectItem value={EmployeeRole.ADMIN}>Admin</SelectItem>
+                  <SelectItem value="Dispatcher">Dispatcher</SelectItem>
+                  <SelectItem value="Shift Supervisor">Shift Supervisor</SelectItem>
+                  <SelectItem value="Management">Management</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />
@@ -154,25 +107,43 @@ export function EmployeeForm() {
 
         <FormField
           control={form.control}
-          name="status"
+          name="user_role"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Status</FormLabel>
+              <FormLabel>User Role</FormLabel>
               <Select
                 onValueChange={field.onChange}
                 defaultValue={field.value}
               >
                 <FormControl>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select a status" />
+                    <SelectValue placeholder="Select a user role" />
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  <SelectItem value={EmployeeStatus.ACTIVE}>Active</SelectItem>
-                  <SelectItem value={EmployeeStatus.INACTIVE}>Inactive</SelectItem>
-                  <SelectItem value={EmployeeStatus.PENDING}>Pending</SelectItem>
+                  <SelectItem value="Employee">Employee</SelectItem>
+                  <SelectItem value="Manager">Manager</SelectItem>
+                  <SelectItem value="Admin">Admin</SelectItem>
                 </SelectContent>
               </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="weekly_hours_scheduled"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Weekly Hours</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  {...field}
+                  onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
+                />
+              </FormControl>
               <FormMessage />
             </FormItem>
           )}

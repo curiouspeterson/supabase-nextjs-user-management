@@ -612,6 +612,30 @@ export type Database = {
         Args: Record<string, never>
         Returns: void
       },
+      get_scheduler_config: {
+        Args: {
+          p_config_key: string
+          p_environment?: string
+        }
+        Returns: {
+          id: string
+          config_key: string
+          config_value: Json
+          environment: string
+          description: string | null
+          created_at: string
+          updated_at: string
+        }
+      },
+      record_scheduler_metrics: {
+        Args: {
+          p_metrics_type: string
+          p_metrics_value: Json
+          p_environment?: string
+          p_measured_at?: string
+        }
+        Returns: void
+      },
       log_scheduler_error: {
         Args: {
           p_error_type: string
