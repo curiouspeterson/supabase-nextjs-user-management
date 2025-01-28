@@ -38,8 +38,15 @@ export class ValidationError extends ApiError {
   }
 }
 
+export interface DatabaseErrorOptions extends ErrorOptions {
+  shift_id?: string;
+  schedule_id?: string;
+  date?: string;
+  error?: string;
+}
+
 export class DatabaseError extends ApiError {
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(message: string, options?: DatabaseErrorOptions) {
     super(message, options)
     this.name = 'DatabaseError'
   }

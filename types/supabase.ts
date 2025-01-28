@@ -600,6 +600,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      begin_transaction: {
+        Args: Record<string, never>
+        Returns: void
+      },
+      commit_transaction: {
+        Args: Record<string, never>
+        Returns: void
+      },
+      rollback_transaction: {
+        Args: Record<string, never>
+        Returns: void
+      },
+      log_scheduler_error: {
+        Args: {
+          p_error_type: string
+          p_error_message: string
+          p_error_details: Json
+        }
+        Returns: string
+      },
       process_error_analytics_batch: {
         Args: {
           p_batch_id: string

@@ -77,7 +77,11 @@ export class MidnightShiftHandler {
       await this.supabase.rpc('log_scheduler_error', {
         p_error_type: 'MIDNIGHT_SHIFT_SPLIT_ERROR',
         p_error_message: 'Failed to split midnight shift',
-        p_error_details: errorDetails
+        p_error_details: {
+          shift_id: errorDetails.shift_id,
+          date: errorDetails.date,
+          error: errorDetails.error
+        }
       });
 
       throw new AppError('Failed to process midnight shift', 'MIDNIGHT_SHIFT_ERROR');
@@ -155,7 +159,9 @@ export class MidnightShiftHandler {
       await this.supabase.rpc('log_scheduler_error', {
         p_error_type: 'COVERAGE_CALCULATION_ERROR',
         p_error_message: 'Failed to calculate coverage',
-        p_error_details: errorDetails
+        p_error_details: {
+          error: errorDetails.error
+        }
       });
 
       throw new AppError('Failed to calculate coverage', 'COVERAGE_ERROR');
@@ -217,7 +223,9 @@ export class MidnightShiftHandler {
       await this.supabase.rpc('log_scheduler_error', {
         p_error_type: 'COVERAGE_UPDATE_ERROR',
         p_error_message: 'Failed to update daily coverage',
-        p_error_details: errorDetails
+        p_error_details: {
+          error: errorDetails.error
+        }
       });
 
       throw new AppError('Failed to update daily coverage', 'COVERAGE_UPDATE_ERROR');

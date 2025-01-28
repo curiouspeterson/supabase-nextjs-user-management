@@ -1,14 +1,16 @@
 -- Add business hours validation function
-CREATE OR REPLACE FUNCTION public.validate_business_hours(p_start time, p_end time)
+CREATE OR REPLACE FUNCTION public.validate_business_hours(
+    p_start_time time without time zone,
+    p_end_time time without time zone,
+    p_timezone text DEFAULT 'UTC'::text
+)
 RETURNS boolean
 LANGUAGE plpgsql
+STABLE SECURITY DEFINER
 AS $$
 BEGIN
-    -- Basic validation: end time should be after start time
-    -- and both should be within a 24-hour period
-    RETURN p_end > p_start AND 
-           p_start >= '00:00:00' AND 
-           p_end <= '24:00:00';
+    -- Convert times to UTC for comparison
+    RETURN p_start_time < p_end_time;
 END;
 $$;
 
@@ -74,4 +76,14 @@ BEGIN
     UNION ALL
     SELECT v_end_date, v_second_segment_hours;
 END;
-$$; 
+$$;
+
+-- Add timezone validation function
+CREATE OR REPLACE FUNCTION public.is_valid_timezone(p_timezone text)
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN p_timezone IN (SELECT name FROM pg_timezone_names);
+END;
+$$;

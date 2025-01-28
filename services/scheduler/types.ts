@@ -69,7 +69,7 @@ export interface Shift {
   start_time: string;
   end_time: string;
   duration_hours: number;
-  duration_category: ShiftDurationCategory;
+  duration_category: Database['public']['Enums']['duration_category_enum'] | null;
   created_at: string;
   updated_at: string;
 }
