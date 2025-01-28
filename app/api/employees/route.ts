@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
+import { cookies } from 'next/headers'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
-import { ApiError, DatabaseError, AuthError } from '@/lib/errors'
+import { ApiError, DatabaseError, AuthError, ValidationError } from '@/lib/errors'
 import crypto from 'crypto'
+import type { Database } from '@/types/supabase'
 
 // Environment variables validation
 const envSchema = z.object({
@@ -20,68 +21,61 @@ const env = envSchema.parse({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
 })
 
-// Request validation schema
-const createEmployeeSchema = z.object({
-  full_name: z.string().min(1, 'Full name is required'),
-  username: z.string().min(1, 'Username is required'),
-  employee_role: z.enum(['Dispatcher', 'Shift Supervisor', 'Management']),
-  weekly_hours_scheduled: z.number().min(0).max(168),
-  default_shift_type_id: z.string().optional(),
+// Request validation schemas
+const employeeSchema = z.object({
+  user_role: z.enum(['Admin', 'Manager', 'Employee']).describe('User role for permissions'),
+  employee_role: z.enum(['Dispatcher', 'Shift Supervisor', 'Management']).describe('Employee role for scheduling'),
+  weekly_hours_scheduled: z.number().min(0).max(168).optional(),
+  default_shift_type_id: z.string().uuid().optional().nullable(),
+}) satisfies z.ZodType<Omit<Database['public']['Tables']['employees']['Insert'], 'id' | 'created_at' | 'updated_at'>>
+
+const updateEmployeeSchema = z.object({
+  user_role: z.enum(['Admin', 'Manager', 'Employee']).optional(),
+  employee_role: z.enum(['Dispatcher', 'Shift Supervisor', 'Management']).optional(),
+  weekly_hours_scheduled: z.number().min(0).max(168).optional(),
+  default_shift_type_id: z.string().uuid().optional(),
 })
 
-function generateUniqueEmail(fullName: string): string {
-  // Remove special characters and convert to lowercase
-  const cleanName = fullName.toLowerCase().replace(/[^a-z0-9]/g, '')
-  // Add random suffix to ensure uniqueness
-  const randomSuffix = Math.random().toString(36).substring(2, 7)
-  return `${cleanName}.${randomSuffix}@dispatch911.com`
-}
-
-function generateSecurePassword(): string {
-  // Generate a password that meets Supabase requirements:
-  // - At least 6 characters
-  // - At least one uppercase letter
-  // - At least one lowercase letter
-  // - At least one number
-  const length = 12
-  const uppercaseChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-  const lowercaseChars = 'abcdefghijklmnopqrstuvwxyz'
-  const numberChars = '0123456789'
-  const specialChars = '!@#$%^&*'
-  
-  // Ensure at least one of each required character type
-  let password = 
-    uppercaseChars.charAt(Math.floor(Math.random() * uppercaseChars.length)) +
-    lowercaseChars.charAt(Math.floor(Math.random() * lowercaseChars.length)) +
-    numberChars.charAt(Math.floor(Math.random() * numberChars.length)) +
-    specialChars.charAt(Math.floor(Math.random() * specialChars.length))
-  
-  // Fill the rest with random characters
-  const allChars = uppercaseChars + lowercaseChars + numberChars + specialChars
-  for (let i = password.length; i < length; i++) {
-    password += allChars.charAt(Math.floor(Math.random() * allChars.length))
-  }
-  
-  // Shuffle the password
-  return password.split('').sort(() => Math.random() - 0.5).join('')
-}
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const supabase = createClient(cookies())
+    const supabase = createClient()
     
     const { data, error } = await supabase
       .from('employees')
-      .select('*')
+      .select(`
+        *,
+        profiles (
+          full_name,
+          avatar_url
+        )
+      `)
       .order('created_at', { ascending: false })
 
-    if (error) throw error
+    if (error) {
+      throw new DatabaseError('Failed to fetch employees', { cause: error })
+    }
 
-    return NextResponse.json(data)
+    return NextResponse.json({
+      data,
+    })
+
   } catch (error) {
-    logger.error('Failed to fetch employees:', error)
+    logger.error('Error fetching employees', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+
+    if (error instanceof DatabaseError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      )
+    }
+
     return NextResponse.json(
-      { error: 'Failed to fetch employees' },
+      { error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }
@@ -91,16 +85,16 @@ export async function POST(request: Request) {
   const requestId = crypto.randomUUID()
   
   try {
-    const json = await request.json()
-    const validatedData = createEmployeeSchema.parse(json)
+    // Parse and validate request body
+    const body = await request.json()
+    const validatedData = employeeSchema.parse(body)
     
-    logger.info('Creating new employee', {
+    logger.info('Creating employee', {
       requestId,
-      username: validatedData.username,
-      role: validatedData.employee_role
+      ...validatedData,
     })
 
-    const supabase = createClient(cookies())
+    const supabase = createClient()
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -111,7 +105,7 @@ export async function POST(request: Request) {
       throw new AuthError('No authenticated user found')
     }
 
-    // Check if user has admin role
+    // Check if user has permission to create employees
     const { data: employeeData, error: employeeError } = await supabase
       .from('employees')
       .select('user_role')
@@ -122,52 +116,30 @@ export async function POST(request: Request) {
       throw new DatabaseError('Failed to fetch employee data', { cause: employeeError })
     }
     if (!employeeData || !['Manager', 'Admin'].includes(employeeData.user_role)) {
-      throw new AuthError('Insufficient permissions to create employee')
+      throw new AuthError('Insufficient permissions to create employees')
     }
 
-    // Generate a secure random password
-    const password = crypto.randomBytes(16).toString('hex')
+    // Create employee with type assertion to handle the id requirement
+    const { data: employee, error: createError } = await supabase
+      .from('employees')
+      .insert(validatedData as Database['public']['Tables']['employees']['Insert'])
+      .select()
+      .single()
 
-    // Create the user account
-    const { data: userData, error: createUserError } = await supabase.auth.signUp({
-      email: `${validatedData.username}@${env.EMAIL_DOMAIN}`,
-      password,
-    })
-
-    if (createUserError || !userData.user) {
-      throw new DatabaseError('Failed to create user account', { cause: createUserError })
-    }
-
-    // Create employee profile
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: userData.user.id,
-      full_name: validatedData.full_name,
-      username: validatedData.username,
-    })
-
-    if (profileError) {
-      throw new DatabaseError('Failed to create employee profile', { cause: profileError })
-    }
-
-    // Create employee record
-    const { data: employeeRecord, error: createEmployeeError } = await supabase.from('employees').insert({
-      id: userData.user.id,
-      employee_role: validatedData.employee_role,
-      weekly_hours_scheduled: validatedData.weekly_hours_scheduled,
-      default_shift_type_id: validatedData.default_shift_type_id,
-      user_role: validatedData.employee_role === 'Management' ? 'Admin' : 'Employee',
-    }).select().single()
-
-    if (createEmployeeError) {
-      throw new DatabaseError('Failed to create employee record', { cause: createEmployeeError })
+    if (createError) {
+      throw new DatabaseError('Failed to create employee', { cause: createError })
     }
 
     logger.info('Successfully created employee', {
       requestId,
-      employeeId: userData.user.id
+      employeeId: employee.id,
     })
 
-    return NextResponse.json(employeeRecord)
+    return NextResponse.json({
+      message: 'Employee created successfully',
+      data: employee,
+    })
+
   } catch (error) {
     logger.error('Error creating employee', {
       requestId,
@@ -177,48 +149,246 @@ export async function POST(request: Request) {
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: 'Invalid request data',
-          errors: error.errors,
-        },
+        { error: 'Invalid request data', errors: error.errors },
+        { status: 400 }
+      )
+    }
+
+    if (error instanceof ValidationError) {
+      return NextResponse.json(
+        { error: error.message },
         { status: 400 }
       )
     }
 
     if (error instanceof AuthError) {
       return NextResponse.json(
-        {
-          type: 'authorization_error',
-          title: 'Authorization Error',
-          status: 403,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 403 }
       )
     }
 
     if (error instanceof DatabaseError) {
       return NextResponse.json(
-        {
-          type: 'database_error',
-          title: 'Database Error',
-          status: 500,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 500 }
       )
     }
 
     return NextResponse.json(
-      {
-        type: 'internal_server_error',
-        title: 'Internal Server Error',
-        status: 500,
-        detail: 'An unexpected error occurred',
-      },
+      { error: 'An unexpected error occurred' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PUT(request: Request) {
+  const requestId = crypto.randomUUID()
+  
+  try {
+    // Get employee ID from URL
+    const url = new URL(request.url)
+    const id = url.searchParams.get('id')
+    if (!id) {
+      throw new ValidationError('Employee ID is required')
+    }
+
+    // Parse and validate request body
+    const body = await request.json()
+    const validatedData = updateEmployeeSchema.parse(body)
+    
+    logger.info('Updating employee', {
+      requestId,
+      employeeId: id,
+      ...validatedData,
+    })
+
+    const supabase = createClient()
+
+    // Get the authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError) {
+      throw new AuthError('Failed to authenticate user', { cause: authError })
+    }
+    if (!user) {
+      throw new AuthError('No authenticated user found')
+    }
+
+    // Check if user has permission to update employees
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('user_role')
+      .eq('id', user.id)
+      .single()
+
+    if (employeeError) {
+      throw new DatabaseError('Failed to fetch employee data', { cause: employeeError })
+    }
+    if (!employeeData || !['Manager', 'Admin'].includes(employeeData.user_role)) {
+      throw new AuthError('Insufficient permissions to update employees')
+    }
+
+    // Update employee
+    const { data: employee, error: updateError } = await supabase
+      .from('employees')
+      .update(validatedData)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (updateError) {
+      throw new DatabaseError('Failed to update employee', { cause: updateError })
+    }
+
+    logger.info('Successfully updated employee', {
+      requestId,
+      employeeId: employee.id,
+    })
+
+    return NextResponse.json({
+      message: 'Employee updated successfully',
+      data: employee,
+    })
+
+  } catch (error) {
+    logger.error('Error updating employee', {
+      requestId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request data', errors: error.errors },
+        { status: 400 }
+      )
+    }
+
+    if (error instanceof ValidationError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
+    }
+
+    if (error instanceof AuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 403 }
+      )
+    }
+
+    if (error instanceof DatabaseError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json(
+      { error: 'An unexpected error occurred' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(request: Request) {
+  const requestId = crypto.randomUUID()
+  
+  try {
+    // Get employee ID from URL
+    const url = new URL(request.url)
+    const id = url.searchParams.get('id')
+    if (!id) {
+      throw new ValidationError('Employee ID is required')
+    }
+    
+    logger.info('Deleting employee', {
+      requestId,
+      employeeId: id,
+    })
+
+    const supabase = createClient()
+
+    // Get the authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError) {
+      throw new AuthError('Failed to authenticate user', { cause: authError })
+    }
+    if (!user) {
+      throw new AuthError('No authenticated user found')
+    }
+
+    // Check if user has permission to delete employees
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('user_role')
+      .eq('id', user.id)
+      .single()
+
+    if (employeeError) {
+      throw new DatabaseError('Failed to fetch employee data', { cause: employeeError })
+    }
+    if (!employeeData || !['Manager', 'Admin'].includes(employeeData.user_role)) {
+      throw new AuthError('Insufficient permissions to delete employees')
+    }
+
+    // Delete employee
+    const { error: deleteError } = await supabase
+      .from('employees')
+      .delete()
+      .eq('id', id)
+
+    if (deleteError) {
+      throw new DatabaseError('Failed to delete employee', { cause: deleteError })
+    }
+
+    logger.info('Successfully deleted employee', {
+      requestId,
+      employeeId: id,
+    })
+
+    return NextResponse.json({
+      message: 'Employee deleted successfully',
+    })
+
+  } catch (error) {
+    logger.error('Error deleting employee', {
+      requestId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request data', errors: error.errors },
+        { status: 400 }
+      )
+    }
+
+    if (error instanceof ValidationError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
+    }
+
+    if (error instanceof AuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 403 }
+      )
+    }
+
+    if (error instanceof DatabaseError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json(
+      { error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }

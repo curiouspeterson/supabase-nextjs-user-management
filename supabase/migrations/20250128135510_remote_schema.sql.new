@@ -1,0 +1,12 @@
+alter table "public"."schedules" add constraint "schedules_shift_id_fkey" FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE not valid;
+
+alter table "public"."schedules" validate constraint "schedules_shift_id_fkey";
+
+-- Business hours and date range validation moved to 20250128135513_validation_functions.sql
+-- alter table "public"."schedules" add constraint "valid_business_hours" CHECK (validate_business_hours(shift_start, shift_end)) not valid;
+-- alter table "public"."schedules" validate constraint "valid_business_hours";
+-- alter table "public"."schedules" add constraint "valid_schedule_dates" CHECK (validate_date_range(period_start, period_end, false)) not valid;
+-- alter table "public"."schedules" validate constraint "valid_schedule_dates";
+
+-- Remove timezone validation from schedules table
+-- alter table "public"."schedules" add constraint "valid_timezone" CHECK (is_valid_timezone(timezone)) not valid; 

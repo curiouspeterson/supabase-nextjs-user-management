@@ -38,8 +38,8 @@ const shiftFormSchema = z.object({
 type ShiftFormData = z.infer<typeof shiftFormSchema>
 
 interface ValidationResult {
-  valid: boolean
-  errors: string[]
+  is_valid: boolean
+  violations: string[]
   warnings: string[]
 }
 
@@ -115,8 +115,8 @@ export default function ShiftManager({ date, employeeId, onClose, onSave, shift 
 
         if (!shiftId) {
           setValidationResult({
-            valid: false,
-            errors: ['Invalid shift configuration'],
+            is_valid: false,
+            violations: ['Invalid shift configuration'],
             warnings: [],
           })
           return
@@ -135,8 +135,8 @@ export default function ShiftManager({ date, employeeId, onClose, onSave, shift 
       } catch (error) {
         logger.error('Error validating shift:', { error })
         setValidationResult({
-          valid: false,
-          errors: ['Failed to validate shift'],
+          is_valid: false,
+          violations: ['Failed to validate shift'],
           warnings: [],
         })
       } finally {
@@ -177,7 +177,7 @@ export default function ShiftManager({ date, employeeId, onClose, onSave, shift 
   }
 
   const onSubmit = async (data: ShiftFormData) => {
-    if (!validationResult?.valid) {
+    if (!validationResult?.is_valid) {
       return
     }
 
@@ -225,9 +225,9 @@ export default function ShiftManager({ date, employeeId, onClose, onSave, shift 
     } catch (error) {
       logger.error('Error saving shift:', { error })
       setValidationResult({
-        valid: false,
-        errors: ['Failed to save shift'],
-        warnings: [],
+        is_valid: false,
+        violations: ['Failed to save shift'],
+        warnings: []
       })
     }
   }
@@ -336,11 +336,11 @@ export default function ShiftManager({ date, employeeId, onClose, onSave, shift 
 
           {validationResult && (
             <>
-              {validationResult.errors.length > 0 && (
+              {validationResult.violations.length > 0 && (
                 <Alert variant="destructive">
                   <ul className="list-disc pl-4">
-                    {validationResult.errors.map((error, index) => (
-                      <li key={index}>{error}</li>
+                    {validationResult.violations.map((violation, index) => (
+                      <li key={index}>{violation}</li>
                     ))}
                   </ul>
                 </Alert>
@@ -367,7 +367,7 @@ export default function ShiftManager({ date, employeeId, onClose, onSave, shift 
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || validating || !validationResult?.valid}
+              disabled={isSubmitting || validating || !validationResult?.is_valid}
               className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-dispatch-600 hover:bg-dispatch-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-dispatch-500 disabled:opacity-50"
             >
               {isSubmitting ? 'Saving...' : 'Save Shift'}

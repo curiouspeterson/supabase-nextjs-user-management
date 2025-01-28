@@ -3,17 +3,24 @@ import { useQuery } from '@tanstack/react-query'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { useErrorBoundary } from '@/lib/hooks/use-error-boundary'
+import { useErrorBoundary } from 'react-error-boundary'
 import { getEmployees } from '@/services/employees'
-import type { Employee } from '@/types'
+import type { Employee } from '@/services/employees/types'
 
 export function EmployeeList() {
-  const { handleError } = useErrorBoundary()
-  const { data: employees, isLoading } = useQuery({
+  const { showBoundary } = useErrorBoundary()
+  const { data: employees, isLoading, error } = useQuery({
     queryKey: ['employees'],
     queryFn: getEmployees,
-    onError: handleError
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
   })
+
+  React.useEffect(() => {
+    if (error) {
+      showBoundary(error)
+    }
+  }, [error, showBoundary])
 
   if (isLoading) {
     return <LoadingSpinner />
@@ -50,7 +57,7 @@ function EmployeeCard({ employee }: { employee: Employee }) {
           Edit
         </Button>
       </div>
-      <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+      <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
         <div>
           <p className="text-muted-foreground">Role</p>
           <p className="capitalize">{employee.role.toLowerCase()}</p>
@@ -58,10 +65,6 @@ function EmployeeCard({ employee }: { employee: Employee }) {
         <div>
           <p className="text-muted-foreground">Status</p>
           <p className="capitalize">{employee.status.toLowerCase()}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Team</p>
-          <p>{employee.teamName || 'Unassigned'}</p>
         </div>
       </div>
     </Card>

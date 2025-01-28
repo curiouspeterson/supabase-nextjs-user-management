@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import type { Pattern, PatternStatus } from '@/types'
+import type { Pattern, PatternStatus } from '@/types/pattern'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,

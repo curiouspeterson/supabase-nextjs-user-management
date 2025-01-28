@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { TimeOffRequest } from '@/types'
+import type { TimeOffRequest } from '@/lib/types/time-off'
 
 interface TimeOffState {
   requests: TimeOffRequest[]

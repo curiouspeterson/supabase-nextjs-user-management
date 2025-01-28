@@ -5,6 +5,7 @@ import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { ErrorCategory, ErrorSeverity } from '@/lib/types/error'
 import { redirect } from 'next/navigation'
+import { logger } from '@/lib/logger'
 
 /**
  * Server action to reset error state and refresh the current page
@@ -39,37 +40,45 @@ export async function resetError(path: string) {
  * Server action to clear all error states and refresh the app
  */
 export async function clearAllErrors() {
-  const cookieStore = cookies()
-  const supabase = createClient(cookieStore)
+  const supabase = createClient()
 
   try {
-    // Log error clear in scheduler_metrics
-    await supabase
+    // Reset all scheduler metrics error states
+    const { error: updateError } = await supabase
       .from('scheduler_metrics')
-      .insert({
-        error_message: 'All errors cleared',
+      .update({
+        error_message: null,
         last_run_status: 'success',
-        schedule_generation_time: 0,
         coverage_deficit: 0,
         overtime_violations: 0,
-        pattern_errors: 0
+        pattern_errors: 0,
+        schedule_generation_time: 0,
       })
+      .neq('id', '')
 
-    // Revalidate the entire app
-    revalidatePath('/', 'layout')
+    if (updateError) {
+      logger.error('Failed to clear error states', {
+        error: updateError.message,
+      })
+      return {
+        success: false,
+        error: 'Failed to clear error states',
+      }
+    }
 
-    return { success: true, error: null }
+    // Revalidate the dashboard page
+    revalidatePath('/dashboard')
+
+    return {
+      success: true,
+    }
   } catch (error) {
-    console.error('Clear all errors failed:', error)
+    logger.error('Failed to clear error states', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
     return {
       success: false,
-      error: {
-        message: 'Failed to clear all error states',
-        code: 'CLEAR_ALL_ERRORS_FAILED',
-        severity: ErrorSeverity.MEDIUM,
-        category: ErrorCategory.UNKNOWN,
-        path: '/'
-      }
+      error: 'Failed to clear error states',
     }
   }
 }
@@ -99,5 +108,47 @@ export async function resetGlobalError() {
     return { success: true }
   } catch (error) {
     return { error: 'Failed to reset global error' }
+  }
+}
+
+export async function clearError(id: string) {
+  const supabase = createClient()
+
+  try {
+    // Update the scheduler metrics to clear error state
+    const { error: updateError } = await supabase
+      .from('scheduler_metrics')
+      .update({
+        error_message: null,
+        last_run_status: 'success',
+      })
+      .eq('id', id)
+
+    if (updateError) {
+      logger.error('Failed to clear error', {
+        errorId: id,
+        error: updateError.message,
+      })
+      return {
+        success: false,
+        error: 'Failed to clear error',
+      }
+    }
+
+    // Revalidate the dashboard page
+    revalidatePath('/dashboard')
+
+    return {
+      success: true,
+    }
+  } catch (error) {
+    logger.error('Failed to clear error', {
+      errorId: id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
+    return {
+      success: false,
+      error: 'Failed to clear error',
+    }
   }
 } 

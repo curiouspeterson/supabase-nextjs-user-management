@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { cookies } from 'next/headers'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
 import { ApiError, DatabaseError, AuthError, ValidationError } from '@/lib/errors'
-import { startOfWeek, parseISO, isValid, format, addWeeks } from 'date-fns'
-import crypto from 'crypto'
 import { ScheduleGenerator } from '@/services/scheduler/ScheduleGenerator'
+import type { Database } from '@/types/supabase'
 
 // Environment variables validation
 const envSchema = z.object({
@@ -16,38 +14,28 @@ const envSchema = z.object({
 
 // Request validation schema
 const generateScheduleSchema = z.object({
-  start_date: z.string().refine(
-    (date) => {
-      const parsed = parseISO(date)
-      return isValid(parsed)
-    },
-    { message: 'Invalid start date format. Use ISO 8601 format (YYYY-MM-DD)' }
-  ),
-  weeks: z.number().min(1).max(12), // Limit to reasonable range
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format. Use YYYY-MM-DD'),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format. Use YYYY-MM-DD'),
   department_id: z.string().uuid().optional(),
+  batch_size: z.number().min(1).max(1000).optional(),
 })
 
-export async function POST(request: Request) {
-  const requestId = crypto.randomUUID()
-  
-  try {
-    // Validate environment variables
-    const env = envSchema.parse({
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    })
+type GenerateScheduleRequest = z.infer<typeof generateScheduleSchema>
 
+export async function POST(request: Request) {
+  try {
     // Parse and validate request body
     const body = await request.json()
-    const validatedData = generateScheduleSchema.parse(body)
-    
-    logger.info('Generating schedules', {
-      requestId,
-      startDate: validatedData.start_date,
-      weeks: validatedData.weeks,
+    const { start_date, end_date, department_id, batch_size } = generateScheduleSchema.parse(body)
+
+    logger.info('Generating schedule', {
+      start_date,
+      end_date,
+      department_id,
+      batch_size,
     })
 
-    const supabase = createClient(cookies())
+    const supabase = createClient()
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -72,30 +60,21 @@ export async function POST(request: Request) {
       throw new AuthError('Insufficient permissions to generate schedules')
     }
 
-    // Calculate date range
-    const startDate = startOfWeek(parseISO(validatedData.start_date))
-    const endDate = addWeeks(startDate, validatedData.weeks)
-
-    // Fetch required data with pagination and date range filtering
-    const batchSize = 100
+    // Initialize schedule generator
     const generator = new ScheduleGenerator(supabase)
-
-    // Initialize generator with date range
     await generator.initialize({
-      startDate: format(startDate, 'yyyy-MM-dd'),
-      endDate: format(endDate, 'yyyy-MM-dd'),
-      departmentId: validatedData.department_id,
-      batchSize,
+      startDate: start_date,
+      endDate: end_date,
+      departmentId: department_id,
+      batchSize: batch_size,
     })
 
     // Generate schedules
     const { schedules, errors } = await generator.generate()
 
     if (errors.length > 0) {
-      // Log errors but continue if some schedules were generated
       logger.warn('Some schedules could not be generated', {
-        requestId,
-        errors,
+        errors: errors.map(e => e.message),
       })
     }
 
@@ -103,98 +82,57 @@ export async function POST(request: Request) {
       throw new ValidationError('No schedules could be generated')
     }
 
-    // Insert schedules in batches
-    for (let i = 0; i < schedules.length; i += batchSize) {
-      const batch = schedules.slice(i, i + batchSize)
-      const { error: insertError } = await supabase
-        .from('schedules')
-        .insert(batch.map(schedule => ({
-          ...schedule,
-          created_by: user.id,
-        })))
-
-      if (insertError) {
-        throw new DatabaseError('Failed to insert schedules', { cause: insertError })
-      }
-    }
-
-    logger.info('Successfully generated schedules', {
-      requestId,
-      count: schedules.length,
-      warnings: errors.length,
+    logger.info('Schedule generation completed', {
+      start_date,
+      end_date,
+      schedulesGenerated: schedules.length,
+      errors: errors.length,
     })
 
     return NextResponse.json({
-      message: 'Schedules generated successfully',
+      message: 'Schedule generated successfully',
       data: {
-        count: schedules.length,
-        warnings: errors.length > 0 ? errors : undefined,
+        schedules,
+        warnings: errors.length > 0 ? errors.map(e => e.message) : undefined,
       },
     })
 
   } catch (error) {
-    logger.error('Error generating schedules', {
-      requestId,
+    logger.error('Error generating schedule', {
       error: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,
     })
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: 'Invalid request data',
-          errors: error.errors,
-        },
+        { error: 'Invalid request data', errors: error.errors },
         { status: 400 }
       )
     }
 
     if (error instanceof ValidationError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 400 }
       )
     }
 
     if (error instanceof AuthError) {
       return NextResponse.json(
-        {
-          type: 'authorization_error',
-          title: 'Authorization Error',
-          status: 403,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 403 }
       )
     }
 
     if (error instanceof DatabaseError) {
       return NextResponse.json(
-        {
-          type: 'database_error',
-          title: 'Database Error',
-          status: 500,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 500 }
       )
     }
 
     return NextResponse.json(
-      {
-        type: 'internal_server_error',
-        title: 'Internal Server Error',
-        status: 500,
-        detail: 'An unexpected error occurred',
-      },
+      { error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }

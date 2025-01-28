@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useToast } from '@/components/ui/use-toast'
 import { useErrorBoundary } from './use-error-boundary'
-import type { HealthStatus, HealthMetrics } from '@/types'
+import type { HealthStatus, HealthMetrics } from '@/types/health'
 
 interface UseHealthMonitorOptions {
   interval?: number
@@ -11,14 +11,17 @@ interface UseHealthMonitorOptions {
 
 export function useHealthMonitor(options: UseHealthMonitorOptions = {}) {
   const { interval = 30000, onStatusChange, onMetricsUpdate } = options
-  const [status, setStatus] = useState<HealthStatus>('HEALTHY')
+  const [status, setStatus] = useState<HealthStatus>({
+    status: 'healthy',
+    message: 'System is healthy',
+    timestamp: new Date().toISOString()
+  })
   const [metrics, setMetrics] = useState<HealthMetrics>({
-    uptime: 0,
-    responseTime: 0,
-    errorRate: 0,
-    activeUsers: 0,
-    cpuUsage: 0,
-    memoryUsage: 0
+    cpu_usage: 0,
+    memory_usage: 0,
+    active_connections: 0,
+    request_latency: 0,
+    error_rate: 0
   })
   const [isMonitoring, setIsMonitoring] = useState(false)
   const { toast } = useToast()
@@ -32,15 +35,15 @@ export function useHealthMonitor(options: UseHealthMonitorOptions = {}) {
       const newStatus = data.status as HealthStatus
       const newMetrics = data.metrics as HealthMetrics
 
-      if (newStatus !== status) {
+      if (newStatus.status !== status.status) {
         setStatus(newStatus)
         onStatusChange?.(newStatus)
 
-        if (newStatus !== 'HEALTHY') {
+        if (newStatus.status !== 'healthy') {
           toast({
             title: 'System Status Change',
-            description: `System status is now ${newStatus.toLowerCase()}`,
-            variant: newStatus === 'CRITICAL' ? 'destructive' : 'default'
+            description: newStatus.message,
+            variant: newStatus.status === 'unhealthy' ? 'destructive' : 'default'
           })
         }
       }
@@ -49,12 +52,17 @@ export function useHealthMonitor(options: UseHealthMonitorOptions = {}) {
       onMetricsUpdate?.(newMetrics)
     } catch (error) {
       handleError(error)
-      setStatus('CRITICAL')
-      onStatusChange?.('CRITICAL')
+      const criticalStatus: HealthStatus = {
+        status: 'unhealthy',
+        message: error instanceof Error ? error.message : 'Failed to check system health',
+        timestamp: new Date().toISOString()
+      }
+      setStatus(criticalStatus)
+      onStatusChange?.(criticalStatus)
 
       toast({
         title: 'Health Check Failed',
-        description: error instanceof Error ? error.message : 'Failed to check system health',
+        description: criticalStatus.message,
         variant: 'destructive'
       })
     }

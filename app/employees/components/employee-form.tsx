@@ -23,21 +23,21 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { useErrorBoundary } from 'react-error-boundary'
 import { createEmployee } from '@/services/employees'
-import type { Employee } from '@/types'
+import { EmployeeRole, EmployeeStatus } from '@/types/employee'
 
 const employeeSchema = z.object({
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
   email: z.string().email('Invalid email address'),
-  role: z.enum(['ADMIN', 'MANAGER', 'SUPERVISOR', 'EMPLOYEE']),
-  status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING'])
+  role: z.nativeEnum(EmployeeRole),
+  status: z.nativeEnum(EmployeeStatus)
 })
 
 type EmployeeFormValues = z.infer<typeof employeeSchema>
 
 export function EmployeeForm() {
   const { toast } = useToast()
-  const { handleError } = useErrorBoundary()
+  const { showBoundary } = useErrorBoundary()
   const [isSubmitting, setIsSubmitting] = React.useState(false)
 
   const form = useForm<EmployeeFormValues>({
@@ -46,8 +46,8 @@ export function EmployeeForm() {
       firstName: '',
       lastName: '',
       email: '',
-      role: 'EMPLOYEE',
-      status: 'ACTIVE'
+      role: EmployeeRole.EMPLOYEE,
+      status: EmployeeStatus.ACTIVE
     }
   })
 
@@ -67,7 +67,7 @@ export function EmployeeForm() {
 
       form.reset()
     } catch (error) {
-      handleError(error)
+      showBoundary(error)
       toast({
         title: 'Error',
         description: error instanceof Error ? error.message : 'Failed to create employee',
@@ -76,7 +76,7 @@ export function EmployeeForm() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [form, handleError, toast])
+  }, [form, showBoundary, toast])
 
   return (
     <Form {...form}>
@@ -141,10 +141,10 @@ export function EmployeeForm() {
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  <SelectItem value="EMPLOYEE">Employee</SelectItem>
-                  <SelectItem value="SUPERVISOR">Supervisor</SelectItem>
-                  <SelectItem value="MANAGER">Manager</SelectItem>
-                  <SelectItem value="ADMIN">Admin</SelectItem>
+                  <SelectItem value={EmployeeRole.EMPLOYEE}>Employee</SelectItem>
+                  <SelectItem value={EmployeeRole.SUPERVISOR}>Supervisor</SelectItem>
+                  <SelectItem value={EmployeeRole.MANAGER}>Manager</SelectItem>
+                  <SelectItem value={EmployeeRole.ADMIN}>Admin</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />
@@ -168,9 +168,9 @@ export function EmployeeForm() {
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  <SelectItem value="ACTIVE">Active</SelectItem>
-                  <SelectItem value="INACTIVE">Inactive</SelectItem>
-                  <SelectItem value="PENDING">Pending</SelectItem>
+                  <SelectItem value={EmployeeStatus.ACTIVE}>Active</SelectItem>
+                  <SelectItem value={EmployeeStatus.INACTIVE}>Inactive</SelectItem>
+                  <SelectItem value={EmployeeStatus.PENDING}>Pending</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />

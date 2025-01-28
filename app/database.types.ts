@@ -9,6 +9,129 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      error_analytics_config: {
+        Row: {
+          id: string
+          component: string
+          max_contexts: number
+          max_user_agents: number
+          max_urls: number
+          max_trends: number
+          trend_period_ms: number
+          retention_days: number
+          batch_size: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          component: string
+          max_contexts: number
+          max_user_agents: number
+          max_urls: number
+          max_trends: number
+          trend_period_ms: number
+          retention_days: number
+          batch_size: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          component?: string
+          max_contexts?: number
+          max_user_agents?: number
+          max_urls?: number
+          max_trends?: number
+          trend_period_ms?: number
+          retention_days?: number
+          batch_size?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      error_analytics_data: {
+        Row: {
+          id: string
+          component: string
+          error_type: string
+          error_message: string
+          context: Json
+          user_agent: string | null
+          url: string | null
+          batch_id: string
+          timestamp: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          component: string
+          error_type: string
+          error_message: string
+          context: Json
+          user_agent?: string | null
+          url?: string | null
+          batch_id: string
+          timestamp: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          component?: string
+          error_type?: string
+          error_message?: string
+          context?: Json
+          user_agent?: string | null
+          url?: string | null
+          batch_id?: string
+          timestamp?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      error_analytics_trends: {
+        Row: {
+          id: string
+          component: string
+          error_type: string
+          count: number
+          first_seen: string
+          last_seen: string
+          contexts: Json[]
+          user_agents: string[]
+          urls: string[]
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          component: string
+          error_type: string
+          count: number
+          first_seen: string
+          last_seen: string
+          contexts: Json[]
+          user_agents: string[]
+          urls: string[]
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          component?: string
+          error_type?: string
+          count?: number
+          first_seen?: string
+          last_seen?: string
+          contexts?: Json[]
+          user_agents?: string[]
+          urls?: string[]
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       daily_coverage: {
         Row: {
           actual_coverage: number
@@ -495,6 +618,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      process_error_analytics_batch: {
+        Args: {
+          p_batch_id: string
+        }
+        Returns: void
+      }
       calculate_period_coverage: {
         Args: {
           p_date: string

@@ -1,4 +1,6 @@
-import { forwardRef } from 'react'
+'use client'
+
+import * as React from 'react'
 import { format } from 'date-fns'
 import { Calendar as CalendarIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -15,7 +17,7 @@ export interface DatePickerProps
   error?: string
 }
 
-export const DatePicker = forwardRef<HTMLInputElement, DatePickerProps>(
+export const DatePicker = React.forwardRef<HTMLInputElement, DatePickerProps>(
   ({ className, error, ...props }, ref) => {
     const [date, setDate] = React.useState<Date>()
 

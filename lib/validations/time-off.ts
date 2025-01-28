@@ -1,22 +1,25 @@
 import * as z from 'zod'
+import { TimeOffType, TimeOffStatus } from '@/services/scheduler/types'
 
-export const timeOffSchema = z.object({
-  type: z.enum(['VACATION', 'SICK', 'PERSONAL', 'BEREAVEMENT', 'JURY_DUTY', 'UNPAID']),
-  startDate: z.date({
+const baseTimeOffSchema = z.object({
+  type: z.nativeEnum(TimeOffType),
+  start_date: z.date({
     required_error: 'Start date is required',
     invalid_type_error: 'Start date must be a valid date'
   }),
-  endDate: z.date({
+  end_date: z.date({
     required_error: 'End date is required',
     invalid_type_error: 'End date must be a valid date'
   }),
   notes: z.string().optional(),
-  isPaid: z.boolean().default(true)
-}).refine(
-  (data) => data.endDate >= data.startDate,
+  status: z.nativeEnum(TimeOffStatus).default(TimeOffStatus.PENDING)
+})
+
+export const timeOffSchema = baseTimeOffSchema.refine(
+  (data) => data.end_date >= data.start_date,
   {
     message: 'End date must be after start date',
-    path: ['endDate']
+    path: ['end_date']
   }
 )
 
@@ -24,18 +27,17 @@ export type TimeOffFormValues = z.infer<typeof timeOffSchema>
 
 export const timeOffResponseSchema = z.object({
   id: z.string().uuid(),
-  employeeId: z.string().uuid(),
-  type: timeOffSchema.shape.type,
-  startDate: timeOffSchema.shape.startDate,
-  endDate: timeOffSchema.shape.endDate,
-  status: z.enum(['PENDING', 'APPROVED', 'REJECTED']),
-  notes: timeOffSchema.shape.notes,
-  isPaid: timeOffSchema.shape.isPaid,
-  reviewedBy: z.string().uuid().optional(),
-  reviewedAt: z.date().optional(),
-  reviewNotes: z.string().optional(),
-  createdAt: z.date(),
-  updatedAt: z.date()
+  employee_id: z.string().uuid(),
+  type: baseTimeOffSchema.shape.type,
+  start_date: baseTimeOffSchema.shape.start_date,
+  end_date: baseTimeOffSchema.shape.end_date,
+  status: z.nativeEnum(TimeOffStatus),
+  notes: baseTimeOffSchema.shape.notes,
+  submitted_at: z.string().datetime(),
+  reviewed_at: z.string().datetime().nullable(),
+  reviewed_by: z.string().uuid().nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime()
 })
 
 export type TimeOffResponse = z.infer<typeof timeOffResponseSchema> 

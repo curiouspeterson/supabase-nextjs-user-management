@@ -1,161 +1,129 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AlertCircle } from 'lucide-react';
 import { useHealthMonitor } from '@/hooks/use-health-monitor';
-import { fetchStatusColors } from '@/services/health';
 import { cn } from '@/lib/utils';
 import MetricCharts from './MetricCharts';
-import type { SystemStatus } from '@/services/health/types';
+import type { SystemStatus, HealthResponse } from '@/services/health/types';
+import { useEffect } from 'react';
 
 interface HealthDashboardUIProps {
-  initialData?: {
-    status: SystemStatus;
-    metrics: {
-      coverage_deficit: number;
-      overtime_violations: number;
-      pattern_errors: number;
-      schedule_generation_time: number;
-    };
-  };
+  initialData?: HealthResponse;
 }
+
+const statusColors = {
+  healthy: {
+    color: 'text-green-700',
+    background: 'bg-green-100'
+  },
+  degraded: {
+    color: 'text-yellow-700',
+    background: 'bg-yellow-100'
+  },
+  unhealthy: {
+    color: 'text-red-700',
+    background: 'bg-red-100'
+  }
+} as const;
 
 export default function HealthDashboardUI({ initialData }: HealthDashboardUIProps) {
-  const { trackError } = useHealthMonitor();
-
-  // Fetch status colors
-  const { data: statusColors, error: colorError } = useQuery({
-    queryKey: ['statusColors'],
-    queryFn: fetchStatusColors,
-    staleTime: 24 * 60 * 60 * 1000, // Cache for 24 hours
+  const { status, metrics, isMonitoring, startMonitoring } = useHealthMonitor({
+    onStatusChange: (newStatus) => {
+      console.log('Health status changed:', newStatus);
+    },
   });
 
-  if (colorError) {
-    trackError('HEALTH', 'FETCH_COLORS', {
-      error: colorError instanceof Error ? colorError.message : 'Failed to fetch status colors'
-    });
-  }
+  // Start monitoring when component mounts
+  useEffect(() => {
+    startMonitoring();
+  }, [startMonitoring]);
 
   const getStatusColor = (status: SystemStatus) => {
-    if (!statusColors) {
-      // Fallback colors if custom colors aren't loaded
-      return {
-        color: 'text-gray-700',
-        background: 'bg-gray-100'
-      };
-    }
-
-    const colorConfig = statusColors.find(c => c.status === status);
-    return {
-      color: colorConfig?.color_class || 'text-gray-700',
-      background: colorConfig?.background_class || 'bg-gray-100'
+    return statusColors[status.status] || {
+      color: 'text-gray-700',
+      background: 'bg-gray-100'
     };
   };
 
-  return (
-    <div className="space-y-6">
-      {/* System Status */}
-      <Card className="p-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">System Status</h2>
-          {initialData ? (
-            <Badge
-              variant="outline"
-              className={cn(
-                'px-4 py-1',
-                getStatusColor(initialData.status).color,
-                getStatusColor(initialData.status).background
-              )}
-            >
-              {initialData.status}
-            </Badge>
-          ) : (
-            <Skeleton className="h-8 w-24" />
-          )}
-        </div>
-
-        {/* Metrics Grid */}
-        <div className="mt-6 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-          <MetricCard
-            label="Coverage Deficit"
-            value={initialData?.metrics.coverage_deficit}
-            format={value => `${value}%`}
-            threshold={20}
-          />
-          <MetricCard
-            label="Overtime Violations"
-            value={initialData?.metrics.overtime_violations}
-            threshold={0}
-          />
-          <MetricCard
-            label="Pattern Errors"
-            value={initialData?.metrics.pattern_errors}
-            threshold={0}
-          />
-          <MetricCard
-            label="Generation Time"
-            value={initialData?.metrics.schedule_generation_time}
-            format={value => `${value}ms`}
-            threshold={5000}
-            thresholdComparator="gt"
-          />
-        </div>
-      </Card>
-
-      {/* Metrics History */}
-      <Card className="p-6">
-        <h2 className="mb-6 text-xl font-semibold">Metrics History</h2>
-        <MetricCharts />
-      </Card>
-    </div>
-  );
-}
-
-interface MetricCardProps {
-  label: string;
-  value?: number;
-  format?: (value: number) => string;
-  threshold?: number;
-  thresholdComparator?: 'gt' | 'lt' | 'eq';
-}
-
-function MetricCard({
-  label,
-  value,
-  format = value => value.toString(),
-  threshold,
-  thresholdComparator = 'gt'
-}: MetricCardProps) {
-  const isOverThreshold = threshold !== undefined && value !== undefined && (
-    thresholdComparator === 'gt' ? value > threshold :
-    thresholdComparator === 'lt' ? value < threshold :
-    value === threshold
-  );
-
-  if (value === undefined) {
+  const renderStatusBadge = (status: SystemStatus) => {
+    const { color, background } = getStatusColor(status);
     return (
-      <div className="rounded-lg border p-4">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="mt-2 h-8 w-16" />
+      <Badge className={cn('capitalize', color, background)}>
+        {status.status}
+      </Badge>
+    );
+  };
+
+  // Show loading state
+  if (!initialData && !status) {
+    return (
+      <div className="space-y-4">
+        <Card className="p-4">
+          <Skeleton className="h-8 w-24" />
+        </Card>
+        <Card className="p-4">
+          <Skeleton className="h-[200px]" />
+        </Card>
+      </div>
+    );
+  }
+
+  const currentStatus = status || initialData?.status;
+  const currentMetrics = metrics || initialData?.metrics;
+
+  if (!currentStatus || !currentMetrics) {
+    return (
+      <div className="space-y-4">
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">System Status</h2>
+            <Badge className={cn('capitalize', 'text-gray-700', 'bg-gray-100')}>
+              Unknown
+            </Badge>
+          </div>
+        </Card>
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            Unable to retrieve system status.
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border p-4">
-      <div className="text-sm font-medium text-gray-500">{label}</div>
-      <div
-        className={cn(
-          'mt-2 text-2xl font-semibold',
-          isOverThreshold ? 'text-red-600' : 'text-gray-900'
-        )}
-      >
-        {format(value)}
-      </div>
+    <div className="space-y-4">
+      <Card className="p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">System Status</h2>
+          {renderStatusBadge(currentStatus)}
+        </div>
+      </Card>
+
+      {currentStatus.status === 'unhealthy' && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            System is experiencing critical issues. Please check the metrics below.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {currentStatus.status === 'degraded' && (
+        <Alert variant="warning">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            System performance is degraded. Some features may be affected.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <MetricCharts metrics={currentMetrics} />
     </div>
   );
 } 

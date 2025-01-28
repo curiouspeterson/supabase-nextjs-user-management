@@ -11,21 +11,22 @@ import { Badge } from '@/components/ui/badge'
 import { AlertCircle } from 'lucide-react'
 import { useHealthMonitor } from '@/hooks/use-health-monitor'
 import { fetchTimeOffRequests } from '@/services/time-off'
-import type { TimeOffRequest } from '@/services/time-off/types'
+import { TimeOffRequest, TimeOffRequestType, TimeOffRequestStatus } from '@/services/time-off/types'
+import TimeOffRequestDialog from './TimeOffRequestDialog'
 
 const TYPE_LABELS = {
-  'VACATION': 'Vacation',
-  'SICK': 'Sick Leave',
-  'PERSONAL': 'Personal',
-  'BEREAVEMENT': 'Bereavement',
-  'JURY_DUTY': 'Jury Duty',
-  'UNPAID': 'Unpaid Leave'
+  [TimeOffRequestType.VACATION]: 'Vacation',
+  [TimeOffRequestType.SICK]: 'Sick Leave',
+  [TimeOffRequestType.PERSONAL]: 'Personal',
+  [TimeOffRequestType.BEREAVEMENT]: 'Bereavement',
+  [TimeOffRequestType.JURY_DUTY]: 'Jury Duty',
+  [TimeOffRequestType.UNPAID]: 'Unpaid Leave'
 } as const
 
 const STATUS_VARIANTS = {
-  'PENDING': 'default',
-  'APPROVED': 'success',
-  'REJECTED': 'destructive'
+  [TimeOffRequestStatus.PENDING]: 'default',
+  [TimeOffRequestStatus.APPROVED]: 'success',
+  [TimeOffRequestStatus.REJECTED]: 'destructive'
 } as const
 
 export default function TimeOffRequestsContent() {
@@ -88,7 +89,7 @@ export default function TimeOffRequestsContent() {
                 {request.employee?.full_name || 'Unknown Employee'}
               </h3>
               <p className="text-sm text-gray-500">
-                {TYPE_LABELS[request.type || 'PERSONAL']} • 
+                {TYPE_LABELS[request.type || TimeOffRequestType.PERSONAL]} • 
                 {format(new Date(request.start_date), 'MMM d, yyyy')} - 
                 {format(new Date(request.end_date), 'MMM d, yyyy')}
               </p>
@@ -99,7 +100,7 @@ export default function TimeOffRequestsContent() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              <Badge variant={STATUS_VARIANTS[request.status || 'PENDING']}>
+              <Badge variant={STATUS_VARIANTS[request.status || TimeOffRequestStatus.PENDING]}>
                 {request.status || 'PENDING'}
               </Badge>
               {request.is_paid && (

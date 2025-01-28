@@ -63,11 +63,11 @@ export class ErrorAnalyticsStorage {
       if (error) throw error
 
       return {
-        currentSizeBytes: data.current_size_bytes,
-        maxSizeBytes: data.max_size_bytes,
-        usagePercentage: data.usage_percentage,
-        needsCleanup: data.needs_cleanup,
-        lastCleanup: data.last_cleanup ? new Date(data.last_cleanup) : null
+        currentSizeBytes: data.total_size_bytes,
+        maxSizeBytes: data.quota_bytes,
+        usagePercentage: data.usage_percent,
+        needsCleanup: data.is_quota_exceeded,
+        lastCleanup: data.last_checked ? new Date(data.last_checked) : null
       }
     } catch (error) {
       throw new StorageError(
@@ -259,5 +259,4 @@ async function decompress(data: Uint8Array): Promise<Uint8Array> {
   writer.write(data)
   writer.close()
   return new Response(ds.readable).arrayBuffer().then(buffer => new Uint8Array(buffer))
-} 
 } 

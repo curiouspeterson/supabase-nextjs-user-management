@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import type { Alert, AlertTemplate, AlertSeverity, AlertCategory } from '@/types'
+import type { Alert, AlertTemplate, AlertSeverity, AlertCategory } from '@/types/alert'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,

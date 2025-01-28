@@ -7,12 +7,6 @@ import { ApiError, DatabaseError, AuthError, ValidationError } from '@/lib/error
 import { parseISO, isValid, isBefore, addYears } from 'date-fns'
 import crypto from 'crypto'
 
-// Environment variables validation
-const envSchema = z.object({
-  NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
-})
-
 // Request validation schemas
 const timeOffRequestSchema = z.object({
   start_date: z.string().refine(
@@ -29,12 +23,12 @@ const timeOffRequestSchema = z.object({
     },
     { message: 'Invalid end date. Date must be in the future.' }
   ),
-  request_type: z.enum(['Vacation', 'Sick Leave', 'Personal', 'Other']),
-  reason: z.string().min(1).max(500),
+  type: z.enum(['Vacation', 'Personal', 'Sick', 'Training']),
+  notes: z.string().min(1).max(500),
 })
 
 const updateRequestSchema = z.object({
-  status: z.enum(['Approved', 'Denied', 'Pending']),
+  status: z.enum(['Approved', 'Declined', 'Pending']),
   manager_notes: z.string().max(500).optional(),
 })
 
@@ -44,12 +38,6 @@ export async function POST(request: Request) {
   const requestId = crypto.randomUUID()
   
   try {
-    // Validate environment variables
-    const env = envSchema.parse({
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    })
-
     // Parse and validate request body
     const body = await request.json()
     const validatedData = timeOffRequestSchema.parse(body)
@@ -58,10 +46,10 @@ export async function POST(request: Request) {
       requestId,
       startDate: validatedData.start_date,
       endDate: validatedData.end_date,
-      type: validatedData.request_type,
+      type: validatedData.type,
     })
 
-    const supabase = createClient(cookies())
+    const supabase = createClient()
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -72,54 +60,33 @@ export async function POST(request: Request) {
       throw new AuthError('No authenticated user found')
     }
 
-    // Validate request using database function
-    const { data: validation, error: validationError } = await supabase.rpc(
-      'validate_time_off_request',
-      {
-        p_user_id: user.id,
-        p_start_date: validatedData.start_date,
-        p_end_date: validatedData.end_date,
-        p_request_type: validatedData.request_type,
-        p_reason: validatedData.reason,
-      }
-    )
-
-    if (validationError) {
-      throw new DatabaseError('Failed to validate request', { cause: validationError })
-    }
-
-    if (!validation.valid) {
-      throw new ValidationError('Invalid time-off request', {
-        errors: validation.errors,
-        conflicts: validation.conflicts,
-      })
-    }
-
-    // Insert time-off request
-    const { error: insertError } = await supabase
+    // Create time off request
+    const { data: timeOffRequest, error: createError } = await supabase
       .from('time_off_requests')
       .insert({
         employee_id: user.id,
         start_date: validatedData.start_date,
         end_date: validatedData.end_date,
-        request_type: validatedData.request_type,
-        reason: validatedData.reason,
+        type: validatedData.type,
+        notes: validatedData.notes,
         status: 'Pending',
-        created_by: user.id,
-        updated_by: user.id,
+        submitted_at: new Date().toISOString(),
       })
+      .select()
+      .single()
 
-    if (insertError) {
-      throw new DatabaseError('Failed to create time-off request', { cause: insertError })
+    if (createError) {
+      throw new DatabaseError('Failed to create time off request', { cause: createError })
     }
 
-    logger.info('Successfully created time-off request', {
+    logger.info('Successfully created time off request', {
       requestId,
-      userId: user.id,
+      timeOffRequestId: timeOffRequest.id,
     })
 
     return NextResponse.json({
       message: 'Time-off request created successfully',
+      data: timeOffRequest,
     })
 
   } catch (error) {
@@ -131,62 +98,34 @@ export async function POST(request: Request) {
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: 'Invalid request data',
-          errors: error.errors,
-        },
+        { error: 'Invalid request data', errors: error.errors },
         { status: 400 }
       )
     }
 
     if (error instanceof ValidationError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: error.message,
-          errors: error.errors,
-          conflicts: error.conflicts,
-        },
+        { error: error.message },
         { status: 400 }
       )
     }
 
     if (error instanceof AuthError) {
       return NextResponse.json(
-        {
-          type: 'authorization_error',
-          title: 'Authorization Error',
-          status: 403,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 403 }
       )
     }
 
     if (error instanceof DatabaseError) {
       return NextResponse.json(
-        {
-          type: 'database_error',
-          title: 'Database Error',
-          status: 500,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 500 }
       )
     }
 
     return NextResponse.json(
-      {
-        type: 'internal_server_error',
-        title: 'Internal Server Error',
-        status: 500,
-        detail: 'An unexpected error occurred',
-      },
+      { error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }
@@ -196,29 +135,7 @@ export async function GET(request: Request) {
   const requestId = crypto.randomUUID()
   
   try {
-    // Validate environment variables
-    const env = envSchema.parse({
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    })
-
-    const supabase = createClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient()
 
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError) {
@@ -233,16 +150,16 @@ export async function GET(request: Request) {
 
     // Check if user can manage time-off requests if querying other employees
     if (employeeId && employeeId !== user.id) {
-      const { data: canManage, error: permissionError } = await supabase
-        .rpc('can_manage_time_off_requests', {
-          p_user_id: user.id,
-        })
+      const { data: employeeData, error: employeeError } = await supabase
+        .from('employees')
+        .select('user_role')
+        .eq('id', user.id)
+        .single()
 
-      if (permissionError) {
-        throw new DatabaseError('Failed to check permissions', { cause: permissionError })
+      if (employeeError) {
+        throw new DatabaseError('Failed to fetch employee data', { cause: employeeError })
       }
-
-      if (!canManage) {
+      if (!employeeData || !['Manager', 'Admin'].includes(employeeData.user_role)) {
         throw new AuthError('Insufficient permissions to view other employees time-off requests')
       }
     }
@@ -254,8 +171,8 @@ export async function GET(request: Request) {
         employee_id,
         start_date,
         end_date,
-        request_type,
-        reason,
+        type,
+        notes,
         status,
         manager_notes,
         created_at,
@@ -302,60 +219,34 @@ export async function GET(request: Request) {
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: 'Invalid request data',
-          errors: error.errors,
-        },
+        { error: 'Invalid request data', errors: error.errors },
         { status: 400 }
       )
     }
 
     if (error instanceof ValidationError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 400 }
       )
     }
 
     if (error instanceof AuthError) {
       return NextResponse.json(
-        {
-          type: 'authorization_error',
-          title: 'Authorization Error',
-          status: 403,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 403 }
       )
     }
 
     if (error instanceof DatabaseError) {
       return NextResponse.json(
-        {
-          type: 'database_error',
-          title: 'Database Error',
-          status: 500,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 500 }
       )
     }
 
     return NextResponse.json(
-      {
-        type: 'internal_server_error',
-        title: 'Internal Server Error',
-        status: 500,
-        detail: 'An unexpected error occurred',
-      },
+      { error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }
@@ -365,12 +256,6 @@ export async function PUT(request: Request) {
   const requestId = crypto.randomUUID()
   
   try {
-    // Validate environment variables
-    const env = envSchema.parse({
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    })
-
     // Get request ID from URL
     const url = new URL(request.url)
     const id = url.searchParams.get('id')
@@ -388,23 +273,7 @@ export async function PUT(request: Request) {
       status: validatedData.status,
     })
 
-    const supabase = createClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient()
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -415,17 +284,17 @@ export async function PUT(request: Request) {
       throw new AuthError('No authenticated user found')
     }
 
-    // Check if user can manage time-off requests
-    const { data: canManage, error: permissionError } = await supabase
-      .rpc('can_manage_time_off_requests', {
-        p_user_id: user.id,
-      })
+    // Check if user has permission to update time-off requests
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('user_role')
+      .eq('id', user.id)
+      .single()
 
-    if (permissionError) {
-      throw new DatabaseError('Failed to check permissions', { cause: permissionError })
+    if (employeeError) {
+      throw new DatabaseError('Failed to fetch employee data', { cause: employeeError })
     }
-
-    if (!canManage) {
+    if (!employeeData || !['Manager', 'Admin'].includes(employeeData.user_role)) {
       throw new AuthError('Insufficient permissions to manage time-off requests')
     }
 
@@ -463,60 +332,34 @@ export async function PUT(request: Request) {
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: 'Invalid request data',
-          errors: error.errors,
-        },
+        { error: 'Invalid request data', errors: error.errors },
         { status: 400 }
       )
     }
 
     if (error instanceof ValidationError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 400 }
       )
     }
 
     if (error instanceof AuthError) {
       return NextResponse.json(
-        {
-          type: 'authorization_error',
-          title: 'Authorization Error',
-          status: 403,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 403 }
       )
     }
 
     if (error instanceof DatabaseError) {
       return NextResponse.json(
-        {
-          type: 'database_error',
-          title: 'Database Error',
-          status: 500,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 500 }
       )
     }
 
     return NextResponse.json(
-      {
-        type: 'internal_server_error',
-        title: 'Internal Server Error',
-        status: 500,
-        detail: 'An unexpected error occurred',
-      },
+      { error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }
@@ -526,12 +369,6 @@ export async function DELETE(request: Request) {
   const requestId = crypto.randomUUID()
   
   try {
-    // Validate environment variables
-    const env = envSchema.parse({
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    })
-
     // Get request ID from URL
     const url = new URL(request.url)
     const id = url.searchParams.get('id')
@@ -544,23 +381,7 @@ export async function DELETE(request: Request) {
       timeOffRequestId: id,
     })
 
-    const supabase = createClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient()
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -571,17 +392,17 @@ export async function DELETE(request: Request) {
       throw new AuthError('No authenticated user found')
     }
 
-    // Check if user can manage time-off requests
-    const { data: canManage, error: permissionError } = await supabase
-      .rpc('can_manage_time_off_requests', {
-        p_user_id: user.id,
-      })
+    // Check if user has permission to delete time-off requests
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('user_role')
+      .eq('id', user.id)
+      .single()
 
-    if (permissionError) {
-      throw new DatabaseError('Failed to check permissions', { cause: permissionError })
+    if (employeeError) {
+      throw new DatabaseError('Failed to fetch employee data', { cause: employeeError })
     }
-
-    if (!canManage) {
+    if (!employeeData || !['Manager', 'Admin'].includes(employeeData.user_role)) {
       throw new AuthError('Insufficient permissions to delete time-off requests')
     }
 
@@ -613,60 +434,34 @@ export async function DELETE(request: Request) {
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: 'Invalid request data',
-          errors: error.errors,
-        },
+        { error: 'Invalid request data', errors: error.errors },
         { status: 400 }
       )
     }
 
     if (error instanceof ValidationError) {
       return NextResponse.json(
-        {
-          type: 'validation_error',
-          title: 'Validation Error',
-          status: 400,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 400 }
       )
     }
 
     if (error instanceof AuthError) {
       return NextResponse.json(
-        {
-          type: 'authorization_error',
-          title: 'Authorization Error',
-          status: 403,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 403 }
       )
     }
 
     if (error instanceof DatabaseError) {
       return NextResponse.json(
-        {
-          type: 'database_error',
-          title: 'Database Error',
-          status: 500,
-          detail: error.message,
-        },
+        { error: error.message },
         { status: 500 }
       )
     }
 
     return NextResponse.json(
-      {
-        type: 'internal_server_error',
-        title: 'Internal Server Error',
-        status: 500,
-        detail: 'An unexpected error occurred',
-      },
+      { error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }

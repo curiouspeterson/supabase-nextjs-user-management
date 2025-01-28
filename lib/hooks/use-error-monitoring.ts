@@ -145,6 +145,9 @@ export function useErrorMonitoring(
       name: error.name,
       message: error.message,
       stack: error.stack,
+      code: 'ERROR_MONITORING_FAILED',
+      statusCode: 500,
+      shouldLog: true
     }
   }, [componentName, mergedConfig])
 

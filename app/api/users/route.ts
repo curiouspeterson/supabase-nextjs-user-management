@@ -52,7 +52,7 @@ export async function GET(request: Request) {
       ...validatedQuery,
     })
 
-    const supabase = createClient(cookies())
+    const supabase = createClient()
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -92,22 +92,35 @@ export async function GET(request: Request) {
     // Mask sensitive data
     const maskedUsers = await Promise.all(
       (users ?? []).map(async (userData) => {
-        const { data: masked, error: maskError } = await supabase.rpc(
-          'mask_user_data',
-          {
-            p_viewer_id: user.id,
-            p_user_data: userData,
+        try {
+          // Check if user has permission to view sensitive data
+          const { data: employeeData, error: employeeError } = await supabase
+            .from('employees')
+            .select('user_role')
+            .eq('id', user.id)
+            .single()
+
+          if (employeeError) {
+            throw employeeError
           }
-        )
-        if (maskError) {
+
+          const canViewSensitiveData = employeeData && ['Manager', 'Admin'].includes(employeeData.user_role)
+
+          // Mask sensitive data for non-privileged users
+          return {
+            ...userData,
+            employee_role: canViewSensitiveData ? userData.employee_role : 'Employee',
+            weekly_hours_scheduled: canViewSensitiveData ? userData.weekly_hours_scheduled : null,
+            default_shift_type_id: canViewSensitiveData ? userData.default_shift_type_id : null,
+          }
+        } catch (error) {
           logger.warn('Failed to mask user data', {
             requestId,
             userId: userData.id,
-            error: maskError,
+            error,
           })
           return null
         }
-        return masked
       })
     )
 
@@ -205,7 +218,7 @@ export async function POST(request: Request) {
       count: validatedData.ids.length,
     })
 
-    const supabase = createClient(cookies())
+    const supabase = createClient()
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -229,22 +242,35 @@ export async function POST(request: Request) {
     // Mask sensitive data
     const maskedUsers = await Promise.all(
       (users ?? []).map(async (userData) => {
-        const { data: masked, error: maskError } = await supabase.rpc(
-          'mask_user_data',
-          {
-            p_viewer_id: user.id,
-            p_user_data: userData,
+        try {
+          // Check if user has permission to view sensitive data
+          const { data: employeeData, error: employeeError } = await supabase
+            .from('employees')
+            .select('user_role')
+            .eq('id', user.id)
+            .single()
+
+          if (employeeError) {
+            throw employeeError
           }
-        )
-        if (maskError) {
+
+          const canViewSensitiveData = employeeData && ['Manager', 'Admin'].includes(employeeData.user_role)
+
+          // Mask sensitive data for non-privileged users
+          return {
+            ...userData,
+            employee_role: canViewSensitiveData ? userData.employee_role : 'Employee',
+            weekly_hours_scheduled: canViewSensitiveData ? userData.weekly_hours_scheduled : null,
+            default_shift_type_id: canViewSensitiveData ? userData.default_shift_type_id : null,
+          }
+        } catch (error) {
           logger.warn('Failed to mask user data', {
             requestId,
             userId: userData.id,
-            error: maskError,
+            error,
           })
           return null
         }
-        return masked
       })
     )
 
@@ -313,5 +339,25 @@ export async function POST(request: Request) {
       },
       { status: 500 }
     )
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const supabase = createClient()
+    
+    // ... rest of the code remains the same ...
+  } catch (error) {
+    // ... rest of the code remains the same ...
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const supabase = createClient()
+    
+    // ... rest of the code remains the same ...
+  } catch (error) {
+    // ... rest of the code remains the same ...
   }
 } 

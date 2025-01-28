@@ -1,6 +1,7 @@
 'use client';
 
-import { addDays, differenceInHours, parseISO, format, zonedTimeToUtc, utcToZonedTime } from 'date-fns';
+import { addDays, differenceInHours, parseISO, format } from 'date-fns';
+import { getTimezoneOffset, formatInTimeZone } from 'date-fns-tz';
 import type { Shift, Schedule, CoverageReport } from './types';
 import { createClient } from '@/utils/supabase/server';
 import { logger } from '@/lib/logger';
@@ -36,8 +37,9 @@ export class MidnightShiftHandler {
     try {
       // Convert the shift times to UTC, considering the timezone
       const shiftDate = parseISO(date);
-      const startTime = zonedTimeToUtc(`${date}T${shift.start_time}`, this.timezone);
-      const endTime = zonedTimeToUtc(`${date}T${shift.end_time}`, this.timezone);
+      const tzOffset = getTimezoneOffset(this.timezone);
+      const startTime = new Date(shiftDate.getTime() + tzOffset);
+      const endTime = new Date(shiftDate.getTime() + tzOffset);
 
       // Use the database function to split the shift
       const { data: segments, error } = await this.supabase.rpc('split_midnight_shift', {
@@ -55,7 +57,7 @@ export class MidnightShiftHandler {
       }
 
       return segments.map(segment => ({
-        date: format(utcToZonedTime(parseISO(segment.segment_date), this.timezone), 'yyyy-MM-dd'),
+        date: formatInTimeZone(parseISO(segment.segment_date), this.timezone, 'yyyy-MM-dd'),
         hours: Number(segment.hours)
       }));
     } catch (error) {

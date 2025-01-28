@@ -2,7 +2,7 @@ import { Suspense } from 'react'
 import { Metadata } from 'next'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { ScheduleSkeleton } from '@/components/skeletons'
-import { ScheduleError } from '@/components/schedule-error'
+import { ScheduleErrorFallback } from './components/ScheduleErrorFallback'
 import { ScheduleLoading } from './components/ScheduleLoading'
 import { EmployeeScheduleContent } from './components/EmployeeScheduleContent'
 
@@ -18,7 +18,7 @@ export default function EmployeeSchedulePage() {
         <h1 className="text-2xl font-bold">My Schedule</h1>
       </div>
 
-      <ErrorBoundary fallback={ScheduleError}>
+      <ErrorBoundary fallback={<ScheduleErrorFallback error={new Error('Failed to load schedule')} />}>
         <Suspense fallback={<ScheduleLoading />}>
           <EmployeeScheduleContent />
         </Suspense>

@@ -187,6 +187,18 @@ class MockRequest implements Request {
     this.signal = init?.signal || new AbortController().signal
   }
 
+  async bytes(): Promise<Uint8Array> {
+    if (this.body instanceof ArrayBuffer) {
+      return new Uint8Array(this.body)
+    } else if (this.body instanceof Blob) {
+      const buffer = await this.body.arrayBuffer()
+      return new Uint8Array(buffer)
+    } else if (typeof this.body === 'string') {
+      return new TextEncoder().encode(this.body)
+    }
+    return new Uint8Array(0)
+  }
+
   get url(): string {
     return this._url
   }
@@ -234,9 +246,9 @@ class MockResponse implements Response {
   readonly redirected: boolean
   readonly status: number
   readonly statusText: string
-  readonly type: ResponseType
-  readonly url: string
-  readonly bodyUsed: boolean
+  readonly type: ResponseType = 'default'
+  readonly url: string = ''
+  readonly bodyUsed: boolean = false
 
   constructor(body?: BodyInit | null, init?: ResponseInit) {
     this._body = body
@@ -247,7 +259,18 @@ class MockResponse implements Response {
     this.redirected = false
     this.type = 'default'
     this.url = ''
-    this.bodyUsed = false
+  }
+
+  async bytes(): Promise<Uint8Array> {
+    if (this._body instanceof ArrayBuffer) {
+      return new Uint8Array(this._body)
+    } else if (this._body instanceof Blob) {
+      const buffer = await this._body.arrayBuffer()
+      return new Uint8Array(buffer)
+    } else if (typeof this._body === 'string') {
+      return new TextEncoder().encode(this._body)
+    }
+    return new Uint8Array(0)
   }
 
   get body(): ReadableStream<Uint8Array> | null {
@@ -429,28 +452,28 @@ class MockHeaders {
     this.headers.set(name.toLowerCase(), value);
   }
 
+  forEach(callbackfn: (value: string, key: string, parent: Headers) => void, thisArg?: any): void {
+    this.headers.forEach((value, key) => callbackfn(value, key, this as unknown as Headers), thisArg)
+  }
+
+  entries(): HeadersIterator<[string, string]> {
+    return this.headers.entries() as unknown as HeadersIterator<[string, string]>
+  }
+
+  keys(): HeadersIterator<string> {
+    return this.headers.keys() as unknown as HeadersIterator<string>
+  }
+
+  values(): HeadersIterator<string> {
+    return this.headers.values() as unknown as HeadersIterator<string>
+  }
+
+  [Symbol.iterator](): HeadersIterator<[string, string]> {
+    return this.entries()
+  }
+
   getSetCookie(): string[] {
     return [];
-  }
-
-  forEach(callbackfn: (value: string, key: string, parent: Headers) => void, thisArg?: any): void {
-    this.headers.forEach((value, key) => callbackfn.call(thisArg, value, key, this as unknown as Headers));
-  }
-
-  entries(): IterableIterator<[string, string]> {
-    return this.headers.entries();
-  }
-
-  keys(): IterableIterator<string> {
-    return this.headers.keys();
-  }
-
-  values(): IterableIterator<string> {
-    return this.headers.values();
-  }
-
-  [Symbol.iterator](): IterableIterator<[string, string]> {
-    return this.entries();
   }
 }
 
@@ -506,31 +529,35 @@ class MockFormData implements FormData {
   }
 
   forEach(callbackfn: (value: FormDataEntryValue, key: string, parent: FormData) => void): void {
-    Array.from(this.data.entries()).forEach(([key, values]) => {
-      values.forEach(value => callbackfn(value, key, this));
-    });
+    this.data.forEach((values, key) => {
+      values.forEach(value => callbackfn(value, key, this))
+    })
   }
 
-  *entries(): IterableIterator<[string, FormDataEntryValue]> {
-    for (const [key, values] of Array.from(this.data.entries())) {
+  *entries(): FormDataIterator<[string, FormDataEntryValue]> {
+    for (const [key, values] of this.data.entries()) {
       for (const value of values) {
-        yield [key, value];
+        yield [key, value] as [string, FormDataEntryValue]
       }
     }
   }
 
-  *keys(): IterableIterator<string> {
-    yield* this.data.keys();
-  }
-
-  *values(): IterableIterator<FormDataEntryValue> {
-    for (const values of this.data.values()) {
-      yield* values;
+  *keys(): FormDataIterator<string> {
+    for (const key of this.data.keys()) {
+      yield key
     }
   }
 
-  [Symbol.iterator](): IterableIterator<[string, FormDataEntryValue]> {
-    return this.entries();
+  *values(): FormDataIterator<FormDataEntryValue> {
+    for (const values of this.data.values()) {
+      for (const value of values) {
+        yield value
+      }
+    }
+  }
+
+  [Symbol.iterator](): FormDataIterator<[string, FormDataEntryValue]> {
+    return this.entries()
   }
 }
 

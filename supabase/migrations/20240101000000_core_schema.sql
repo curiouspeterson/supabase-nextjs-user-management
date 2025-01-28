@@ -167,8 +167,8 @@ CREATE POLICY "Users can update own profile"
     USING (auth.uid() = id)
     WITH CHECK (
         auth.uid() = id AND
-        role IS NOT DISTINCT FROM OLD.role AND
-        status IS NOT DISTINCT FROM OLD.status
+        (role = (SELECT role FROM public.profiles WHERE id = auth.uid())) AND
+        (status = (SELECT status FROM public.profiles WHERE id = auth.uid()))
     );
 
 CREATE POLICY "Admins can update all profiles"

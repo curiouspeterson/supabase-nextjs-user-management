@@ -439,46 +439,402 @@ export type Database = {
         }
         Relationships: []
       }
+      error_analytics_config: {
+        Row: {
+          id: string
+          component: string
+          max_contexts: number
+          max_user_agents: number
+          max_urls: number
+          max_trends: number
+          trend_period_ms: number
+          retention_days: number
+          batch_size: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          component: string
+          max_contexts: number
+          max_user_agents: number
+          max_urls: number
+          max_trends: number
+          trend_period_ms: number
+          retention_days: number
+          batch_size: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          component?: string
+          max_contexts?: number
+          max_user_agents?: number
+          max_urls?: number
+          max_trends?: number
+          trend_period_ms?: number
+          retention_days?: number
+          batch_size?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      error_analytics_data: {
+        Row: {
+          id: string
+          component: string
+          error_type: string
+          error_message: string
+          context: Json
+          user_agent: string | null
+          url: string | null
+          batch_id: string
+          timestamp: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          component: string
+          error_type: string
+          error_message: string
+          context: Json
+          user_agent?: string | null
+          url?: string | null
+          batch_id: string
+          timestamp: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          component?: string
+          error_type?: string
+          error_message?: string
+          context?: Json
+          user_agent?: string | null
+          url?: string | null
+          batch_id?: string
+          timestamp?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      error_analytics_trends: {
+        Row: {
+          id: string
+          component: string
+          error_type: string
+          count: number
+          first_seen: string
+          last_seen: string
+          contexts: Json[]
+          user_agents: string[]
+          urls: string[]
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          component: string
+          error_type: string
+          count: number
+          first_seen: string
+          last_seen: string
+          contexts: Json[]
+          user_agents: string[]
+          urls: string[]
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          component?: string
+          error_type?: string
+          count?: number
+          first_seen?: string
+          last_seen?: string
+          contexts?: Json[]
+          user_agents?: string[]
+          urls?: string[]
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      error_analytics_storage: {
+        Row: {
+          id: string
+          component: string
+          storage_key: string
+          data: string
+          size_bytes: number
+          last_accessed: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          component: string
+          storage_key: string
+          data: string
+          size_bytes: number
+          last_accessed?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          component?: string
+          storage_key?: string
+          data?: string
+          size_bytes?: number
+          last_accessed?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      process_error_analytics_batch: {
+        Args: {
+          p_batch_id: string
+        }
+        Returns: void
+      },
+      split_midnight_shift: {
+        Args: {
+          p_start_time: string
+          p_end_time: string
+          p_timezone?: string
+        }
+        Returns: Array<{
+          segment_date: string
+          hours: number
+        }>
+      },
+      log_request: {
+        Args: {
+          p_level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
+          p_message: string
+          p_request_data: {
+            method: string
+            url: string
+            headers?: Record<string, string>
+            ip?: string
+            userAgent?: string
+          }
+          p_user_data: {
+            id: string
+            email: string
+            role: string
+          } | null
+          p_metadata?: Record<string, unknown>
+        }
+        Returns: void
+      },
+      cleanup_error_analytics_data: {
+        Args: {
+          p_component: string
+        }
+        Returns: void
+      },
       calculate_period_coverage: {
         Args: {
-          p_date: string
           p_period_id: string
+          p_start_date: string
+          p_end_date: string
+        }
+        Returns: {
+          date: string
+          required_coverage: number
+          actual_coverage: number
+          coverage_status: string
+        }[]
+      },
+      get_error_http_code: {
+        Args: {
+          p_error_code: string
         }
         Returns: number
-      }
+      },
       get_time_off_requests: {
-        Args: Record<PropertyKey, never>
+        Args: {
+          p_employee_id: string
+          p_start_date: string
+          p_end_date: string
+        }
         Returns: {
           id: string
           employee_id: string
           start_date: string
           end_date: string
-          type: Database["public"]["Enums"]["time_off_type_enum"]
-          status: Database["public"]["Enums"]["time_off_status_enum"]
-          notes: string
-          reviewed_by: string
-          reviewed_at: string
-          submitted_at: string
-          created_at: string
-          updated_at: string
-          employee_email: string
-          employee_full_name: string
-          employee_role: Database["public"]["Enums"]["employee_role_enum"]
+          type: string
+          status: string
         }[]
-      }
+      },
       validate_schedule_against_pattern: {
         Args: {
           p_employee_id: string
+          p_start_date: string
+          p_end_date: string
+        }
+        Returns: {
+          is_valid: boolean
+          violations: string[]
+        }
+      },
+      validate_shift_assignment: {
+        Args: {
+          p_employee_id: string
+          p_shift_id: string
           p_date: string
         }
-        Returns: boolean
+        Returns: {
+          is_valid: boolean
+          violations: string[]
+          warnings: string[]
+        }
+      },
+      log_auth_error: {
+        Args: {
+          p_user_id: string | null
+          p_action: string
+          p_error_code: string
+          p_error_message: string
+          p_ip_address: string
+          p_user_agent: string
+        }
+        Returns: string
+      },
+      log_error_metrics: {
+        Args: {
+          p_component: string
+          p_metrics: {
+            errorCount: number
+            lastError: Date | null
+            recoveryAttempts: number
+            successfulRecoveries: number
+          }
+          p_error_details: {
+            name: string
+            message: string
+            stack?: string
+          } | null
+        }
+        Returns: void
+      },
+      log_network_retry_metrics: {
+        Args: {
+          p_component: string
+          p_endpoint: string
+          p_metrics: {
+            totalRetries: number
+            successfulRetries: number
+            failedRetries: number
+            lastRetry: Date | null
+            avgRetryDelay: number
+            maxRetryDelay: number
+          }
+          p_retry_details: {
+            lastAttemptSuccess: boolean
+            lastRetryDelay: number
+            strategy: 'LINEAR' | 'EXPONENTIAL' | 'FIBONACCI'
+          }
+        }
+        Returns: void
+      },
+      get_user_profile: {
+        Args: {
+          p_user_id: string
+        }
+        Returns: Array<{
+          id: string
+          email: string
+          role: 'ADMIN' | 'MANAGER' | 'EMPLOYEE'
+          status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING'
+          full_name: string | null
+          avatar_url: string | null
+          metadata: Record<string, unknown>
+          preferences: Record<string, unknown>
+          last_active: string | null
+          created_at: string
+          updated_at: string
+        }>
+      },
+      log_auth_event: {
+        Args: {
+          p_event_type: string
+          p_user_id: string | null
+          p_metadata: Record<string, unknown>
+        }
+        Returns: void
+      },
+      check_rate_limit: {
+        Args: {
+          p_key: string
+          p_user_id: string | null
+        }
+        Returns: {
+          is_allowed: boolean
+          remaining_attempts: number
+          reset_time: string
+        }
+      },
+      get_rate_limit_metrics: {
+        Args: {
+          p_key: string
+          p_user_id: string | null
+          p_window_start: string
+        }
+        Returns: Array<{
+          window_start: string
+          request_count: number
+          last_request: string | null
+        }>
+      },
+      check_storage_quota_status: {
+        Args: {
+          p_component: string
+        }
+        Returns: {
+          total_size_bytes: number
+          quota_bytes: number
+          usage_percent: number
+          is_quota_exceeded: boolean
+          last_checked: string
+        }
+      },
+      cleanup_error_analytics_storage: {
+        Args: {
+          p_component: string
+          p_older_than_days: number
+        }
+        Returns: number
+      },
+      get_error_analytics_data: {
+        Args: {
+          p_component: string
+          p_storage_key: string
+        }
+        Returns: Array<{
+          data: string
+        }>
+      },
+      save_error_analytics_data: {
+        Args: {
+          p_component: string
+          p_storage_key: string
+          p_data: string
+          p_size_bytes: number
+        }
+        Returns: void
       }
-    }
+    },
     Enums: {
       coverage_status_enum: "Under" | "Met" | "Over"
       day_of_week_enum:
@@ -496,7 +852,7 @@ export type Database = {
       time_off_status_enum: "Pending" | "Approved" | "Declined"
       time_off_type_enum: "Vacation" | "Sick" | "Personal" | "Training"
       user_role_enum: "Employee" | "Manager" | "Admin"
-    }
+    },
     CompositeTypes: {
       [_ in never]: never
     }

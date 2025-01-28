@@ -17,12 +17,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Schedule } from '@/lib/types/schedule';
+import { Schedule, ScheduleAction, ScheduleStatus } from '@/services/scheduler/types';
 import { AppError } from '@/lib/types/error';
 import { useToast } from '@/components/ui/use-toast';
 import { useScheduleStore } from '@/lib/stores/schedule-store';
 import { useAppState } from '@/lib/hooks/use-app-state';
-import type { ScheduleAction } from '@/types';
 
 interface ScheduleActionsProps {
   schedule: Schedule;
@@ -38,61 +37,62 @@ export function ScheduleActions({ schedule, onAction }: ScheduleActionsProps) {
   const [currentAction, setCurrentAction] = useState<ScheduleAction | null>(null);
   
   const { addSchedule, updateSchedule, removeSchedule } = useScheduleStore();
-  const { appState, persistState } = useAppState();
+  const { appState, persistState, updateState } = useAppState();
 
-  // Persist state on app state changes
+  // Persist state on component mount and update
   useEffect(() => {
-    const handleAppStateChange = () => {
-      if (appState === 'active') {
-        persistState('scheduleActions', {
-          showConfirm,
-          currentAction,
-          scheduleId: schedule.id
-        });
+    updateState({
+      schedules: {
+        showConfirm,
+        currentAction,
+        selectedSchedule: schedule
       }
-    };
-    
-    return () => {
-      handleAppStateChange();
-    };
-  }, [appState, showConfirm, currentAction, schedule.id, persistState]);
+    });
+  }, [showConfirm, currentAction, schedule, updateState]);
 
   // Restore state on mount
   useEffect(() => {
-    const restored = persistState.get('scheduleActions');
-    if (restored && restored.scheduleId === schedule.id) {
-      setShowConfirm(restored.showConfirm);
-      setCurrentAction(restored.currentAction);
+    const savedState = appState.schedules;
+    if (savedState && savedState.selectedSchedule?.id === schedule.id) {
+      setShowConfirm(savedState.showConfirm);
+      setCurrentAction(savedState.currentAction);
     }
-  }, [schedule.id, persistState]);
+  }, [appState, schedule.id]);
 
   const handleAction = useCallback(async (action: ScheduleAction) => {
     try {
       setIsLoading(true);
       setCurrentAction(action);
       
-      if (action === 'delete') {
+      // For delete action, show confirmation first
+      if (action === ScheduleAction.DELETE && !showConfirm) {
         setShowConfirm(true);
+        setIsLoading(false);
+        return;
+      }
+
+      // If we get here with DELETE action, it means confirmation was shown
+      if (action === ScheduleAction.DELETE) {
+        await onAction(action);
+        removeSchedule(schedule.id);
+        toast('Schedule deleted successfully');
+        setShowConfirm(false);
         return;
       }
 
       await onAction(action);
       
       switch (action) {
-        case 'publish':
-          updateSchedule({ ...schedule, status: 'published' });
-          useToastToast({ title: 'Schedule published successfully' });
+        case ScheduleAction.PUBLISH:
+          updateSchedule({ ...schedule, status: 'Published' });
+          toast('Schedule published successfully');
           break;
-        case 'unpublish':
-          updateSchedule({ ...schedule, status: 'draft' });
-          useToastToast({ title: 'Schedule unpublished successfully' });
-          break;
-        case 'delete':
-          removeSchedule(schedule.id);
-          useToastToast({ title: 'Schedule deleted successfully' });
+        case ScheduleAction.CANCEL:
+          updateSchedule({ ...schedule, status: 'Draft' });
+          toast('Schedule unpublished successfully');
           break;
         default:
-          throw new Error(`Invalid action: ${action}`);
+          toast('Invalid action');
       }
     } catch (error) {
       useToastToast({
@@ -103,27 +103,29 @@ export function ScheduleActions({ schedule, onAction }: ScheduleActionsProps) {
     } finally {
       setIsLoading(false);
       setCurrentAction(null);
-      setShowConfirm(false);
+      if (action !== ScheduleAction.DELETE || showConfirm) {
+        setShowConfirm(false);
+      }
     }
-  }, [schedule, onAction, updateSchedule, removeSchedule, useToastToast]);
+  }, [schedule, onAction, updateSchedule, removeSchedule, useToastToast, showConfirm]);
 
   return (
     <>
       <div className="flex space-x-2">
-        {schedule.status === 'draft' && (
+        {schedule.status === 'Draft' && (
           <Button
             variant="default"
-            onClick={() => handleAction('publish')}
+            onClick={() => handleAction(ScheduleAction.PUBLISH)}
             disabled={isLoading}
           >
             Publish
           </Button>
         )}
         
-        {schedule.status === 'published' && (
+        {schedule.status === 'Published' && (
           <Button
             variant="outline"
-            onClick={() => handleAction('unpublish')}
+            onClick={() => handleAction(ScheduleAction.CANCEL)}
             disabled={isLoading}
           >
             Unpublish
@@ -132,28 +134,33 @@ export function ScheduleActions({ schedule, onAction }: ScheduleActionsProps) {
 
         <Button
           variant="destructive"
-          onClick={() => handleAction('delete')}
+          onClick={() => handleAction(ScheduleAction.DELETE)}
           disabled={isLoading}
         >
           Delete
         </Button>
       </div>
 
-      <AlertDialog
-        open={showConfirm}
-        onOpenChange={setShowConfirm}
-        title="Delete Schedule"
-        description="Are you sure you want to delete this schedule? This action cannot be undone."
-        action={
-          <Button
-            variant="destructive"
-            onClick={() => handleAction('delete')}
-            disabled={isLoading}
-          >
-            Delete
-          </Button>
-        }
-      />
+      <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Schedule</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this schedule? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => handleAction(ScheduleAction.DELETE)}
+              disabled={isLoading}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 } 

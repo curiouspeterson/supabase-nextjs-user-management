@@ -166,8 +166,8 @@ $$;
 
 -- Log request function
 CREATE OR REPLACE FUNCTION public.log_request(
-    p_level public.log_level DEFAULT 'INFO',
     p_message TEXT,
+    p_level public.log_level DEFAULT 'INFO',
     p_request_data JSONB DEFAULT '{}'::jsonb,
     p_user_data JSONB DEFAULT NULL,
     p_metadata JSONB DEFAULT NULL
@@ -255,25 +255,62 @@ BEGIN
 END;
 $$;
 
+-- Auth error logging function
+CREATE OR REPLACE FUNCTION public.log_auth_error(
+    p_user_id UUID,
+    p_action TEXT,
+    p_error_code TEXT,
+    p_error_message TEXT,
+    p_ip_address TEXT,
+    p_user_agent TEXT
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_log_id UUID;
+BEGIN
+    -- Insert log entry with auth error details
+    INSERT INTO public.request_logs (
+        level,
+        message,
+        request_data,
+        user_data,
+        metadata
+    )
+    VALUES (
+        'ERROR',
+        format('Authentication error during %s: %s', p_action, p_error_code),
+        jsonb_build_object(
+            'error_code', p_error_code,
+            'error_message', p_error_message,
+            'action', p_action,
+            'ip_address', p_ip_address,
+            'user_agent', p_user_agent
+        ),
+        CASE 
+            WHEN p_user_id IS NOT NULL 
+            THEN jsonb_build_object('id', p_user_id)
+            ELSE NULL
+        END,
+        jsonb_build_object(
+            'auth_error', true,
+            'timestamp', NOW()
+        )
+    )
+    RETURNING id INTO v_log_id;
+
+    RETURN v_log_id;
+END;
+$$;
+
 ------ TRIGGERS ------
 -- Add updated_at trigger
 CREATE TRIGGER update_employee_operations_updated_at
     BEFORE UPDATE ON public.employee_operations
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
-
--- Add audit triggers for key tables
-CREATE TRIGGER audit_employees
-    AFTER INSERT OR UPDATE OR DELETE ON public.employees
-    FOR EACH ROW EXECUTE FUNCTION public.create_audit_log();
-
-CREATE TRIGGER audit_time_off_requests
-    AFTER INSERT OR UPDATE OR DELETE ON public.time_off_requests
-    FOR EACH ROW EXECUTE FUNCTION public.create_audit_log();
-
-CREATE TRIGGER audit_schedules
-    AFTER INSERT OR UPDATE OR DELETE ON public.schedules
-    FOR EACH ROW EXECUTE FUNCTION public.create_audit_log();
 
 ------ RLS POLICIES ------
 -- Enable RLS
@@ -332,5 +369,7 @@ GRANT SELECT ON public.audit_logs TO authenticated;
 GRANT EXECUTE ON FUNCTION public.track_employee_operation TO authenticated;
 GRANT EXECUTE ON FUNCTION public.complete_employee_operation TO authenticated;
 GRANT EXECUTE ON FUNCTION public.log_request TO authenticated;
+GRANT EXECUTE ON FUNCTION public.log_auth_error TO authenticated;
+GRANT EXECUTE ON FUNCTION public.log_auth_error TO anon;
 
 COMMIT; 

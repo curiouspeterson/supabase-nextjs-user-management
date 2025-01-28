@@ -21,7 +21,25 @@ export class PeriodError extends Error {
   ) {
     super(message);
     this.name = 'PeriodError';
+    // Ensure proper prototype chain for instanceof checks
+    Object.setPrototypeOf(this, PeriodError.prototype);
   }
+}
+
+/**
+ * Check if a period crosses midnight
+ * @param startTime Time in HH:MM format
+ * @param endTime Time in HH:MM format
+ * @returns boolean indicating if period crosses midnight
+ */
+function periodCrossesMidnight(startTime: string, endTime: string): boolean {
+  const [startHour, startMinute] = startTime.split(':').map(Number);
+  const [endHour, endMinute] = endTime.split(':').map(Number);
+  
+  const startMinutes = startHour * 60 + startMinute;
+  const endMinutes = endHour * 60 + endMinute;
+  
+  return endMinutes <= startMinutes;
 }
 
 /**
@@ -32,8 +50,6 @@ export class PeriodError extends Error {
  * @throws {TimeFormatError} If time format is invalid
  */
 export async function periodIdToTimes(periodId: string): Promise<{ start_time: string; end_time: string }> {
-  const supabase = createClient();
-  
   try {
     // Validate period format
     const { periodId: validatedId } = periodFormatSchema.parse({ periodId });
@@ -42,27 +58,24 @@ export async function periodIdToTimes(periodId: string): Promise<{ start_time: s
     const [start, end] = validatedId.split('-');
     
     // Check if period crosses midnight
-    const { data: crossesMidnight } = await supabase.rpc('period_crosses_midnight', {
-      p_start_time: start,
-      p_end_time: end
-    });
+    const crossesMidnight = periodCrossesMidnight(start, end);
 
-    // Log period format check
-    await supabase.from('period_format_issues').insert({
-      period_id: periodId,
-      source_format: 'HH:MM-HH:MM',
-      error_message: crossesMidnight ? 'Period crosses midnight' : 'Valid period format',
-      component: 'health-dashboard',
-      resolved_at: new Date().toISOString(),
-      resolution: 'Automatically validated'
-    });
+    // Log validation result to console in development
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('Period validation:', {
+        periodId,
+        crossesMidnight,
+        start,
+        end
+      });
+    }
 
     return { 
       start_time: start, 
       end_time: end 
     };
   } catch (error) {
-    // Handle validation errors
+    // Handle validation errors with structured error
     if (error instanceof z.ZodError) {
       const periodError = new PeriodError(
         'Invalid period format',
@@ -70,13 +83,13 @@ export async function periodIdToTimes(periodId: string): Promise<{ start_time: s
         { zodError: error.errors }
       );
 
-      // Log validation error
-      await supabase.from('period_format_issues').insert({
-        period_id: periodId,
-        source_format: 'HH:MM-HH:MM',
-        error_message: error.errors[0]?.message || 'Unknown validation error',
-        component: 'health-dashboard'
-      });
+      // Log error in development
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Period validation error:', {
+          periodId,
+          error: error.errors
+        });
+      }
 
       throw periodError;
     }

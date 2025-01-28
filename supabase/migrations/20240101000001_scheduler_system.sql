@@ -3,13 +3,6 @@
 BEGIN;
 
 ------ ENUMS ------
--- Schedule status enum
-CREATE TYPE public.schedule_status AS ENUM (
-    'draft',
-    'published',
-    'archived'
-);
-
 -- Schedule operation enum
 CREATE TYPE public.schedule_operation AS ENUM (
     'PUBLISH',
@@ -26,11 +19,20 @@ CREATE TABLE public.schedules (
     employee_id UUID NOT NULL REFERENCES auth.users(id),
     date DATE NOT NULL,
     shift_id UUID NOT NULL,
-    status schedule_status NOT NULL DEFAULT 'draft',
+    status TEXT NOT NULL DEFAULT 'DRAFT',
     last_operation_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Update any existing values to match new enum case
+UPDATE public.schedules
+SET status = CASE 
+    WHEN status = 'draft' THEN 'DRAFT'
+    WHEN status = 'published' THEN 'PUBLISHED'
+    WHEN status = 'archived' THEN 'CANCELLED'
+    ELSE status
+END;
 
 -- Schedule settings table
 CREATE TABLE public.schedule_settings (
@@ -223,8 +225,8 @@ BEGIN
     IF p_status = 'failed' THEN
         UPDATE public.schedules
         SET status = CASE
-            WHEN v_operation.operation = 'PUBLISH' THEN 'draft'::schedule_status
-            WHEN v_operation.operation = 'UNPUBLISH' THEN 'published'::schedule_status
+            WHEN v_operation.operation = 'PUBLISH' THEN 'DRAFT'
+            WHEN v_operation.operation = 'UNPUBLISH' THEN 'PUBLISHED'
             ELSE status
         END
         WHERE id = v_operation.schedule_id;

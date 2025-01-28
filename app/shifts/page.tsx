@@ -70,7 +70,7 @@ export default function ShiftsPage() {
       if (error) {
         toast({
           title: 'Error',
-          description: error,
+          description: error.message || 'Failed to sign out',
           variant: 'destructive'
         })
         return
@@ -89,7 +89,7 @@ export default function ShiftsPage() {
       console.error('Sign out error:', error)
       toast({
         title: 'Error',
-        description: 'Failed to sign out',
+        description: error instanceof Error ? error.message : 'Failed to sign out',
         variant: 'destructive'
       })
     }

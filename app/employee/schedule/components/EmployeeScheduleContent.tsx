@@ -4,19 +4,19 @@ import { createClient } from '@/utils/supabase/client'
 import WeeklySchedule from '@/components/schedule/WeeklySchedule'
 import { getWeekStart } from '@/utils/schedule/helpers'
 import { addDays, format } from 'date-fns'
-import type { Employee, EmployeeRole, Shift, CoverageReport, ShiftDurationCategory } from '@/services/scheduler/types'
+import { Employee, EmployeeRole, Shift, CoverageReport, ShiftDurationCategory } from '@/services/scheduler/types'
 import { useEffect, useState } from 'react'
 
 const mapLegacyRole = (role: string): EmployeeRole => {
   switch (role) {
     case 'Dispatcher':
-      return 'Employee' as const
+      return EmployeeRole.STAFF
     case 'Manager':
-      return 'Management' as const
+      return EmployeeRole.MANAGER
     case 'Shift Supervisor':
-      return 'Shift Supervisor' as const
+      return EmployeeRole.SUPERVISOR
     default:
-      return 'Employee' as const
+      return EmployeeRole.STAFF
   }
 }
 
@@ -26,11 +26,13 @@ export function EmployeeScheduleContent() {
     employee: Employee | null
     shifts: Shift[]
     coverage: CoverageReport[]
+    weekStart: Date
   }>({
     schedules: [],
     employee: null,
     shifts: [],
     coverage: [],
+    weekStart: getWeekStart(new Date())
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -120,12 +122,11 @@ export function EmployeeScheduleContent() {
 
         // Transform shifts data
         const shifts: Shift[] = shiftsData?.map(shift => {
-          let duration_category: ShiftDurationCategory = '8 hours' // Default
+          let duration_category: ShiftDurationCategory = ShiftDurationCategory.TEN_HOURS // Default
           switch (shift.duration_hours) {
-            case 4: duration_category = '4 hours'; break
-            case 8: duration_category = '8 hours'; break
-            case 10: duration_category = '10 hours'; break
-            case 12: duration_category = '12 hours'; break
+            case 4: duration_category = ShiftDurationCategory.FOUR_HOURS; break
+            case 12: duration_category = ShiftDurationCategory.TWELVE_HOURS; break
+            // 10 hours is the default
           }
 
           return {
@@ -183,6 +184,7 @@ export function EmployeeScheduleContent() {
           employee,
           shifts,
           coverage,
+          weekStart
         })
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred while fetching schedule data')
@@ -209,6 +211,7 @@ export function EmployeeScheduleContent() {
   return (
     <div className="space-y-4">
       <WeeklySchedule
+        startDate={scheduleData.weekStart}
         schedules={scheduleData.schedules}
         employees={[scheduleData.employee]}
         shifts={scheduleData.shifts}

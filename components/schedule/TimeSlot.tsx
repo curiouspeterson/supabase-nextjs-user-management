@@ -51,44 +51,47 @@ export default function TimeSlot({
   const isCurrentHourValue = useIsCurrentHour(hour);
 
   // Memoize the drop handler
-  const handleDrop = useCallback(async (item: DragItem) => {
+  const handleDrop = useCallback((item: DragItem) => {
     if (!onAssignShift) return;
 
-    try {
-      // Find the most appropriate shift starting at this hour
-      const availableShift = shifts.find(s => {
-        const [shiftHour] = s.start_time.split(':').map(Number);
-        return shiftHour === hour;
-      });
+    // Find the most appropriate shift starting at this hour
+    const availableShift = shifts.find(s => {
+      const [shiftHour] = s.start_time.split(':').map(Number);
+      return shiftHour === hour;
+    });
 
-      if (availableShift) {
-        await onAssignShift(item.employeeId, availableShift.id, date);
+    if (!availableShift) {
+      toast({
+        title: 'No Available Shift',
+        description: 'No shift is available for this time slot.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Handle the assignment asynchronously
+    onAssignShift(item.employeeId, availableShift.id, date)
+      .then(() => {
         toast({
           title: 'Shift Assigned',
           description: 'The shift has been successfully assigned.',
         });
-      } else {
+      })
+      .catch((error) => {
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
         toast({
-          title: 'No Available Shift',
-          description: 'No shift is available for this time slot.',
+          title: 'Error Assigning Shift',
+          description: errorMessage,
           variant: 'destructive',
         });
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      toast({
-        title: 'Error Assigning Shift',
-        description: errorMessage,
-        variant: 'destructive',
+        trackError('SCHEDULE', 'SHIFT_ASSIGNMENT', {
+          error: errorMessage,
+          employeeId: item.employeeId,
+          date: date.toISOString(),
+          hour,
+        });
+        showBoundary(error);
       });
-      trackError('SCHEDULE', 'SHIFT_ASSIGNMENT', {
-        error: errorMessage,
-        employeeId: item.employeeId,
-        date: date.toISOString(),
-        hour,
-      });
-      showBoundary(error);
-    }
   }, [onAssignShift, shifts, hour, date, toast, trackError, showBoundary]);
 
   // Memoize the canDrop check

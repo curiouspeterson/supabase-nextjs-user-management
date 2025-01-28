@@ -1,20 +1,23 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Schedule } from '@/types'
+import type { Schedule, Shift } from '@/types/schedule'
 
 interface ScheduleState {
   schedules: Schedule[]
+  selectedShift: Shift | null
   addSchedule: (schedule: Schedule) => void
   updateSchedule: (schedule: Schedule) => void
   removeSchedule: (id: string) => void
   getSchedule: (id: string) => Schedule | undefined
   clearSchedules: () => void
+  setSelectedShift: (shift: Shift | null) => void
 }
 
 export const useScheduleStore = create<ScheduleState>()(
   persist(
     (set, get) => ({
       schedules: [],
+      selectedShift: null,
       
       addSchedule: (schedule) => 
         set((state) => ({
@@ -37,13 +40,17 @@ export const useScheduleStore = create<ScheduleState>()(
         get().schedules.find((s) => s.id === id),
       
       clearSchedules: () => 
-        set({ schedules: [] })
+        set({ schedules: [], selectedShift: null }),
+
+      setSelectedShift: (shift) =>
+        set({ selectedShift: shift })
     }),
     {
       name: 'schedule-store',
       version: 1,
       partialize: (state) => ({
-        schedules: state.schedules
+        schedules: state.schedules,
+        selectedShift: state.selectedShift
       })
     }
   )

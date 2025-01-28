@@ -47,6 +47,8 @@ export class ErrorAnalyticsError extends AppError {
   }
 }
 
+export type AnalyticsError = ErrorAnalyticsError
+
 export class ErrorAnalyticsService {
   private supabase = createClient()
   private component: string
@@ -235,9 +237,9 @@ export class ErrorAnalyticsService {
         count: trend.count,
         firstSeen: new Date(trend.first_seen),
         lastSeen: new Date(trend.last_seen),
-        contexts: trend.contexts,
-        userAgents: trend.user_agents,
-        urls: trend.urls
+        contexts: (trend.contexts || []).map(context => context as ErrorContext),
+        userAgents: trend.user_agents || [],
+        urls: trend.urls || []
       }))
     } catch (error) {
       console.error('Failed to get error trends:', error)
@@ -295,4 +297,7 @@ export class ErrorAnalyticsService {
       throw new ErrorAnalyticsError('Failed to cleanup error analytics', error)
     }
   }
-} 
+}
+
+// Create and export singleton instance
+export const errorAnalytics = new ErrorAnalyticsService() 

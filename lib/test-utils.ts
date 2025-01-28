@@ -2,7 +2,7 @@ import type { Toast } from '@/types/toast'
 import type { SupabaseClient, User, Session } from '@supabase/supabase-js'
 import { ErrorSeverity, ErrorCategory, ErrorRecoveryStrategy } from './types/error'
 import { AppError } from './errors'
-import { Employee, Shift, Schedule } from '@/services/scheduler/types'
+import { Employee, Shift, Schedule, EmployeeRole, ShiftDurationCategory, ScheduleStatus } from '@/services/scheduler/types'
 
 /**
  * Mock function for toast notifications
@@ -336,7 +336,7 @@ export const mockAuthUser = (overrides = {}) => ({
 export const testEmployee: Employee = {
   id: 'test-employee-1',
   user_id: 'test-user-1',
-  employee_role: 'Employee',
+  employee_role: EmployeeRole.STAFF,
   weekly_hours_scheduled: 40,
   default_shift_type_id: 'test-shift-type-1',
   created_at: new Date().toISOString(),
@@ -350,7 +350,7 @@ export const testEmployee: Employee = {
 export const mockEmployee = (overrides?: Partial<Employee>): Employee => ({
   id: 'test-employee-1',
   user_id: 'test-user-1',
-  employee_role: 'Employee',
+  employee_role: EmployeeRole.STAFF,
   weekly_hours_scheduled: 40,
   default_shift_type_id: 'test-shift-type-1',
   created_at: new Date().toISOString(),
@@ -368,7 +368,7 @@ export const mockShift = (overrides?: Partial<Shift>): Shift => ({
   start_time: '07:00:00',
   end_time: '17:00:00',
   duration_hours: 10,
-  duration_category: '10 hours',
+  duration_category: ShiftDurationCategory.TEN_HOURS,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   ...overrides
@@ -379,7 +379,7 @@ export const mockSchedule = (overrides?: Partial<Schedule>): Schedule => ({
   employee_id: 'test-employee-1',
   shift_id: 'test-shift-1',
   date: '2025-01-01',
-  status: 'Draft',
+  status: ScheduleStatus.DRAFT,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   ...overrides

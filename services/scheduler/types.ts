@@ -1,21 +1,17 @@
 import { Database } from '@/types/supabase';
 import { z } from 'zod';
 import { isValid, parseISO, differenceInHours } from 'date-fns';
-import { zonedTimeToUtc } from 'date-fns-tz';
+import { formatInTimeZone } from 'date-fns-tz';
 
 export enum ShiftDurationCategory {
-  SHORT = 'SHORT',
-  REGULAR = 'REGULAR',
-  EXTENDED = 'EXTENDED',
-  LONG = 'LONG'
+  FOUR_HOURS = '4 hours',
+  TEN_HOURS = '10 hours',
+  TWELVE_HOURS = '12 hours'
 }
 
 export enum ScheduleStatus {
-  DRAFT = 'DRAFT',
-  PENDING = 'PENDING',
-  APPROVED = 'APPROVED',
-  PUBLISHED = 'PUBLISHED',
-  CANCELLED = 'CANCELLED'
+  DRAFT = 'Draft',
+  PUBLISHED = 'Published'
 }
 
 export enum EmployeeRole {
@@ -26,9 +22,10 @@ export enum EmployeeRole {
 }
 
 export enum TimeOffType {
-  VACATION = 'VACATION',
-  SICK_LEAVE = 'SICK_LEAVE',
-  TRAINING = 'TRAINING'
+  VACATION = 'Vacation',
+  SICK = 'Sick',
+  PERSONAL = 'Personal',
+  TRAINING = 'Training'
 }
 
 export enum TimeOffStatus {
@@ -47,6 +44,14 @@ export enum PatternType {
   FOUR_BY_TEN = '4x10',
   THREE_BY_TWELVE_ONE_BY_FOUR = '3x12_1x4',
   CUSTOM = 'Custom'
+}
+
+export enum ScheduleAction {
+  APPROVE = 'APPROVE',
+  REJECT = 'REJECT',
+  PUBLISH = 'PUBLISH',
+  CANCEL = 'CANCEL',
+  DELETE = 'DELETE'
 }
 
 export interface ShiftType {
@@ -235,8 +240,8 @@ export const ShiftSchema = z.object({
     return end > start || (
       // Handle shifts crossing midnight
       end < start && differenceInHours(
-        zonedTimeToUtc(end, 'UTC'),
-        zonedTimeToUtc(start, 'UTC')
+        new Date(formatInTimeZone(end, 'UTC', "yyyy-MM-dd'T'HH:mm:ssXXX")),
+        new Date(formatInTimeZone(start, 'UTC', "yyyy-MM-dd'T'HH:mm:ssXXX"))
       ) + 24 <= 24
     );
   },
@@ -334,8 +339,7 @@ export const isValidStatusTransition = (
 };
 
 export const calculateDurationCategory = (hours: number): ShiftDurationCategory => {
-  if (hours <= 4) return ShiftDurationCategory.SHORT;
-  if (hours <= 8) return ShiftDurationCategory.REGULAR;
-  if (hours <= 10) return ShiftDurationCategory.EXTENDED;
-  return ShiftDurationCategory.LONG;
+  if (hours <= 4) return ShiftDurationCategory.FOUR_HOURS;
+  if (hours <= 10) return ShiftDurationCategory.TEN_HOURS;
+  return ShiftDurationCategory.TWELVE_HOURS;
 }; 

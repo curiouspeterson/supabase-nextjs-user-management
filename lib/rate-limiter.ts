@@ -28,9 +28,9 @@ export class RateLimitError extends AppError {
 }
 
 interface RateLimitResult {
-  allowed: boolean
-  remaining: number
-  resetAt: Date
+  is_allowed: boolean
+  remaining_attempts: number
+  reset_time: string
 }
 
 interface RateLimitMetrics {
@@ -57,18 +57,17 @@ export class RateLimiter {
       const { data, error } = await this.supabase
         .rpc('check_rate_limit', {
           p_key: key,
-          p_user_id: userId
+          p_user_id: userId || null
         })
 
       if (error) throw error
 
-      const result = data[0] as RateLimitResult
-      if (!result.allowed) {
+      if (!data.is_allowed) {
         throw new RateLimitError(
-          `Rate limit exceeded for ${key}. Try again in ${this.formatTimeUntilReset(result.resetAt)}.`,
+          `Rate limit exceeded for ${key}. Try again in ${this.formatTimeUntilReset(data.reset_time)}.`,
           key,
-          new Date(result.resetAt),
-          result.remaining
+          new Date(data.reset_time),
+          data.remaining_attempts
         )
       }
     } catch (error) {
@@ -96,7 +95,7 @@ export class RateLimiter {
       const { data, error } = await this.supabase
         .rpc('get_rate_limit_metrics', {
           p_key: key,
-          p_user_id: userId,
+          p_user_id: userId || null,
           p_window_start: windowStart.toISOString()
         })
 

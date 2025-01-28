@@ -18,7 +18,7 @@ import crypto from 'crypto'
 // GET /api/schedules
 export async function GET(request: Request) {
   try {
-    const supabase = createClient(cookies())
+    const supabase = createClient()
     const { searchParams } = new URL(request.url)
     
     // Get query parameters
@@ -87,54 +87,28 @@ export async function POST(request: Request) {
   const requestId = crypto.randomUUID()
   
   try {
-    // Validate environment variables
-    const env = z.object({
-      NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
-    }).parse({
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    })
-
     // Parse and validate request body
     const body = await request.json()
     const validatedData = z.object({
       employee_id: z.string().uuid(),
-      shift_type_id: z.string().uuid(),
-      week_start_date: z.string().refine(
+      shift_id: z.string().uuid(),
+      date: z.string().refine(
         (date) => {
           const parsed = parseISO(date)
           return isValid(parsed)
         },
         { message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD)' }
       ),
-      hours: z.number().min(0).max(168),
-      notes: z.string().optional(),
+      status: z.enum(['Draft', 'Published']).optional(),
     }).parse(body)
     
     logger.info('Creating new schedule', {
       requestId,
       employeeId: validatedData.employee_id,
-      weekStart: validatedData.week_start_date,
+      date: validatedData.date,
     })
 
-    const supabase = createClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient()
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -159,16 +133,13 @@ export async function POST(request: Request) {
       throw new AuthError('Insufficient permissions to create schedules')
     }
 
-    // Validate week start date
-    const weekStart = startOfWeek(parseISO(validatedData.week_start_date))
-    const formattedWeekStart = format(weekStart, 'yyyy-MM-dd')
-
     // Check for existing schedule
     const { data: existingSchedule, error: checkError } = await supabase
       .from('schedules')
       .select()
       .eq('employee_id', validatedData.employee_id)
-      .eq('week_start_date', formattedWeekStart)
+      .eq('date', validatedData.date)
+      .eq('shift_id', validatedData.shift_id)
       .maybeSingle()
 
     if (checkError) {
@@ -176,17 +147,13 @@ export async function POST(request: Request) {
     }
 
     if (existingSchedule) {
-      throw new ValidationError('Schedule already exists for this week')
+      throw new ValidationError('Schedule already exists for this date and shift')
     }
 
     // Create schedule
     const { data: schedule, error: createError } = await supabase
       .from('schedules')
-      .insert({
-        ...validatedData,
-        week_start_date: formattedWeekStart,
-        created_by: user.id,
-      })
+      .insert(validatedData)
       .select()
       .single()
 
@@ -278,7 +245,7 @@ export async function POST(request: Request) {
 // PATCH /api/schedules
 export async function PATCH(request: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createClient()
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
     const bulk = searchParams.get('bulk') === 'true'
@@ -309,36 +276,38 @@ export async function PATCH(request: Request) {
         .in('id', bulkBody.ids)
         .select(`
           *,
-          shifts (
+          shifts:shifts (
             *,
-            shift_types (*)
+            shift_types:shift_types (*)
           ),
-          employees (
-            id, 
-            full_name,
-            employee_pattern,
-            weekly_hours_scheduled,
-            default_shift_type_id
+          employees:employees (
+            *,
+            profiles:profiles (
+              full_name
+            )
           )
         `)
     } else {
       // Single update
+      if (!id) {
+        throw new ValidationError('Schedule ID is required')
+      }
+      
       result = await supabase
         .from('schedules')
         .update(body as UpdateScheduleInput)
         .eq('id', id)
         .select(`
           *,
-          shifts (
+          shifts:shifts (
             *,
-            shift_types (*)
+            shift_types:shift_types (*)
           ),
-          employees (
-            id, 
-            full_name,
-            employee_pattern,
-            weekly_hours_scheduled,
-            default_shift_type_id
+          employees:employees (
+            *,
+            profiles:profiles (
+              full_name
+            )
           )
         `)
         .single()
@@ -360,7 +329,7 @@ export async function PATCH(request: Request) {
 // DELETE /api/schedules
 export async function DELETE(request: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createClient()
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
     const ids = searchParams.get('ids')?.split(',')
@@ -376,8 +345,10 @@ export async function DELETE(request: Request) {
     
     if (ids) {
       query = query.in('id', ids)
-    } else {
+    } else if (id) {
       query = query.eq('id', id)
+    } else {
+      throw new ValidationError('Schedule ID or IDs are required')
     }
 
     const { error } = await query
@@ -399,15 +370,6 @@ export async function PUT(request: Request) {
   const requestId = crypto.randomUUID()
   
   try {
-    // Validate environment variables
-    const env = z.object({
-      NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
-    }).parse({
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    })
-
     // Parse and validate request body
     const body = await request.json()
     const validatedData = z.object({
@@ -428,23 +390,7 @@ export async function PUT(request: Request) {
       scheduleId: validatedData.id,
     })
 
-    const supabase = createClient(
-      env.NEXT_PUBLIC_SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        cookies: {
-          get(name: string) {
-            return cookies().get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookies().set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookies().set({ name, value: '', ...options })
-          },
-        },
-      }
-    )
+    const supabase = createClient()
 
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()

@@ -2,7 +2,8 @@ import { createClient } from '@/utils/supabase/server'
 import WeeklySchedule from '@/components/schedule/WeeklySchedule'
 import { getWeekStart } from '@/utils/schedule/helpers'
 import { addDays, format } from 'date-fns'
-import type { Employee, EmployeeRole, Shift, CoverageReport, ShiftDurationCategory } from '@/services/scheduler/types'
+import { EmployeeRole, ShiftDurationCategory, ScheduleStatus } from '@/services/scheduler/types'
+import type { Employee, Shift, CoverageReport } from '@/services/scheduler/types'
 import type { Database } from '@/types/supabase'
 
 type EmployeeWithProfile = Database['public']['Tables']['employees']['Row'] & {
@@ -18,13 +19,13 @@ type EmployeeWithProfile = Database['public']['Tables']['employees']['Row'] & {
 const mapLegacyRole = (role: string): EmployeeRole => {
   switch (role) {
     case 'Dispatcher':
-      return 'Employee'
+      return EmployeeRole.STAFF;
     case 'Manager':
-      return 'Management'
+      return EmployeeRole.MANAGER;
     case 'Shift Supervisor':
-      return 'Shift Supervisor'
+      return EmployeeRole.SUPERVISOR;
     default:
-      return 'Employee'
+      return EmployeeRole.STAFF;
   }
 }
 
@@ -65,11 +66,18 @@ export default async function SchedulesPage() {
   const weekEnd = addDays(weekStart, 6)
 
   // Fetch schedules for the current week
-  const { data: schedules } = await supabase
+  const { data: schedulesData } = await supabase
     .from('schedules')
     .select('*')
     .gte('date', format(weekStart, 'yyyy-MM-dd'))
     .lte('date', format(weekEnd, 'yyyy-MM-dd'))
+
+  // Transform schedules data to use enum values
+  const schedules = schedulesData?.map(schedule => ({
+    ...schedule,
+    status: schedule.status === 'Draft' ? ScheduleStatus.DRAFT :
+            ScheduleStatus.PUBLISHED
+  })) || []
 
   // Fetch all shifts
   const { data: shiftsData } = await supabase
@@ -79,12 +87,15 @@ export default async function SchedulesPage() {
 
   // Transform shifts data
   const shifts: Shift[] = shiftsData?.map(shift => {
-    let duration_category: ShiftDurationCategory = '8 hours' // Default
+    let duration_category: ShiftDurationCategory = ShiftDurationCategory.TEN_HOURS // Default
     switch (shift.duration_hours) {
-      case 4: duration_category = '4 hours'; break
-      case 8: duration_category = '8 hours'; break
-      case 10: duration_category = '10 hours'; break
-      case 12: duration_category = '12 hours'; break
+      case 4:
+        duration_category = ShiftDurationCategory.FOUR_HOURS;
+        break;
+      case 12:
+        duration_category = ShiftDurationCategory.TWELVE_HOURS;
+        break;
+      // 10 hours is the default
     }
 
     return {
@@ -145,6 +156,7 @@ export default async function SchedulesPage() {
           employees={employees}
           shifts={shifts}
           coverage={coverage}
+          startDate={weekStart}
         />
       </div>
     </div>

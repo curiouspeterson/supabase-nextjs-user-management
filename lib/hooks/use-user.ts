@@ -119,7 +119,7 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
     if (error instanceof AuthError) {
       appError = new CustomAuthError(error.message, {
         supabaseError: error,
-        code: error.status || 'UNKNOWN',
+        code: error.status ? String(error.status) : 'UNKNOWN',
       })
     } else if (error.name === 'NetworkError' || error.name === 'TypeError') {
       appError = new NetworkError(error.message, {
@@ -135,17 +135,12 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
 
       // Log error to database
       const errorId = await supabase.rpc('log_auth_error', {
-        p_error_type: 'USER_HOOK',
+        p_user_id: session?.user?.id || null,
+        p_action: 'USER_HOOK',
         p_error_code: appError.code,
         p_error_message: appError.message,
-        p_error_details: {
-          name: appError.name,
-          stack: appError.stack,
-          metadata: appError.metadata,
-        },
-        p_user_id: session?.user?.id,
-        p_session_id: session?.id,
-        p_severity: appError instanceof NetworkError ? 'HIGH' : 'MEDIUM'
+        p_ip_address: typeof window !== 'undefined' ? window.location.hostname : 'server',
+        p_user_agent: typeof window !== 'undefined' ? window.navigator.userAgent : 'server'
       })
 
       // Update error with ID for tracking
@@ -216,7 +211,7 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
       // Log successful sync
       await supabase.rpc('log_auth_event', {
         p_event_type: 'USER_SYNC',
-        p_user_id: user?.id,
+        p_user_id: user?.id || null,
         p_metadata: { 
           timestamp: new Date().toISOString(),
           hasProfile: !!profile
@@ -258,7 +253,7 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
             break
 
           case 'SIGNED_OUT':
-          case 'USER_DELETED':
+          case 'USER_UPDATED':
             updateState({
               user: null,
               profile: null,
@@ -279,15 +274,12 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
         // Log auth event
         await supabase.rpc('log_auth_event', {
           p_event_type: event,
-          p_user_id: session?.user?.id,
+          p_user_id: session?.user?.id || null,
           p_metadata: { 
             timestamp: new Date().toISOString(),
             previousUserId: state.user?.id,
             hasProfile: !!state.profile
-          },
-          p_success: success,
-          p_error_id: errorId,
-          p_session_id: session?.id
+          }
         })
       } catch (error) {
         handleError(error as Error | AuthError)

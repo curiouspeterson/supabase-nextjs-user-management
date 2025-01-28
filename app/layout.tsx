@@ -22,7 +22,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="font-sans">
       <body className="bg-background text-foreground">
-        <ErrorBoundary fallback={ErrorFallback}>
+        <ErrorBoundary FallbackComponent={ErrorFallback}>
           <main className="min-h-screen flex flex-col">
             <header className="bg-gray-800 text-white">
               <div className="container mx-auto px-4 py-4">

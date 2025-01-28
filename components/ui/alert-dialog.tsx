@@ -4,26 +4,8 @@ import * as React from 'react'
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog'
 import { cn } from '@/lib/utils'
 
-const AlertDialog = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Root>
->(({ children, ...props }, ref) => (
-  <AlertDialogPrimitive.Root {...props} ref={ref}>
-    {children}
-  </AlertDialogPrimitive.Root>
-))
-AlertDialog.displayName = AlertDialogPrimitive.Root.displayName
-
-const AlertDialogTrigger = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Trigger>
->(({ children, ...props }, ref) => (
-  <AlertDialogPrimitive.Trigger {...props} ref={ref}>
-    {children}
-  </AlertDialogPrimitive.Trigger>
-))
-AlertDialogTrigger.displayName = AlertDialogPrimitive.Trigger.displayName
-
+const AlertDialog = AlertDialogPrimitive.Root
+const AlertDialogTrigger = AlertDialogPrimitive.Trigger
 const AlertDialogPortal = AlertDialogPrimitive.Portal
 
 const AlertDialogOverlay = React.forwardRef<

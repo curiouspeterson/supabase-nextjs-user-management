@@ -14,7 +14,7 @@ import PatternVisualizer from './PatternVisualizer';
 
 const patternSchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  pattern_type: z.enum(['4x10', '3x12_1x4', 'Custom'] as const),
+  pattern_type: z.nativeEnum(PatternType),
   shift_duration: z.number().min(4).max(12),
   is_forbidden: z.boolean(),
   pattern: z.string().regex(/^[01]+$/, 'Pattern must only contain 0s and 1s'),
@@ -28,10 +28,10 @@ interface PatternEditorProps {
   onCancel: () => void;
 }
 
-const PRESET_PATTERNS = {
-  '4x10': { pattern: '1111000', shift_duration: 10, days_on: 4, days_off: 3 },
-  '3x12_1x4': { pattern: '1110000', shift_duration: 12, days_on: 3, days_off: 4 },
-  Custom: { pattern: '0000000', shift_duration: 8, days_on: 0, days_off: 7 },
+const PRESET_PATTERNS: Record<PatternType, { pattern: string; shift_duration: number; days_on: number; days_off: number }> = {
+  [PatternType.FOUR_BY_TEN]: { pattern: '1111000', shift_duration: 10, days_on: 4, days_off: 3 },
+  [PatternType.THREE_BY_TWELVE_ONE_BY_FOUR]: { pattern: '1110000', shift_duration: 12, days_on: 3, days_off: 4 },
+  [PatternType.CUSTOM]: { pattern: '0000000', shift_duration: 8, days_on: 0, days_off: 7 },
 };
 
 const PatternEditor: React.FC<PatternEditorProps> = ({
@@ -45,7 +45,7 @@ const PatternEditor: React.FC<PatternEditorProps> = ({
     resolver: zodResolver(patternSchema),
     defaultValues: initialPattern || {
       name: '',
-      pattern_type: 'Custom',
+      pattern_type: PatternType.CUSTOM,
       shift_duration: 8,
       is_forbidden: false,
       pattern: '0000000',
@@ -72,7 +72,7 @@ const PatternEditor: React.FC<PatternEditorProps> = ({
           id: initialPattern?.id || '',
           name: value.name,
           pattern: value.pattern,
-          pattern_type: value.pattern_type as PatternType,
+          pattern_type: value.pattern_type || PatternType.CUSTOM,
           shift_duration: value.shift_duration || 8,
           is_forbidden: value.is_forbidden || false,
           length: value.pattern.length,
@@ -127,9 +127,9 @@ const PatternEditor: React.FC<PatternEditorProps> = ({
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value="4x10">4x10</SelectItem>
-                    <SelectItem value="3x12_1x4">3x12 + 1x4</SelectItem>
-                    <SelectItem value="Custom">Custom</SelectItem>
+                    <SelectItem value={PatternType.FOUR_BY_TEN}>4x10</SelectItem>
+                    <SelectItem value={PatternType.THREE_BY_TWELVE_ONE_BY_FOUR}>3x12 + 1x4</SelectItem>
+                    <SelectItem value={PatternType.CUSTOM}>Custom</SelectItem>
                   </SelectContent>
                 </Select>
                 <FormMessage />

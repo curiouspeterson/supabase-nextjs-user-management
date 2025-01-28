@@ -39,7 +39,7 @@ const Toast = React.memo(function Toast({
   action,
   ...props
 }: ToastProps) {
-  const timerRef = React.useRef<number | undefined>()
+  const timerRef = React.useRef<number | undefined>(undefined)
 
   React.useEffect(() => {
     return () => {

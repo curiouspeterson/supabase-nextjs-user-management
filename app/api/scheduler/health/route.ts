@@ -1,12 +1,58 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
+import { headers } from 'next/headers';
+import type { 
+  SystemStatus, 
+  HealthResponse, 
+  SchedulerMetrics 
+} from '@/services/health/types';
 
-export async function GET() {
+// Configure edge runtime
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
+export const revalidate = 30; // Revalidate every 30 seconds
+
+// Rate limiting types
+type RateLimitEntry = number[]; // Array of timestamps
+type RateLimitMap = Map<string, RateLimitEntry>;
+
+// Rate limiting map
+const rateLimit: RateLimitMap = new Map();
+const RATE_LIMIT = 100; // requests per minute
+const RATE_WINDOW = 60 * 1000; // 1 minute in milliseconds
+
+export async function GET(): Promise<NextResponse<HealthResponse>> {
   try {
-    const supabase = createClient(cookies());
+    // Get client IP for rate limiting
+    const headersList = headers();
+    const clientIp = headersList.get('x-forwarded-for') || 'unknown';
     
-    // Get latest system metrics
+    // Implement rate limiting
+    const now = Date.now();
+    const clientRequests: number[] = rateLimit.get(clientIp) || [];
+    const recentRequests = clientRequests.filter((time: number) => now - time < RATE_WINDOW);
+    
+    if (recentRequests.length >= RATE_LIMIT) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Too many requests' }),
+        { 
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-RateLimit-Limit': RATE_LIMIT.toString(),
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': (now + RATE_WINDOW).toString(),
+          }
+        }
+      );
+    }
+    
+    recentRequests.push(now);
+    rateLimit.set(clientIp, recentRequests);
+
+    const supabase = createClient();
+    
+    // Get latest system metrics with caching
     const { data: metrics, error: metricsError } = await supabase
       .from('scheduler_metrics')
       .select('*')
@@ -19,22 +65,39 @@ export async function GET() {
     // Calculate system status based on metrics
     const status = determineSystemStatus(metrics);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       status,
       metrics: {
-        cpu_usage: metrics.schedule_generation_time, // Using generation time as CPU proxy
-        memory_usage: metrics.coverage_deficit, // Using coverage deficit as memory proxy
+        cpu_usage: metrics.schedule_generation_time,
+        memory_usage: metrics.coverage_deficit,
         active_connections: metrics.overtime_violations,
         request_latency: metrics.pattern_errors,
-        error_rate: metrics.last_run_status === 'error' ? 100 : 0 // Convert error status to percentage
+        error_rate: metrics.last_run_status === 'error' ? 100 : 0
       }
     });
+
+    // Add security headers
+    response.headers.set('X-Content-Type-Options', 'nosniff');
+    response.headers.set('X-Frame-Options', 'DENY');
+    response.headers.set('X-XSS-Protection', '1; mode=block');
+    response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    
+    // Add rate limit headers
+    response.headers.set('X-RateLimit-Limit', RATE_LIMIT.toString());
+    response.headers.set('X-RateLimit-Remaining', (RATE_LIMIT - recentRequests.length).toString());
+    
+    // Add cache control headers
+    response.headers.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=59');
+
+    return response;
   } catch (error) {
     console.error('Health check failed:', error);
-    return NextResponse.json(
+    
+    const errorResponse = NextResponse.json(
       {
         status: {
-          status: 'unhealthy',
+          status: 'unhealthy' as const,
           message: 'Failed to retrieve system health status',
           timestamp: new Date().toISOString()
         },
@@ -45,13 +108,22 @@ export async function GET() {
           request_latency: 0,
           error_rate: 0
         }
-      },
+      } satisfies HealthResponse,
       { status: 500 }
     );
+
+    // Add security headers even for error responses
+    errorResponse.headers.set('X-Content-Type-Options', 'nosniff');
+    errorResponse.headers.set('X-Frame-Options', 'DENY');
+    errorResponse.headers.set('X-XSS-Protection', '1; mode=block');
+    errorResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    errorResponse.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+    return errorResponse;
   }
 }
 
-function determineSystemStatus(metrics: any) {
+function determineSystemStatus(metrics: SchedulerMetrics): SystemStatus {
   // Critical thresholds
   const CRITICAL_GENERATION_TIME = 10000; // 10 seconds
   const CRITICAL_COVERAGE_DEFICIT = 20; // 20% coverage deficit

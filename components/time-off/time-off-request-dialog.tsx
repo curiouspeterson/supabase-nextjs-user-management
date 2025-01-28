@@ -27,35 +27,34 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import { Loader2 } from 'lucide-react'
-import { TimeOffRequestInsert, TimeOffType } from '@/lib/types/time-off'
+import { TimeOffType, TimeOffRequest } from '@/lib/types/time-off'
 import { createTimeOffRequest } from '@/lib/api/time-off'
 import { useUser } from '@/lib/hooks'
 import { useTimeOffStore } from '@/lib/stores/time-off-store'
 import { useErrorBoundary } from '@/lib/hooks/use-error-boundary'
 import { timeOffSchema } from '@/lib/validations/time-off'
-import type { TimeOffRequest } from '@/types'
 import { DatePicker } from '@/components/ui/date-picker'
-import { Select } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const TIME_OFF_TYPES = [
-  { value: 'VACATION', label: 'Vacation' },
-  { value: 'SICK', label: 'Sick Leave' },
-  { value: 'PERSONAL', label: 'Personal' },
-  { value: 'BEREAVEMENT', label: 'Bereavement' },
-  { value: 'JURY_DUTY', label: 'Jury Duty' },
-  { value: 'UNPAID', label: 'Unpaid Leave' }
+  { value: TimeOffType.VACATION, label: 'Vacation' },
+  { value: TimeOffType.SICK, label: 'Sick Leave' },
+  { value: TimeOffType.PERSONAL, label: 'Personal' },
+  { value: TimeOffType.TRAINING, label: 'Training' }
 ] as const
 
 interface TimeOffRequestDialogProps {
   request?: TimeOffRequest
   open: boolean
   onOpenChange: (open: boolean) => void
+  onRequestSubmitted?: () => void
 }
 
 export const TimeOffRequestDialog = memo(function TimeOffRequestDialog({ 
   request, 
   open, 
-  onOpenChange 
+  onOpenChange,
+  onRequestSubmitted 
 }: TimeOffRequestDialogProps) {
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -66,11 +65,11 @@ export const TimeOffRequestDialog = memo(function TimeOffRequestDialog({
   const form = useForm({
     resolver: zodResolver(timeOffSchema),
     defaultValues: useMemo(() => ({
-      type: request?.type || 'VACATION',
-      startDate: request?.startDate || new Date(),
-      endDate: request?.endDate || new Date(),
+      type: request?.type || TimeOffType.VACATION,
+      start_date: request?.start_date ? new Date(request.start_date) : new Date(),
+      end_date: request?.end_date ? new Date(request.end_date) : new Date(),
       notes: request?.notes || '',
-      isPaid: request?.isPaid ?? true
+      status: request?.status || 'Pending'
     }), [request])
   })
 
@@ -79,7 +78,7 @@ export const TimeOffRequestDialog = memo(function TimeOffRequestDialog({
       setIsSubmitting(true)
 
       // Validate dates
-      if (data.endDate < data.startDate) {
+      if (data.end_date < data.start_date) {
         throw new Error('End date must be after start date')
       }
 
@@ -95,6 +94,7 @@ export const TimeOffRequestDialog = memo(function TimeOffRequestDialog({
       }
 
       onOpenChange(false)
+      onRequestSubmitted?.()
     } catch (error) {
       handleError(error)
       toast({
@@ -105,7 +105,7 @@ export const TimeOffRequestDialog = memo(function TimeOffRequestDialog({
     } finally {
       setIsSubmitting(false)
     }
-  }, [request, updateRequest, addRequest, handleError, toast, onOpenChange])
+  }, [request, updateRequest, addRequest, handleError, toast, onOpenChange, onRequestSubmitted])
 
   const timeOffTypes = useMemo(() => TIME_OFF_TYPES, [])
 
@@ -146,33 +146,40 @@ export const TimeOffRequestDialog = memo(function TimeOffRequestDialog({
                   <FormLabel>Type</FormLabel>
                   <FormControl>
                     <Select
-                      id="type"
-                      {...field}
-                      error={form.formState.errors.type?.message}
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
                     >
-                      {timeOffTypes.map(type => (
-                        <option key={type.value} value={type.value}>
-                          {type.label}
-                        </option>
-                      ))}
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select time off type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {timeOffTypes.map(type => (
+                          <SelectItem key={type.value} value={type.value}>
+                            {type.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
                     </Select>
+                    {form.formState.errors.type?.message && (
+                      <FormMessage>{form.formState.errors.type.message}</FormMessage>
+                    )}
                   </FormControl>
-                  <FormMessage />
                 </FormItem>
               )}
             />
             <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
-                name="startDate"
+                name="start_date"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Start Date</FormLabel>
                     <FormControl>
                       <DatePicker
-                        id="startDate"
-                        {...field}
-                        error={form.formState.errors.startDate?.message}
+                        value={field.value.toISOString()}
+                        onChange={(date) => field.onChange(date)}
+                        disabled={isSubmitting}
+                        error={form.formState.errors.start_date?.message}
                       />
                     </FormControl>
                     <FormMessage />
@@ -181,16 +188,17 @@ export const TimeOffRequestDialog = memo(function TimeOffRequestDialog({
               />
               <FormField
                 control={form.control}
-                name="endDate"
+                name="end_date"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>End Date</FormLabel>
                     <FormControl>
                       <DatePicker
-                        id="endDate"
-                        {...field}
-                        error={form.formState.errors.endDate?.message}
-                        minDate={form.watch('startDate')}
+                        value={field.value.toISOString()}
+                        onChange={(date) => field.onChange(date)}
+                        disabled={isSubmitting}
+                        error={form.formState.errors.end_date?.message}
+                        min={form.watch('start_date').toISOString()}
                       />
                     </FormControl>
                     <FormMessage />
@@ -211,14 +219,6 @@ export const TimeOffRequestDialog = memo(function TimeOffRequestDialog({
                 </FormItem>
               )}
             />
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="isPaid"
-                {...form.register('isPaid')}
-              />
-              <label htmlFor="isPaid">Paid Time Off</label>
-            </div>
             <DialogFooter>
               <Button
                 type="button"

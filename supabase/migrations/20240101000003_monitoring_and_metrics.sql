@@ -170,7 +170,7 @@ CREATE OR REPLACE FUNCTION public.get_metrics_history(
     p_interval INTERVAL DEFAULT '1 hour'::INTERVAL
 )
 RETURNS TABLE (
-    timestamp TIMESTAMPTZ,
+    metric_timestamp TIMESTAMPTZ,
     status public.system_status,
     metrics JSONB
 )
@@ -180,7 +180,7 @@ AS $$
 BEGIN
     RETURN QUERY
     SELECT
-        time_bucket(p_interval, m.timestamp) AS timestamp,
+        time_bucket(p_interval, m.timestamp) AS metric_timestamp,
         mode() WITHIN GROUP (ORDER BY m.status) AS status,
         jsonb_build_object(
             'coverage_deficit', avg((m.metrics->>'coverage_deficit')::numeric),
@@ -192,7 +192,7 @@ BEGIN
     WHERE m.organization_id = p_organization_id
     AND m.timestamp BETWEEN p_start_date AND p_end_date
     GROUP BY time_bucket(p_interval, m.timestamp)
-    ORDER BY timestamp DESC;
+    ORDER BY metric_timestamp DESC;
 END;
 $$;
 
@@ -221,18 +221,18 @@ CREATE TRIGGER update_status_colors_updated_at
 ------ DEFAULT DATA ------
 -- Insert default status colors
 INSERT INTO public.status_colors (organization_id, status, color_class, background_class)
-SELECT 
+SELECT
     org.id,
-    status,
+    status::public.system_status,
     color_class,
     background_class
 FROM public.organizations org
 CROSS JOIN (
-    VALUES 
-        ('HEALTHY', 'text-green-700', 'bg-green-100'),
-        ('DEGRADED', 'text-yellow-700', 'bg-yellow-100'),
-        ('CRITICAL', 'text-red-700', 'bg-red-100'),
-        ('MAINTENANCE', 'text-blue-700', 'bg-blue-100')
+    VALUES
+        ('HEALTHY'::public.system_status, 'text-green-700', 'bg-green-100'),
+        ('DEGRADED'::public.system_status, 'text-yellow-700', 'bg-yellow-100'),
+        ('CRITICAL'::public.system_status, 'text-red-700', 'bg-red-100'),
+        ('MAINTENANCE'::public.system_status, 'text-blue-700', 'bg-blue-100')
 ) AS colors(status, color_class, background_class)
 ON CONFLICT (organization_id, status) DO UPDATE
 SET

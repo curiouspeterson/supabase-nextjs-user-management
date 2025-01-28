@@ -3,11 +3,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { ErrorSeverity, ErrorCategory } from '@/lib/types/error'
+import { AppError } from '@/lib/errors'
 import { errorAnalytics } from '@/lib/error-analytics'
 
 interface ErrorState {
-  errors: Map<string, AppError>
-  lastError: AppError | null
+  errors: Map<string, ErrorDetails>
+  lastError: ErrorDetails | null
   hasError: boolean
 }
 
@@ -16,10 +17,10 @@ interface ErrorActions {
   clearError: (path: string) => void
   clearAllErrors: () => void
   hasErrorForPath: (path: string) => boolean
-  getErrorForPath: (path: string) => AppError | null
+  getErrorForPath: (path: string) => ErrorDetails | null
 }
 
-interface AppError {
+interface ErrorDetails {
   message: string
   code: string
   severity: ErrorSeverity
@@ -41,21 +42,42 @@ export const useErrorStore = create<ErrorState & ErrorActions>()(
       ...initialState,
 
       setError: (path: string, error: AppError) => {
-        const newError = {
-          ...error,
-          timestamp: new Date().toISOString(),
-          path
-        }
+        // Create new AppError instance for tracking
+        const newError = new AppError(
+          error.message,
+          error.code,
+          error.statusCode,
+          error.shouldLog,
+          error.severity,
+          error.category,
+          {
+            ...error.metadata,
+            path,
+            timestamp: new Date().toISOString()
+          },
+          error.recoveryStrategy
+        )
 
         // Track error in analytics
         errorAnalytics.trackError(newError)
 
+        // Convert to ErrorDetails for state storage
+        const errorDetails: ErrorDetails = {
+          message: newError.message,
+          code: newError.code,
+          severity: newError.severity,
+          category: newError.category,
+          timestamp: new Date().toISOString(),
+          path,
+          metadata: newError.metadata
+        }
+
         set(state => {
           const newErrors = new Map(state.errors)
-          newErrors.set(path, newError)
+          newErrors.set(path, errorDetails)
           return {
             errors: newErrors,
-            lastError: newError,
+            lastError: errorDetails,
             hasError: true
           }
         })

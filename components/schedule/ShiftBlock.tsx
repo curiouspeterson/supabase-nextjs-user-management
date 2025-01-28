@@ -10,6 +10,7 @@ import type {
 } from '@/services/scheduler/types';
 import { useScheduleStore } from '@/lib/stores/schedule-store';
 import { cn } from '@/lib/utils';
+import { EmployeeRole, ShiftDurationCategory } from '@/services/scheduler/types';
 
 interface DragItem {
   type: 'SHIFT';
@@ -71,15 +72,15 @@ export default function ShiftBlock({
   
   // Determine background color based on role and duration
   const getBgColor = () => {
-    if (employee.employee_role === 'Shift Supervisor') {
+    if (employee.employee_role === EmployeeRole.SUPERVISOR) {
       return 'bg-purple-100 border-purple-200';
     }
     switch (shift.duration_category) {
-      case '12 hours':
+      case ShiftDurationCategory.TWELVE_HOURS:
         return 'bg-blue-100 border-blue-200';
-      case '10 hours':
+      case ShiftDurationCategory.TEN_HOURS:
         return 'bg-green-100 border-green-200';
-      case '8 hours':
+      case ShiftDurationCategory.FOUR_HOURS:
         return 'bg-yellow-100 border-yellow-200';
       default:
         return 'bg-gray-100 border-gray-200';
@@ -135,7 +136,7 @@ export default function ShiftBlock({
         </div>
         {employee && (
           <div className="text-xs text-muted-foreground">
-            {employee.first_name} {employee.last_name}
+            {employee.full_name}
           </div>
         )}
         {overlappingShifts.length > 1 && (

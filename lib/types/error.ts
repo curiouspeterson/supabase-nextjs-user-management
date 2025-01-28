@@ -71,6 +71,11 @@ export interface ErrorMetadata {
   context?: string;
   /** User ID if applicable */
   userId?: string;
+  /** i18n data */
+  i18n?: {
+    key: string;
+    values?: Record<string, string | number>;
+  };
   /** Additional data */
   [key: string]: unknown;
 }

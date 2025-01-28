@@ -17,21 +17,39 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import { useErrorBoundary } from '@/lib/hooks/use-error-boundary'
 import { createPattern } from '@/services/patterns'
-import type { Pattern } from '@/types'
+import { PatternType } from '@/services/scheduler/types'
+import { Pattern, PatternStatus } from '@/types/pattern'
 
 const patternSchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  description: z.string().min(1, 'Description is required'),
-  duration: z.number().min(1, 'Duration must be at least 1 day'),
-  shifts: z.array(z.object({
-    startTime: z.string(),
-    endTime: z.string(),
-    role: z.string(),
-    capacity: z.number().min(1)
-  })).min(1, 'At least one shift is required')
+  description: z.string().default(''),
+  pattern: z.string().min(1, 'Pattern is required'),
+  is_forbidden: z.boolean().default(false),
+  pattern_type: z.nativeEnum(PatternType),
+  shift_duration: z.number().min(1, 'Shift duration must be at least 1 hour'),
+  days_on: z.number().min(1, 'Must have at least 1 day on'),
+  days_off: z.number().min(0, 'Days off must be 0 or more')
 })
 
 type PatternFormValues = z.infer<typeof patternSchema>
+
+function convertToPattern(formData: PatternFormValues): Omit<Pattern, 'id' | 'createdAt' | 'updatedAt'> {
+  // Convert the pattern string to shifts array
+  const shifts = formData.pattern.split('').map((day, index) => ({
+    startTime: `${(index * 24) % 168}:00`, // 168 hours in a week
+    endTime: `${((index * 24) + formData.shift_duration) % 168}:00`,
+    duration: formData.shift_duration,
+    type: day === '1' ? 'work' : 'off'
+  }))
+
+  return {
+    name: formData.name,
+    description: formData.description,
+    duration: formData.pattern.length * 24, // Duration in hours
+    shifts,
+    status: PatternStatus.ACTIVE
+  }
+}
 
 export function PatternForm() {
   const { toast } = useToast()
@@ -43,8 +61,12 @@ export function PatternForm() {
     defaultValues: {
       name: '',
       description: '',
-      duration: 7,
-      shifts: []
+      pattern: '0000000',
+      is_forbidden: false,
+      pattern_type: PatternType.CUSTOM,
+      shift_duration: 8,
+      days_on: 0,
+      days_off: 7
     }
   })
 
@@ -52,14 +74,12 @@ export function PatternForm() {
     try {
       setIsSubmitting(true)
 
-      await createPattern({
-        ...data,
-        status: 'DRAFT'
-      })
+      const pattern = convertToPattern(data)
+      await createPattern(pattern)
 
       toast({
         title: 'Pattern created successfully',
-        description: 'Your pattern has been saved as a draft.'
+        description: 'Your pattern has been saved.'
       })
 
       form.reset()
@@ -108,18 +128,72 @@ export function PatternForm() {
 
         <FormField
           control={form.control}
-          name="duration"
+          name="pattern"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Duration (days)</FormLabel>
+              <FormLabel>Pattern (0 for off days, 1 for work days)</FormLabel>
+              <FormControl>
+                <Input {...field} placeholder="e.g., 1111000" />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="pattern_type"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Pattern Type</FormLabel>
+              <FormControl>
+                <select
+                  {...field}
+                  className="w-full p-2 border rounded"
+                >
+                  {Object.values(PatternType).map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="shift_duration"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Shift Duration (hours)</FormLabel>
               <FormControl>
                 <Input
                   type="number"
                   min={1}
+                  max={24}
                   {...field}
                   onChange={e => field.onChange(parseInt(e.target.value))}
                 />
               </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="is_forbidden"
+          render={({ field }) => (
+            <FormItem className="flex items-center space-x-2">
+              <FormControl>
+                <input
+                  type="checkbox"
+                  checked={field.value}
+                  onChange={field.onChange}
+                />
+              </FormControl>
+              <FormLabel>Forbidden Pattern</FormLabel>
               <FormMessage />
             </FormItem>
           )}

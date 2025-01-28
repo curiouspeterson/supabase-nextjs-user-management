@@ -1,12 +1,33 @@
 'use client'
 
-export function ErrorFallback({ error }: { error: Error }) {
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AlertCircle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+
+interface ErrorFallbackProps {
+  error: Error
+  resetErrorBoundary: () => void
+}
+
+export function ErrorFallback({ error, resetErrorBoundary }: ErrorFallbackProps) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-4">
-      <div className="rounded-lg bg-red-50 p-4">
-        <h2 className="mb-2 text-lg font-semibold text-red-800">Something went wrong</h2>
-        <p className="text-sm text-red-600">{error.message}</p>
-      </div>
+      <Alert variant="destructive" className="max-w-lg w-full">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>Something went wrong</AlertTitle>
+        <AlertDescription>
+          <p className="mb-4 text-sm">{error.message}</p>
+          <Button
+            variant="outline"
+            onClick={() => {
+              resetErrorBoundary()
+              window.location.reload()
+            }}
+          >
+            Try again
+          </Button>
+        </AlertDescription>
+      </Alert>
     </div>
   )
 } 

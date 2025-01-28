@@ -1,6 +1,5 @@
 'use client'
 
-import { Employee, EmployeeRole } from '../page'
 import { useState } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { Button } from '@/components/ui/button'
@@ -16,6 +15,8 @@ import {
 import { toast } from '@/components/ui/use-toast'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRouter } from 'next/navigation'
+import type { Employee } from '@/types/employee'
+import { EmployeeRole } from '@/types/employee'
 
 interface EmployeeListProps {
   employees: Employee[]
@@ -80,8 +81,6 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
         return 'bg-green-500'
       case EmployeeRole.EMPLOYEE:
         return 'bg-yellow-500'
-      case EmployeeRole.CONTRACTOR:
-        return 'bg-purple-500'
       default:
         return 'bg-gray-500'
     }
@@ -95,15 +94,14 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
             <TableHead>Name</TableHead>
             <TableHead>Email</TableHead>
             <TableHead>Role</TableHead>
-            <TableHead>Team</TableHead>
             <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {employees.map((employee) => (
-            <TableRow key={employee.user_id}>
+            <TableRow key={employee.id}>
               <TableCell>
-                <span className="font-medium">{employee.full_name}</span>
+                <span className="font-medium">{employee.fullName}</span>
               </TableCell>
               <TableCell>{employee.email}</TableCell>
               <TableCell>
@@ -111,18 +109,17 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
                   {employee.role}
                 </Badge>
               </TableCell>
-              <TableCell>{employee.team_name || 'No Team'}</TableCell>
               <TableCell>
                 <div className="flex gap-2">
-                  {employee.user_id !== currentUserId && (
+                  {employee.id !== currentUserId && (
                     <>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleRoleUpdate(employee.user_id, EmployeeRole.MANAGER)}
-                        disabled={loading[employee.user_id]}
+                        onClick={() => handleRoleUpdate(employee.id, EmployeeRole.MANAGER)}
+                        disabled={loading[employee.id]}
                       >
-                        {loading[employee.user_id] ? (
+                        {loading[employee.id] ? (
                           <Skeleton className="h-4 w-4" />
                         ) : (
                           'Promote'
@@ -131,10 +128,10 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleRoleUpdate(employee.user_id, EmployeeRole.EMPLOYEE)}
-                        disabled={loading[employee.user_id]}
+                        onClick={() => handleRoleUpdate(employee.id, EmployeeRole.EMPLOYEE)}
+                        disabled={loading[employee.id]}
                       >
-                        {loading[employee.user_id] ? (
+                        {loading[employee.id] ? (
                           <Skeleton className="h-4 w-4" />
                         ) : (
                           'Demote'
@@ -148,7 +145,7 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
           ))}
           {employees.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className="text-center py-4">
+              <TableCell colSpan={4} className="text-center py-4">
                 No employees found
               </TableCell>
             </TableRow>

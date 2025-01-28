@@ -118,28 +118,28 @@ class MockHeaders implements Headers {
   }
 
   forEach(callbackfn: (value: string, key: string, parent: Headers) => void): void {
-    this.headers.forEach((value, key) => callbackfn(value, key, this))
+    this.headers.forEach((value, key) => callbackfn(value, key, this as unknown as Headers))
   }
 
-  entries(): IterableIterator<[string, string]> {
-    return this.headers.entries()
+  entries(): HeadersIterator<[string, string]> {
+    return this.headers.entries() as unknown as HeadersIterator<[string, string]>
   }
 
-  keys(): IterableIterator<string> {
-    return this.headers.keys()
+  keys(): HeadersIterator<string> {
+    return this.headers.keys() as unknown as HeadersIterator<string>
   }
 
-  values(): IterableIterator<string> {
-    return this.headers.values()
+  values(): HeadersIterator<string> {
+    return this.headers.values() as unknown as HeadersIterator<string>
+  }
+
+  [Symbol.iterator](): HeadersIterator<[string, string]> {
+    return this.entries()
   }
 
   getSetCookie(): string[] {
     const cookies = this.get('set-cookie')
     return cookies ? cookies.split(', ') : []
-  }
-
-  [Symbol.iterator](): IterableIterator<[string, string]> {
-    return this.entries()
   }
 }
 
@@ -207,6 +207,17 @@ class MockRequest {
   async text(): Promise<string> {
     this._bodyUsed = true
     return this._body ? String(this._body) : ''
+  }
+
+  async bytes(): Promise<number> {
+    if (this._body instanceof ArrayBuffer) {
+      return this._body.byteLength
+    } else if (this._body instanceof Blob) {
+      return this._body.size
+    } else if (typeof this._body === 'string') {
+      return new TextEncoder().encode(this._body).length
+    }
+    return 0
   }
 }
 

@@ -10,6 +10,13 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+type FallbackProps = {
+  error: Error
+  resetErrorBoundary: () => void
+}
+
+type FallbackComponent = React.ComponentType<FallbackProps>
+
 /**
  * Props for the ErrorBoundary component
  */
@@ -18,6 +25,7 @@ interface ErrorBoundaryProps {
   children: React.ReactNode
   /** Fallback component to show when an error occurs */
   fallback?: React.ReactNode
+  FallbackComponent?: FallbackComponent
 }
 
 /**
@@ -67,8 +75,21 @@ export class ErrorBoundary extends React.Component<
     console.error('Error caught by error boundary:', error, errorInfo)
   }
 
+  resetErrorBoundary = () => {
+    this.setState({ hasError: false, error: null })
+  }
+
   render() {
-    if (this.state.hasError) {
+    if (this.state.hasError && this.state.error) {
+      if (this.props.FallbackComponent) {
+        return (
+          <this.props.FallbackComponent
+            error={this.state.error}
+            resetErrorBoundary={this.resetErrorBoundary}
+          />
+        )
+      }
+
       if (this.props.fallback) {
         return this.props.fallback
       }
@@ -84,7 +105,7 @@ export class ErrorBoundary extends React.Component<
             <Button
               variant="outline"
               onClick={() => {
-                this.setState({ hasError: false, error: null })
+                this.resetErrorBoundary()
                 window.location.reload()
               }}
             >

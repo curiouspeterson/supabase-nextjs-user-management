@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
-import type { HealthStatus, HealthMetrics, HealthCheckConfig } from '@/types'
+import type { HealthStatus, HealthMetrics, HealthCheckConfig } from '@/types/health'
 
 export async function fetchHealthStatus(): Promise<{
   status: HealthStatus
@@ -115,6 +115,7 @@ export async function getHealthMetricsHistory(
   startDate: Date,
   endDate: Date
 ): Promise<HealthMetrics[]> {
+  const supabase = createClient()
   const { data, error } = await supabase
     .rpc('get_metrics_history', {
       p_start_date: startDate.toISOString(),
@@ -126,17 +127,27 @@ export async function getHealthMetricsHistory(
     throw new Error('Failed to fetch health metrics history')
   }
 
-  return data.map(metric => ({
-    uptime: metric.metrics.uptime || 0,
-    responseTime: metric.metrics.response_time || 0,
-    errorRate: metric.metrics.error_rate || 0,
-    activeUsers: metric.metrics.active_users || 0,
-    cpuUsage: metric.metrics.cpu_usage || 0,
-    memoryUsage: metric.metrics.memory_usage || 0
+  type MetricRecord = {
+    metrics: {
+      cpu_usage?: number
+      memory_usage?: number
+      active_connections?: number
+      response_time?: number
+      error_rate?: number
+    }
+  }
+
+  return data.map((metric: MetricRecord) => ({
+    cpu_usage: metric.metrics.cpu_usage || 0,
+    memory_usage: metric.metrics.memory_usage || 0,
+    active_connections: metric.metrics.active_connections || 0,
+    request_latency: metric.metrics.response_time || 0,
+    error_rate: metric.metrics.error_rate || 0
   }))
 }
 
 export async function triggerHealthCheck(configId: string): Promise<void> {
+  const supabase = createClient()
   const { error } = await supabase
     .rpc('trigger_health_check', {
       p_config_id: configId

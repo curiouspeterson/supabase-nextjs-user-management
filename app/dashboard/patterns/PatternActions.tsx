@@ -93,7 +93,7 @@ export default function PatternActions({ initialPatterns }: PatternActionsProps)
       toast({
         title: 'Pattern Created',
         description: `Successfully created pattern "${pattern.name}"`,
-        variant: 'success',
+        variant: 'default',
       });
     } catch (error) {
       const errorMessage = error instanceof z.ZodError
@@ -101,10 +101,7 @@ export default function PatternActions({ initialPatterns }: PatternActionsProps)
         : 'Failed to create pattern. Please try again.';
       
       await logPatternAction('ERROR', pattern, error as Error);
-      handleError(error, 'creating pattern', {
-        errorCode: PATTERN_ERROR_CODES.CREATE_FAILED,
-        context: { pattern },
-      });
+      handleError(error, 'Error creating pattern');
       
       toast({
         title: 'Error Creating Pattern',
@@ -142,7 +139,7 @@ export default function PatternActions({ initialPatterns }: PatternActionsProps)
       toast({
         title: 'Pattern Updated',
         description: `Successfully updated pattern "${pattern.name}"`,
-        variant: 'success',
+        variant: 'default',
       });
     } catch (error) {
       const errorMessage = error instanceof z.ZodError
@@ -150,10 +147,7 @@ export default function PatternActions({ initialPatterns }: PatternActionsProps)
         : 'Failed to update pattern. Please try again.';
       
       await logPatternAction('ERROR', pattern, error as Error);
-      handleError(error, 'updating pattern', {
-        errorCode: PATTERN_ERROR_CODES.UPDATE_FAILED,
-        context: { pattern },
-      });
+      handleError(error, 'Error updating pattern');
       
       toast({
         title: 'Error Updating Pattern',
@@ -181,15 +175,12 @@ export default function PatternActions({ initialPatterns }: PatternActionsProps)
       toast({
         title: 'Pattern Deleted',
         description: `Successfully deleted pattern "${pattern.name}"`,
-        variant: 'success',
+        variant: 'default',
       });
     } catch (error) {
       const pattern = patterns.find(p => p.id === patternId);
       await logPatternAction('ERROR', { id: patternId, ...pattern }, error as Error);
-      handleError(error, 'deleting pattern', {
-        errorCode: PATTERN_ERROR_CODES.DELETE_FAILED,
-        context: { patternId },
-      });
+      handleError(error, 'Error deleting pattern');
       
       toast({
         title: 'Error Deleting Pattern',

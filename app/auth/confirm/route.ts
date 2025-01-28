@@ -1,128 +1,111 @@
 import { type EmailOtpType } from '@supabase/supabase-js'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/utils/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { ApiError, ValidationError } from '@/lib/errors'
+import { logger } from '@/lib/logger'
+import crypto from 'crypto'
 
 // Validation schema for query parameters
 const confirmQuerySchema = z.object({
   token_hash: z.string().min(1, 'Token hash is required'),
-  type: z.enum(['email', 'recovery', 'invite', 'magiclink'] as const, {
-    errorMap: () => ({ message: 'Invalid confirmation type' })
-  }),
-  next: z.string().optional()
+  type: z.enum(['signup', 'recovery', 'invite', 'email'] as const),
+  next: z.string().url().optional()
 })
 
 // Creating a handler to a GET request to route /auth/confirm
-export async function GET(request: NextRequest) {
+export const dynamic = 'force-dynamic'
+
+export async function GET(request: Request) {
   const requestId = crypto.randomUUID()
   const cookieStore = cookies()
-  const supabase = createClient(cookieStore)
+  const supabase = createClient()
 
   try {
     // Parse and validate query parameters
-    const { searchParams } = new URL(request.url)
-    const queryParams = {
-      token_hash: searchParams.get('token_hash'),
-      type: searchParams.get('type'),
-      next: searchParams.get('next') || '/account'
-    }
-
-    const { token_hash, type, next } = confirmQuerySchema.parse(queryParams)
-
-    // Get client info for rate limiting
-    const clientIp = request.headers.get('x-forwarded-for') || request.ip || 'unknown'
-    const userAgent = request.headers.get('user-agent') || 'unknown'
-
-    // Check rate limit before proceeding
-    const { data: rateLimit, error: rateLimitError } = await supabase.rpc(
-      'check_confirmation_rate_limit',
-      { 
-        p_ip_address: clientIp,
-        p_email: null // We don't have email at this point
-      }
-    )
-
-    if (rateLimitError) {
-      throw new ApiError('Failed to check rate limit', { cause: rateLimitError })
-    }
-
-    if (!rateLimit?.allowed) {
-      const retryAfter = rateLimit?.next_allowed_attempt
-        ? Math.ceil((new Date(rateLimit.next_allowed_attempt).getTime() - Date.now()) / 1000)
-        : 3600
-
-      // Log failed attempt
-      await supabase.rpc('log_confirmation_attempt', {
-        p_type: type,
-        p_token_hash: token_hash,
-        p_ip_address: clientIp,
-        p_user_agent: userAgent,
-        p_success: false,
-        p_error_message: 'Rate limit exceeded'
-      })
-
-      // Create redirect to error page with rate limit info
-      const errorUrl = new URL('/error', request.url)
-      errorUrl.searchParams.set('code', 'RATE_LIMIT_EXCEEDED')
-      errorUrl.searchParams.set('retry_after', String(retryAfter))
-      return NextResponse.redirect(errorUrl, {
-        headers: {
-          'Retry-After': String(retryAfter)
-        }
-      })
-    }
-
-    // Verify the token
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      type,
-      token_hash,
+    const url = new URL(request.url)
+    const validatedQuery = confirmQuerySchema.parse({
+      token_hash: url.searchParams.get('token_hash'),
+      type: url.searchParams.get('type'),
+      next: url.searchParams.get('next'),
+    })
+    
+    logger.info('Processing confirmation request', {
+      requestId,
+      type: validatedQuery.type,
     })
 
-    // Log the confirmation attempt
-    await supabase.rpc('log_confirmation_attempt', {
-      p_type: type,
-      p_token_hash: token_hash,
-      p_ip_address: clientIp,
-      p_user_agent: userAgent,
-      p_success: !verifyError,
-      p_error_message: verifyError?.message
+    // Verify the token hash
+    const { data: { user }, error: verifyError } = await supabase.auth.verifyOtp({
+      token_hash: validatedQuery.token_hash,
+      type: validatedQuery.type as EmailOtpType,
     })
 
     if (verifyError) {
       throw new ApiError('Failed to verify token', { cause: verifyError })
     }
 
-    // Create redirect URL for success
-    const redirectTo = new URL(next, request.url)
-    redirectTo.searchParams.delete('token_hash')
-    redirectTo.searchParams.delete('type')
-    redirectTo.searchParams.delete('next')
+    if (!user) {
+      throw new ApiError('No user found')
+    }
 
+    // Create employee record if this is a signup confirmation
+    if (validatedQuery.type === 'signup') {
+      const { error: employeeError } = await supabase
+        .from('employees')
+        .insert({
+          id: user.id,
+          user_role: 'Employee',
+          employee_role: 'Dispatcher',
+        })
+
+      if (employeeError) {
+        throw new ApiError('Failed to create employee record', { cause: employeeError })
+      }
+    }
+
+    logger.info('Successfully confirmed user', {
+      requestId,
+      userId: user.id,
+      type: validatedQuery.type,
+    })
+
+    // Redirect to the next URL or default to the dashboard
+    const redirectTo = validatedQuery.next ?? '/dashboard'
     return NextResponse.redirect(redirectTo)
 
   } catch (error) {
-    console.error('Auth confirmation error:', error)
-
-    // Create redirect URL for error page
-    const errorUrl = new URL('/error', request.url)
+    logger.error('Error confirming user', {
+      requestId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+    })
 
     if (error instanceof z.ZodError) {
-      errorUrl.searchParams.set('code', 'INVALID_PARAMETERS')
-      errorUrl.searchParams.set('message', error.errors[0]?.message || 'Invalid parameters')
-      return NextResponse.redirect(errorUrl)
+      return NextResponse.json(
+        { error: 'Invalid request data', errors: error.errors },
+        { status: 400 }
+      )
+    }
+
+    if (error instanceof ValidationError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      )
     }
 
     if (error instanceof ApiError) {
-      errorUrl.searchParams.set('code', 'VERIFICATION_FAILED')
-      errorUrl.searchParams.set('message', error.message)
-      return NextResponse.redirect(errorUrl)
+      return NextResponse.json(
+        { error: error.message },
+        { status: 403 }
+      )
     }
 
-    // Generic error
-    errorUrl.searchParams.set('code', 'UNKNOWN_ERROR')
-    errorUrl.searchParams.set('message', 'An unexpected error occurred')
-    return NextResponse.redirect(errorUrl)
+    return NextResponse.json(
+      { error: 'An unexpected error occurred' },
+      { status: 500 }
+    )
   }
 }
