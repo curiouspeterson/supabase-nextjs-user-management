@@ -3,11 +3,36 @@ import { z } from 'zod';
 import { isValid, parseISO, differenceInHours } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 
-export enum ShiftDurationCategory {
-  FOUR_HOURS = '4 hours',
-  TEN_HOURS = '10 hours',
-  TWELVE_HOURS = '12 hours'
-}
+export type ShiftDurationCategory = '4 hours' | '10 hours' | '12 hours';
+
+export const ShiftDurationCategory = {
+  FOUR_HOURS: '4 hours' as const,
+  TEN_HOURS: '10 hours' as const,
+  TWELVE_HOURS: '12 hours' as const,
+  
+  fromHours(hours: number): ShiftDurationCategory {
+    if (hours <= 4) return this.FOUR_HOURS;
+    if (hours <= 10) return this.TEN_HOURS;
+    return this.TWELVE_HOURS;
+  },
+  
+  toHours(category: ShiftDurationCategory): number {
+    switch (category) {
+      case this.FOUR_HOURS:
+        return 4;
+      case this.TEN_HOURS:
+        return 10;
+      case this.TWELVE_HOURS:
+        return 12;
+      default:
+        throw new Error(`Invalid duration category: ${category}`);
+    }
+  },
+  
+  values(): ShiftDurationCategory[] {
+    return [this.FOUR_HOURS, this.TEN_HOURS, this.TWELVE_HOURS];
+  }
+} as const;
 
 export enum ScheduleStatus {
   DRAFT = 'Draft',
@@ -15,10 +40,9 @@ export enum ScheduleStatus {
 }
 
 export enum EmployeeRole {
-  STAFF = 'STAFF',
-  SUPERVISOR = 'SUPERVISOR',
-  MANAGER = 'MANAGER',
-  ADMIN = 'ADMIN'
+  DISPATCHER = 'Dispatcher',
+  SHIFT_SUPERVISOR = 'Shift Supervisor',
+  MANAGEMENT = 'Management'
 }
 
 export enum TimeOffType {
@@ -29,9 +53,9 @@ export enum TimeOffType {
 }
 
 export enum TimeOffStatus {
-  PENDING = 'PENDING',
-  APPROVED = 'APPROVED',
-  DECLINED = 'DECLINED'
+  PENDING = 'Pending',
+  APPROVED = 'Approved',
+  DECLINED = 'Declined'
 }
 
 export enum CoverageStatus {
@@ -54,11 +78,13 @@ export enum ScheduleAction {
   DELETE = 'DELETE'
 }
 
-export interface ShiftType {
+export interface DatabaseShift {
   id: string;
-  name: string;
-  description: string | null;
-  color: string | null;
+  shift_type_id: string;
+  start_time: string;
+  end_time: string;
+  duration_hours: number;
+  duration_category: ShiftDurationCategory | null;
   created_at: string;
   updated_at: string;
 }
@@ -69,7 +95,7 @@ export interface Shift {
   start_time: string;
   end_time: string;
   duration_hours: number;
-  duration_category: Database['public']['Enums']['duration_category_enum'] | null;
+  duration_category: ShiftDurationCategory | null;
   created_at: string;
   updated_at: string;
 }
@@ -98,6 +124,28 @@ export interface ShiftPattern {
   shift_duration: number;
   days_on: number;
   days_off: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PatternShift {
+  start_time: string;
+  end_time: string;
+  shift_type_id: string;
+  duration_hours: number;
+  duration_category: ShiftDurationCategory | null;
+  employee_role: EmployeeRole;
+}
+
+export interface Pattern {
+  id: string;
+  name: string;
+  pattern_type: PatternType;
+  days_on: number;
+  days_off: number;
+  shift_duration: number;
+  shifts: PatternShift[];
+  pattern_shifts?: PatternShift[];
   created_at: string;
   updated_at: string;
 }
@@ -223,6 +271,36 @@ export interface HealthCheckResult {
   alerts: string[];
 }
 
+export interface GenerationMetrics {
+  generation_time_ms: number;
+  optimization_iterations: number;
+  constraints_checked: number;
+  errors_encountered: number;
+  schedules_generated: number;
+  patterns_used: number;
+  shifts_generated: number;
+  shifts_skipped: number;
+  constraint_violations: {
+    weekly_hours: number;
+    consecutive_days: number;
+    hours_between_shifts: number;
+    daily_hours: number;
+  };
+  employee_assignments: {
+    [role: string]: number;
+  };
+  pattern_usage: {
+    [pattern: string]: number;
+  };
+  time_off_conflicts: number;
+  performance_metrics: {
+    database_time_ms: number;
+    constraint_check_time_ms: number;
+    assignment_time_ms: number;
+    transaction_time_ms: number;
+  };
+}
+
 export const ShiftSchema = z.object({
   id: z.string().uuid(),
   start_time: z.string().datetime(),
@@ -338,8 +416,12 @@ export const isValidStatusTransition = (
   return validTransitions[currentStatus].includes(newStatus);
 };
 
+export function isShiftDurationCategory(value: unknown): value is ShiftDurationCategory {
+  return typeof value === 'string' && ShiftDurationCategory.values().includes(value as ShiftDurationCategory);
+}
+
 export const calculateDurationCategory = (hours: number): ShiftDurationCategory => {
-  if (hours <= 4) return ShiftDurationCategory.FOUR_HOURS;
-  if (hours <= 10) return ShiftDurationCategory.TEN_HOURS;
-  return ShiftDurationCategory.TWELVE_HOURS;
+  if (hours <= 4) return '4 hours';
+  if (hours <= 10) return '10 hours';
+  return '12 hours';
 }; 

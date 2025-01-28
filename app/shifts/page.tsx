@@ -17,10 +17,21 @@ import { Badge } from '@/components/ui/badge'
 import { ShiftTemplateDialog } from '@/components/shifts/shift-template-dialog'
 import { signOut } from '../login/actions'
 import { useToast } from '@/components/ui/use-toast'
+import { logger } from '@/lib/logger'
+import { AppError, DatabaseError } from '@/lib/errors'
+import type { 
+  Shift as DatabaseShift, 
+  ShiftType as DatabaseShiftType 
+} from '@/services/scheduler/types'
 
 type DurationCategory = "4 hours" | "10 hours" | "12 hours";
 
-interface Shift {
+// Database types with relationships
+interface DatabaseShiftTypeWithRelations extends DatabaseShiftType {
+  shifts: DatabaseShift[]
+}
+
+interface ShiftDisplay {
   id: string
   start_time: string
   end_time: string
@@ -29,19 +40,35 @@ interface Shift {
   shift_type_id: string
 }
 
-interface ShiftType {
-  id: string
-  name: string
-  description: string | null
-  shifts: Shift[]
+interface ShiftTypeDisplay extends Omit<DatabaseShiftType, 'color'> {
+  shifts: ShiftDisplay[]
+}
+
+// Transform database shift type to display type
+function transformShiftType(dbType: DatabaseShiftTypeWithRelations): ShiftTypeDisplay {
+  return {
+    id: dbType.id,
+    name: dbType.name,
+    description: dbType.description,
+    created_at: dbType.created_at,
+    updated_at: dbType.updated_at,
+    shifts: dbType.shifts.map(shift => ({
+      id: shift.id,
+      start_time: shift.start_time,
+      end_time: shift.end_time,
+      duration_hours: shift.duration_hours,
+      duration_category: shift.duration_category,
+      shift_type_id: shift.shift_type_id
+    }))
+  }
 }
 
 export default function ShiftsPage() {
-  const [shiftTypes, setShiftTypes] = useState<ShiftType[]>([])
+  const [shiftTypes, setShiftTypes] = useState<ShiftTypeDisplay[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [selectedShift, setSelectedShift] = useState<Shift | undefined>()
+  const [selectedShift, setSelectedShift] = useState<ShiftDisplay | undefined>()
   const supabase = createClient()
   const router = useRouter()
   const { toast } = useToast()
@@ -101,9 +128,7 @@ export default function ShiftsPage() {
         .from('shift_types')
         .select(`
           *,
-          shifts (
-            *
-          )
+          shifts (*)
         `)
         .order('name')
 
@@ -111,7 +136,11 @@ export default function ShiftsPage() {
         throw error
       }
 
-      setShiftTypes(data)
+      if (!data) {
+        throw new Error('No data returned from database')
+      }
+
+      setShiftTypes(data.map(type => transformShiftType(type as DatabaseShiftTypeWithRelations)))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'An error occurred while fetching shifts')
     } finally {

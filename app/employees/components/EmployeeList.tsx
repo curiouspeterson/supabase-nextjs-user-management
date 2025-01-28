@@ -15,8 +15,7 @@ import {
 import { toast } from '@/components/ui/use-toast'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRouter } from 'next/navigation'
-import type { Employee } from '@/types/employee'
-import { EmployeeRole } from '@/types/employee'
+import type { Employee, EmployeeRole } from '@/types/employee'
 
 interface EmployeeListProps {
   employees: Employee[]
@@ -73,14 +72,12 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
 
   const getRoleBadgeColor = (role: EmployeeRole) => {
     switch (role) {
-      case EmployeeRole.ADMIN:
+      case 'Management':
         return 'bg-red-500'
-      case EmployeeRole.MANAGER:
+      case 'Shift Supervisor':
         return 'bg-blue-500'
-      case EmployeeRole.SUPERVISOR:
+      case 'Dispatcher':
         return 'bg-green-500'
-      case EmployeeRole.EMPLOYEE:
-        return 'bg-yellow-500'
       default:
         return 'bg-gray-500'
     }
@@ -91,9 +88,9 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>Role</TableHead>
+            <TableHead>ID</TableHead>
+            <TableHead>Employee Role</TableHead>
+            <TableHead>User Role</TableHead>
             <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -101,12 +98,12 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
           {employees.map((employee) => (
             <TableRow key={employee.id}>
               <TableCell>
-                <span className="font-medium">{employee.fullName}</span>
+                <span className="font-medium">{employee.id}</span>
               </TableCell>
-              <TableCell>{employee.email}</TableCell>
+              <TableCell>{employee.employee_role}</TableCell>
               <TableCell>
-                <Badge className={getRoleBadgeColor(employee.role)}>
-                  {employee.role}
+                <Badge className={getRoleBadgeColor(employee.employee_role)}>
+                  {employee.employee_role}
                 </Badge>
               </TableCell>
               <TableCell>
@@ -116,7 +113,7 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleRoleUpdate(employee.id, EmployeeRole.MANAGER)}
+                        onClick={() => handleRoleUpdate(employee.id, 'Management')}
                         disabled={loading[employee.id]}
                       >
                         {loading[employee.id] ? (
@@ -128,7 +125,7 @@ export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleRoleUpdate(employee.id, EmployeeRole.EMPLOYEE)}
+                        onClick={() => handleRoleUpdate(employee.id, 'Dispatcher')}
                         disabled={loading[employee.id]}
                       >
                         {loading[employee.id] ? (

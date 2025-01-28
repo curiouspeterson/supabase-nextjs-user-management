@@ -182,7 +182,7 @@ export class ScheduleGenerator {
   private assignEmployee(
     availableEmployees: Employee[],
     role: Database['public']['Enums']['employee_role_enum'],
-    existingShifts: Shift[]
+    existingSchedules: Schedule[]
   ): string {
     // Filter employees by role
     const eligibleEmployees = availableEmployees.filter(
@@ -195,11 +195,11 @@ export class ScheduleGenerator {
 
     // Sort employees by number of assigned shifts (ascending)
     eligibleEmployees.sort((a, b) => {
-      const aShifts = existingShifts.filter(
-        (shift) => shift.employee_id === a.id
+      const aShifts = existingSchedules.filter(
+        (schedule) => schedule.employee_id === a.id
       ).length
-      const bShifts = existingShifts.filter(
-        (shift) => shift.employee_id === b.id
+      const bShifts = existingSchedules.filter(
+        (schedule) => schedule.employee_id === b.id
       ).length
       return aShifts - bShifts
     })

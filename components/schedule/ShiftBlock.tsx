@@ -72,7 +72,7 @@ export default function ShiftBlock({
   
   // Determine background color based on role and duration
   const getBgColor = () => {
-    if (employee.employee_role === EmployeeRole.SUPERVISOR) {
+    if (employee.employee_role === EmployeeRole.SHIFT_SUPERVISOR) {
       return 'bg-purple-100 border-purple-200';
     }
     switch (shift.duration_category) {

@@ -178,30 +178,30 @@ export type Database = {
       }
       schedules: {
         Row: {
-          created_at: string
-          date: string
-          employee_id: string
           id: string
+          employee_id: string
           shift_id: string
+          date: string
           status: Database["public"]["Enums"]["schedule_status_enum"]
+          created_at: string
           updated_at: string
         }
         Insert: {
-          created_at?: string
-          date: string
-          employee_id: string
           id?: string
+          employee_id: string
           shift_id: string
+          date: string
           status?: Database["public"]["Enums"]["schedule_status_enum"]
+          created_at?: string
           updated_at?: string
         }
         Update: {
-          created_at?: string
-          date?: string
-          employee_id?: string
           id?: string
+          employee_id?: string
           shift_id?: string
+          date?: string
           status?: Database["public"]["Enums"]["schedule_status_enum"]
+          created_at?: string
           updated_at?: string
         }
         Relationships: [
@@ -218,7 +218,48 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "shifts"
             referencedColumns: ["id"]
-          },
+          }
+        ]
+      }
+      shifts: {
+        Row: {
+          id: string
+          shift_type_id: string
+          start_time: string
+          end_time: string
+          duration_hours: number
+          duration_category: Database["public"]["Enums"]["duration_category_enum"] | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          shift_type_id: string
+          start_time: string
+          end_time: string
+          duration_hours: number
+          duration_category?: Database["public"]["Enums"]["duration_category_enum"] | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          shift_type_id?: string
+          start_time?: string
+          end_time?: string
+          duration_hours?: number
+          duration_category?: Database["public"]["Enums"]["duration_category_enum"] | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shifts_shift_type_id_fkey"
+            columns: ["shift_type_id"]
+            isOneToOne: false
+            referencedRelation: "shift_types"
+            referencedColumns: ["id"]
+          }
         ]
       }
       shift_patterns: {
@@ -252,7 +293,69 @@ export type Database = {
           shift_duration?: number
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "pattern_shifts_pattern_id_fkey"
+            columns: ["id"]
+            isOneToOne: false
+            referencedRelation: "pattern_shifts"
+            referencedColumns: ["pattern_id"]
+          }
+        ]
+      }
+      pattern_shifts: {
+        Row: {
+          id: string
+          pattern_id: string
+          start_time: string
+          end_time: string
+          shift_type_id: string
+          duration_hours: number
+          duration_category: Database["public"]["Enums"]["duration_category_enum"] | null
+          employee_role: Database["public"]["Enums"]["employee_role"]
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          pattern_id: string
+          start_time: string
+          end_time: string
+          shift_type_id: string
+          duration_hours: number
+          duration_category?: Database["public"]["Enums"]["duration_category_enum"] | null
+          employee_role: Database["public"]["Enums"]["employee_role"]
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          pattern_id?: string
+          start_time?: string
+          end_time?: string
+          shift_type_id?: string
+          duration_hours?: number
+          duration_category?: Database["public"]["Enums"]["duration_category_enum"] | null
+          employee_role?: Database["public"]["Enums"]["employee_role"]
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pattern_shifts_pattern_id_fkey"
+            columns: ["pattern_id"]
+            isOneToOne: false
+            referencedRelation: "shift_patterns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pattern_shifts_shift_type_id_fkey"
+            columns: ["shift_type_id"]
+            isOneToOne: false
+            referencedRelation: "shift_types"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       shift_types: {
         Row: {
@@ -277,53 +380,6 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
-      }
-      shifts: {
-        Row: {
-          created_at: string
-          duration_category:
-            | Database["public"]["Enums"]["duration_category_enum"]
-            | null
-          duration_hours: number
-          end_time: string
-          id: string
-          shift_type_id: string
-          start_time: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          duration_category?:
-            | Database["public"]["Enums"]["duration_category_enum"]
-            | null
-          duration_hours: number
-          end_time: string
-          id?: string
-          shift_type_id: string
-          start_time: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          duration_category?:
-            | Database["public"]["Enums"]["duration_category_enum"]
-            | null
-          duration_hours?: number
-          end_time?: string
-          id?: string
-          shift_type_id?: string
-          start_time?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "shifts_shift_type_id_fkey"
-            columns: ["shift_type_id"]
-            isOneToOne: false
-            referencedRelation: "shift_types"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       staffing_requirements: {
         Row: {

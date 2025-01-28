@@ -19,13 +19,13 @@ type EmployeeWithProfile = Database['public']['Tables']['employees']['Row'] & {
 const mapLegacyRole = (role: string): EmployeeRole => {
   switch (role) {
     case 'Dispatcher':
-      return EmployeeRole.STAFF;
-    case 'Manager':
-      return EmployeeRole.MANAGER;
+      return EmployeeRole.DISPATCHER;
+    case 'Management':
+      return EmployeeRole.MANAGEMENT;
     case 'Shift Supervisor':
-      return EmployeeRole.SUPERVISOR;
+      return EmployeeRole.SHIFT_SUPERVISOR;
     default:
-      return EmployeeRole.STAFF;
+      return EmployeeRole.DISPATCHER;
   }
 }
 
@@ -87,27 +87,12 @@ export default async function SchedulesPage() {
 
   // Transform shifts data
   const shifts: Shift[] = shiftsData?.map(shift => {
-    let duration_category: ShiftDurationCategory = ShiftDurationCategory.TEN_HOURS // Default
-    switch (shift.duration_hours) {
-      case 4:
-        duration_category = ShiftDurationCategory.FOUR_HOURS;
-        break;
-      case 12:
-        duration_category = ShiftDurationCategory.TWELVE_HOURS;
-        break;
-      // 10 hours is the default
-    }
-
+    const duration_category = ShiftDurationCategory.fromHours(shift.duration_hours);
+    
     return {
-      id: shift.id,
-      shift_type_id: shift.shift_type_id,
-      start_time: shift.start_time,
-      end_time: shift.end_time,
-      duration_hours: shift.duration_hours,
-      duration_category,
-      created_at: shift.created_at,
-      updated_at: shift.updated_at
-    }
+      ...shift,
+      duration_category
+    };
   }) || []
 
   // Initialize coverage reports

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { scheduleService } from '@/services/scheduleService'
-import { Employee } from '@/utils/scheduling/types'
+import { Employee } from '@/services/scheduler/types'
 import { format } from 'date-fns'
 import { toast } from '@/components/ui/use-toast'
 

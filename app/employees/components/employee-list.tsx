@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { useErrorBoundary } from 'react-error-boundary'
 import { getEmployees } from '@/services/employees'
-import type { Employee } from '@/services/employees/types'
+import type { Employee } from '@/types/employee'
 
 export function EmployeeList() {
   const { showBoundary } = useErrorBoundary()
@@ -48,9 +48,9 @@ function EmployeeCard({ employee }: { employee: Employee }) {
     <Card className="p-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-medium">{employee.fullName}</h3>
+          <h3 className="font-medium">Employee {employee.id}</h3>
           <p className="text-sm text-muted-foreground">
-            {employee.email}
+            {employee.employee_role}
           </p>
         </div>
         <Button variant="outline" size="sm">
@@ -60,11 +60,11 @@ function EmployeeCard({ employee }: { employee: Employee }) {
       <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
         <div>
           <p className="text-muted-foreground">Role</p>
-          <p className="capitalize">{employee.role.toLowerCase()}</p>
+          <p className="capitalize">{employee.employee_role.toLowerCase()}</p>
         </div>
         <div>
-          <p className="text-muted-foreground">Status</p>
-          <p className="capitalize">{employee.status.toLowerCase()}</p>
+          <p className="text-muted-foreground">User Role</p>
+          <p className="capitalize">{employee.user_role.toLowerCase()}</p>
         </div>
       </div>
     </Card>

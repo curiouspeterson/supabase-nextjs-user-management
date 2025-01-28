@@ -19,15 +19,15 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/ui/use-toast'
 import { useErrorBoundary } from 'react-error-boundary'
-import { Employee, EmployeeRole, EmployeeStatus } from '@/types/employee'
+import type { Employee, EmployeeInsert } from '@/types/employee'
 import { createEmployee, updateEmployee } from '@/services/employees'
 
 const employeeSchema = z.object({
-  firstName: z.string().min(1, 'First name is required'),
-  lastName: z.string().min(1, 'Last name is required'),
-  email: z.string().email('Invalid email address'),
-  role: z.nativeEnum(EmployeeRole),
-  status: z.nativeEnum(EmployeeStatus)
+  id: z.string().uuid(),
+  employee_role: z.enum(['Dispatcher', 'Shift Supervisor', 'Management']),
+  user_role: z.enum(['Employee', 'Manager', 'Admin']),
+  weekly_hours_scheduled: z.number().nullable(),
+  default_shift_type_id: z.string().uuid().nullable()
 })
 
 type EmployeeFormValues = z.infer<typeof employeeSchema>
@@ -47,17 +47,17 @@ export function EmployeeDialog({ employee, open, onOpenChange }: EmployeeDialogP
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema),
     defaultValues: employee ? {
-      firstName: employee.firstName,
-      lastName: employee.lastName,
-      email: employee.email,
-      role: employee.role,
-      status: employee.status
+      id: employee.id,
+      employee_role: employee.employee_role,
+      user_role: employee.user_role,
+      weekly_hours_scheduled: employee.weekly_hours_scheduled,
+      default_shift_type_id: employee.default_shift_type_id
     } : {
-      firstName: '',
-      lastName: '',
-      email: '',
-      role: EmployeeRole.EMPLOYEE,
-      status: EmployeeStatus.ACTIVE
+      id: crypto.randomUUID(),
+      employee_role: 'Dispatcher',
+      user_role: 'Employee',
+      weekly_hours_scheduled: null,
+      default_shift_type_id: null
     }
   })
 
@@ -65,11 +65,11 @@ export function EmployeeDialog({ employee, open, onOpenChange }: EmployeeDialogP
   useEffect(() => {
     if (open && employee) {
       form.reset({
-        firstName: employee.firstName,
-        lastName: employee.lastName,
-        email: employee.email,
-        role: employee.role,
-        status: employee.status
+        id: employee.id,
+        employee_role: employee.employee_role,
+        user_role: employee.user_role,
+        weekly_hours_scheduled: employee.weekly_hours_scheduled,
+        default_shift_type_id: employee.default_shift_type_id
       })
     } else if (!open) {
       form.reset()
@@ -81,19 +81,13 @@ export function EmployeeDialog({ employee, open, onOpenChange }: EmployeeDialogP
       setIsSubmitting(true)
 
       if (employee) {
-        await updateEmployee(employee.id, {
-          ...data,
-          fullName: `${data.firstName} ${data.lastName}`
-        })
+        await updateEmployee(employee.id, data)
         toast({
           title: 'Success',
           description: 'Employee updated successfully'
         })
       } else {
-        await createEmployee({
-          ...data,
-          fullName: `${data.firstName} ${data.lastName}`
-        })
+        await createEmployee(data)
         toast({
           title: 'Success',
           description: 'Employee created successfully'
@@ -119,56 +113,12 @@ export function EmployeeDialog({ employee, open, onOpenChange }: EmployeeDialogP
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="firstName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>First Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="lastName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Last Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
             <FormField
               control={form.control}
-              name="email"
+              name="employee_role"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Email</FormLabel>
-                  <FormControl>
-                    <Input type="email" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="role"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Role</FormLabel>
+                  <FormLabel>Employee Role</FormLabel>
                   <Select
                     onValueChange={field.onChange}
                     defaultValue={field.value}
@@ -179,7 +129,7 @@ export function EmployeeDialog({ employee, open, onOpenChange }: EmployeeDialogP
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {Object.values(EmployeeRole).map((role) => (
+                      {['Dispatcher', 'Shift Supervisor', 'Management'].map((role) => (
                         <SelectItem key={role} value={role}>
                           {role}
                         </SelectItem>
@@ -193,27 +143,71 @@ export function EmployeeDialog({ employee, open, onOpenChange }: EmployeeDialogP
 
             <FormField
               control={form.control}
-              name="status"
+              name="user_role"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Status</FormLabel>
+                  <FormLabel>User Role</FormLabel>
                   <Select
                     onValueChange={field.onChange}
                     defaultValue={field.value}
                   >
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select a status" />
+                        <SelectValue placeholder="Select a user role" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {Object.values(EmployeeStatus).map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {status}
+                      {['Employee', 'Manager', 'Admin'].map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {role}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="weekly_hours_scheduled"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Weekly Hours Scheduled</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      value={field.value ?? ''}
+                      onChange={e => {
+                        const value = e.target.value;
+                        field.onChange(value === '' ? null : Number(value));
+                      }}
+                      onBlur={field.onBlur}
+                      name={field.name}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="default_shift_type_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Default Shift Type ID</FormLabel>
+                  <FormControl>
+                    <Input
+                      value={field.value ?? ''}
+                      onChange={e => field.onChange(e.target.value || null)}
+                      onBlur={field.onBlur}
+                      name={field.name}
+                      ref={field.ref}
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

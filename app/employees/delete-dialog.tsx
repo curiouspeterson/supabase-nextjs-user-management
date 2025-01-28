@@ -15,7 +15,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { AppError } from '@/lib/types/error'
-import { Employee } from '@/services/employees/types'
+import type { Employee } from '@/types/employee'
 
 interface DeleteDialogProps {
   employee: Employee
@@ -60,7 +60,7 @@ export function DeleteDialog({ employee }: DeleteDialogProps) {
         <AlertDialogHeader>
           <AlertDialogTitle>Delete Employee</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete {employee.fullName}? This action cannot be undone.
+            Are you sure you want to delete employee {employee.id}? This action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

@@ -3,6 +3,7 @@
  */
 
 import { Database } from './supabase'
+import { ShiftDurationCategory } from '@/services/scheduler/types'
 
 export enum PatternStatus {
   ACTIVE = 'ACTIVE',
@@ -10,19 +11,12 @@ export enum PatternStatus {
   DRAFT = 'DRAFT'
 }
 
-export interface Shift {
-  startTime: string
-  endTime: string
-  duration: number
-  type: string
-}
-
 export type PatternShift = {
   start_time: string
   end_time: string
   shift_type_id: string
   duration_hours: number
-  duration_category: Database['public']['Enums']['duration_category_enum'] | null
+  duration_category: ShiftDurationCategory | null
 }
 
 export interface Pattern {

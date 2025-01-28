@@ -1,18 +1,82 @@
+import { Suspense } from 'react'
 import DispatchSchedule from '@/components/schedule/DispatchSchedule'
 import { Metadata } from 'next'
+import { createClient } from '@/utils/supabase/server'
+import { transformDatabaseShift } from '@/components/schedule/types'
+import type { DispatchScheduleData, ShiftAssignment } from '@/components/schedule/types'
 
 export const metadata: Metadata = {
   title: 'Dispatch Schedule | 911 Dispatch Management',
   description: 'Manage and view 24/7 dispatch schedules, shifts, and staffing levels',
 }
 
-const sampleData = {
-  date: new Date('2025-01-24').toISOString(),
-  requirements: [
+async function getScheduleData(date: string): Promise<DispatchScheduleData> {
+  const supabase = createClient()
+  
+  // Fetch shifts with assignments
+  const { data: schedules, error: schedulesError } = await supabase
+    .from('schedules')
+    .select(`
+      *,
+      shifts (*),
+      employees (
+        id,
+        profiles (
+          full_name
+        )
+      )
+    `)
+    .eq('date', date)
+
+  if (schedulesError) throw schedulesError
+
+  // Group assignments by shift
+  const shiftAssignments = new Map<string, ShiftAssignment[]>()
+  
+  schedules?.forEach(schedule => {
+    const shift = schedule.shifts
+    const employee = schedule.employees?.profiles
+    
+    if (!shift || !employee) return
+    
+    // Skip if no full name is available
+    if (!employee.full_name) return
+    
+    if (!shiftAssignments.has(shift.id)) {
+      shiftAssignments.set(shift.id, [])
+    }
+    
+    const assignments = shiftAssignments.get(shift.id)
+    if (assignments) {
+      assignments.push({
+        name: employee.full_name,
+        status: 'Regular',
+        startTime: shift.start_time,
+        endTime: shift.end_time
+      })
+    }
+  })
+
+  // Transform shifts
+  const displayShifts = schedules?.map(schedule => {
+    const shift = schedule.shifts
+    if (!shift) return null
+    
+    return transformDatabaseShift(
+      shift,
+      shiftAssignments.get(shift.id) || []
+    )
+  }).filter((shift): shift is NonNullable<typeof shift> => shift !== null) || []
+
+  // Get requirements
+  const requirements = [
     {
       period: 'Early Morning',
       required: 6,
-      assigned: 2,
+      assigned: displayShifts.reduce((count, shift) => 
+        count + (shift?.assignments.filter(a => 
+          a.startTime >= '05:00' && a.startTime < '09:00'
+        ).length || 0), 0),
       status: 'Not Met' as const,
       startHour: 5,
       endHour: 9,
@@ -45,67 +109,24 @@ const sampleData = {
       endHour: 28,
       color: '#f59e0b'
     },
-  ],
-  shifts: [
-    {
-      name: 'Day Shift Early',
-      time: '05:00 - 15:00',
-      supervisor: 'Michael Thompson',
-      assignments: [
-        { name: 'Sarah Johnson', status: 'Regular', startTime: '05:00', endTime: '15:00' },
-        { name: 'James Wilson', status: 'On-Call', startTime: '05:00', endTime: '15:00' },
-        { name: 'Emily Davis', status: 'Trade', startTime: '05:00', endTime: '15:00' },
-        { name: 'Robert Martinez', status: 'Flexed', startTime: '05:00', endTime: '15:00' },
-        { name: 'Lisa Anderson', status: 'Time off rqst pending', startTime: '05:00', endTime: '15:00' },
-        { name: 'David Taylor', status: 'Coverage if needed', startTime: '05:00', endTime: '15:00' },
-      ],
-    },
-    {
-      name: 'Day Shift',
-      time: '09:00 - 19:00',
-      supervisor: 'Jennifer Williams',
-      assignments: [
-        { name: 'Thomas Brown', status: 'OT Shift', startTime: '09:00', endTime: '19:00' },
-        { name: 'Maria Garcia', status: 'Regular', startTime: '09:00', endTime: '19:00' },
-        { name: 'William Lee', status: 'Reserve', startTime: '09:00', endTime: '19:00' },
-        { name: 'Patricia Moore', status: 'Open', startTime: '09:00', endTime: '19:00' },
-        { name: 'Christopher White', status: 'Shift Closed', startTime: '09:00', endTime: '19:00' },
-        { name: 'Jessica Rodriguez', status: 'Trade', startTime: '09:00', endTime: '19:00' },
-      ],
-    },
-    {
-      name: 'Swing Shift',
-      time: '15:00 - 03:00',
-      supervisor: 'Daniel Miller',
-      assignments: [
-        { name: 'Kevin Harris', status: 'Regular', startTime: '15:00', endTime: '03:00' },
-        { name: 'Michelle Clark', status: 'OT Shift', startTime: '15:00', endTime: '03:00' },
-        { name: 'Steven Wright', status: 'On-Call', startTime: '15:00', endTime: '03:00' },
-        { name: 'Amanda Turner', status: 'Flexed', startTime: '15:00', endTime: '03:00' },
-        { name: 'Brian Lewis', status: 'Coverage if needed', startTime: '15:00', endTime: '03:00' },
-        { name: 'Rachel King', status: 'Time off rqst pending', startTime: '15:00', endTime: '03:00' },
-      ],
-    },
-    {
-      name: 'Graveyard',
-      time: '17:00 - 05:00',
-      supervisor: 'Elizabeth Scott',
-      assignments: [
-        { name: 'John Martinez', status: 'Regular', startTime: '17:00', endTime: '05:00' },
-        { name: 'Sandra Adams', status: 'Reserve', startTime: '17:00', endTime: '05:00' },
-        { name: 'Richard Hall', status: 'Open', startTime: '17:00', endTime: '05:00' },
-        { name: 'Karen Young', status: 'Shift Closed', startTime: '17:00', endTime: '05:00' },
-        { name: 'Joseph Baker', status: 'Trade', startTime: '17:00', endTime: '05:00' },
-        { name: 'Laura Phillips', status: 'OT Shift', startTime: '17:00', endTime: '05:00' },
-      ],
-    },
   ]
+
+  return {
+    date,
+    shifts: displayShifts,
+    requirements
+  }
 }
 
-export default function SchedulePage() {
+export default async function SchedulePage() {
+  const date = new Date().toISOString().split('T')[0]
+  const scheduleData = await getScheduleData(date)
+  
   return (
     <div className="h-[calc(100vh-3.5rem)]">
-      <DispatchSchedule {...sampleData} />
+      <Suspense fallback={<div>Loading schedule...</div>}>
+        <DispatchSchedule {...scheduleData} />
+      </Suspense>
     </div>
   )
 } 

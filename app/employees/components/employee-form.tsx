@@ -140,8 +140,14 @@ export function EmployeeForm() {
               <FormControl>
                 <Input
                   type="number"
-                  {...field}
-                  onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
+                  value={field.value ?? ''}
+                  onChange={e => {
+                    const value = e.target.value;
+                    field.onChange(value === '' ? null : Number(value));
+                  }}
+                  onBlur={field.onBlur}
+                  name={field.name}
+                  ref={field.ref}
                 />
               </FormControl>
               <FormMessage />

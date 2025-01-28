@@ -6,6 +6,7 @@ import type { Shift, Schedule, CoverageReport } from './types';
 import { createClient } from '@/utils/supabase/server';
 import { logger } from '@/lib/logger';
 import { AppError, DatabaseError } from '@/lib/errors';
+import { ShiftDurationCategory } from './types';
 
 export interface ShiftSegment {
   date: string;
@@ -111,7 +112,13 @@ export class MidnightShiftHandler {
 
           if (shiftError) throw new DatabaseError('Failed to fetch shift');
 
-          const segments = await this.splitShiftAcrossDays(shift, schedule.date);
+          // Transform shift to match the Shift interface
+          const transformedShift: Shift = {
+            ...shift,
+            duration_category: shift.duration_category as ShiftDurationCategory
+          };
+
+          const segments = await this.splitShiftAcrossDays(transformedShift, schedule.date);
 
           for (const segment of segments) {
             if (!coverage.has(segment.date)) {
@@ -122,7 +129,7 @@ export class MidnightShiftHandler {
             }
 
             const report = coverage.get(segment.date)!;
-            const periodKey = `${shift.start_time}-${shift.end_time}`;
+            const periodKey = `${transformedShift.start_time}-${transformedShift.end_time}`;
 
             if (!report.periods[periodKey]) {
               report.periods[periodKey] = {

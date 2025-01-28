@@ -4,36 +4,26 @@ import { useState } from 'react'
 import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import type { 
+  DispatchScheduleData, 
+  DisplayShift, 
+  ShiftAssignment,
+  ShiftStatus,
+  RequirementPeriod
+} from './types'
 
-interface Assignment {
-  name: string
-  status?: string
-  startTime: string
-  endTime: string
-}
-
-interface Shift {
-  name: string
-  time: string
-  supervisor: string
-  assignments: Assignment[]
-}
-
-interface Requirement {
-  period: string
-  required: number
-  assigned: number
-  status: 'Met' | 'Not Met'
-  startHour: number
-  endHour: number
-  color: string
-}
-
-interface DispatchScheduleProps {
-  date: string
-  shifts: Shift[]
-  requirements: Requirement[]
-}
+const statusColorMap: Record<ShiftStatus, string> = {
+  'Regular': 'bg-white',
+  'Shift Closed': 'bg-blue-200',
+  'On-Call': 'bg-red-200',
+  'Trade': 'bg-purple-200',
+  'Flexed': 'bg-orange-200',
+  'Time off rqst pending': 'bg-green-200',
+  'OT Shift': 'bg-pink-200',
+  'Coverage if needed': 'bg-cyan-200',
+  'Reserve': 'bg-gray-100',
+  'Open': 'bg-yellow-200'
+} as const
 
 function calculateGridPosition(time: string): number {
   const [hours, minutes] = time.split(':').map(Number)
@@ -49,31 +39,11 @@ function calculateWidth(start: string, end: string): number {
   return endPos - startPos
 }
 
-export default function DispatchSchedule({ date, shifts, requirements }: DispatchScheduleProps) {
-  const legendItems = [
-    { label: 'Shift Closed', color: 'bg-blue-200' },
-    { label: 'On-Call', color: 'bg-red-200' },
-    { label: 'Trade', color: 'bg-purple-200' },
-    { label: 'Flexed', color: 'bg-orange-200' },
-    { label: 'Time off rqst pending', color: 'bg-green-200' },
-    { label: 'OT Shift', color: 'bg-pink-200' },
-    { label: 'Coverage if needed', color: 'bg-cyan-200' },
-    { label: 'Reserve', color: 'bg-gray-100' },
-    { label: 'Open', color: 'bg-yellow-200' },
-  ]
-
-  const statusColorMap: Record<string, string> = {
-    'Shift Closed': 'bg-blue-200',
-    'On-Call': 'bg-red-200',
-    'Trade': 'bg-purple-200',
-    'Flexed': 'bg-orange-200',
-    'Time off rqst pending': 'bg-green-200',
-    'OT Shift': 'bg-pink-200',
-    'Coverage if needed': 'bg-cyan-200',
-    'Reserve': 'bg-gray-100',
-    'Open': 'bg-yellow-200',
-    'Regular': 'bg-white',
-  }
+export default function DispatchSchedule({ date, shifts, requirements }: DispatchScheduleData) {
+  const legendItems = Object.entries(statusColorMap).map(([label, color]) => ({
+    label,
+    color
+  }))
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -208,11 +178,10 @@ export default function DispatchSchedule({ date, shifts, requirements }: Dispatc
                   </div>
 
                   {/* Assignment Bars */}
-                  {shift.assignments.map((assignment: Assignment, i: number) => {
+                  {shift.assignments.map((assignment: ShiftAssignment, i: number) => {
                     const startPos = calculateGridPosition(assignment.startTime)
                     const width = calculateWidth(assignment.startTime, assignment.endTime)
-                    const status = assignment.status || 'Regular'
-                    const bgColor = statusColorMap[status] || 'bg-white'
+                    const bgColor = statusColorMap[assignment.status]
                     
                     return (
                       <div
@@ -227,14 +196,12 @@ export default function DispatchSchedule({ date, shifts, requirements }: Dispatc
                         <span className="text-gray-900">
                           {assignment.name}
                         </span>
-                        {assignment.status && (
-                          <Badge 
-                            variant={status === 'Regular' ? 'secondary' : 'outline'} 
-                            className="ml-2 text-[10px] text-gray-900"
-                          >
-                            {status}
-                          </Badge>
-                        )}
+                        <Badge 
+                          variant={assignment.status === 'Regular' ? 'secondary' : 'outline'} 
+                          className="ml-2 text-[10px] text-gray-900"
+                        >
+                          {assignment.status}
+                        </Badge>
                       </div>
                     )
                   })}

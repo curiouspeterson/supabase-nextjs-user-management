@@ -10,13 +10,13 @@ import { useEffect, useState } from 'react'
 const mapLegacyRole = (role: string): EmployeeRole => {
   switch (role) {
     case 'Dispatcher':
-      return EmployeeRole.STAFF
-    case 'Manager':
-      return EmployeeRole.MANAGER
+      return EmployeeRole.DISPATCHER
+    case 'Management':
+      return EmployeeRole.MANAGEMENT
     case 'Shift Supervisor':
-      return EmployeeRole.SUPERVISOR
+      return EmployeeRole.SHIFT_SUPERVISOR
     default:
-      return EmployeeRole.STAFF
+      return EmployeeRole.DISPATCHER
   }
 }
 
