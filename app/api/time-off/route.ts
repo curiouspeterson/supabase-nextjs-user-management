@@ -25,6 +25,7 @@ const timeOffRequestSchema = z.object({
   ),
   type: z.enum(['Vacation', 'Personal', 'Sick', 'Training']),
   notes: z.string().min(1).max(500),
+  submitted_at: z.string().datetime().optional(),
 })
 
 const updateRequestSchema = z.object({

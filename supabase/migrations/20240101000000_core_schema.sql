@@ -2,15 +2,22 @@
 -- This migration sets up the core schema including all base types, tables, and policies
 BEGIN;
 
------- ENUMS ------
--- User role enum
+------ Basic Types and Enums ------
+-- User and Role Enums
 CREATE TYPE public.user_role AS ENUM (
     'ADMIN',
     'MANAGER',
     'EMPLOYEE'
 );
 
--- Profile status enum
+CREATE TYPE public.employee_role AS ENUM (
+    'STAFF',
+    'SUPERVISOR',
+    'MANAGER',
+    'ADMIN'
+);
+
+-- Profile and System Status Enums
 CREATE TYPE public.profile_status AS ENUM (
     'ACTIVE',
     'INACTIVE',
@@ -18,24 +25,6 @@ CREATE TYPE public.profile_status AS ENUM (
     'PENDING'
 );
 
--- Alert severity enum
-CREATE TYPE public.alert_severity AS ENUM (
-    'LOW',
-    'MEDIUM',
-    'HIGH',
-    'CRITICAL'
-);
-
--- Alert category enum
-CREATE TYPE public.alert_category AS ENUM (
-    'SCHEDULE',
-    'COVERAGE',
-    'EMPLOYEE',
-    'SYSTEM',
-    'PERFORMANCE'
-);
-
--- System status enum
 CREATE TYPE public.system_status AS ENUM (
     'HEALTHY',
     'DEGRADED',
@@ -43,7 +32,15 @@ CREATE TYPE public.system_status AS ENUM (
     'MAINTENANCE'
 );
 
--- Time off type enum
+-- Schedule Related Enums
+CREATE TYPE public.schedule_status AS ENUM (
+    'DRAFT',
+    'PENDING',
+    'APPROVED',
+    'PUBLISHED',
+    'CANCELLED'
+);
+
 CREATE TYPE public.time_off_type AS ENUM (
     'VACATION',
     'SICK',
@@ -53,7 +50,48 @@ CREATE TYPE public.time_off_type AS ENUM (
     'UNPAID'
 );
 
------- FUNCTIONS ------
+-- Security and Auth Enums
+CREATE TYPE public.password_policy AS ENUM (
+    'BASIC',
+    'STANDARD',
+    'STRONG',
+    'CUSTOM'
+);
+
+CREATE TYPE public.auth_error_severity AS ENUM (
+    'LOW',
+    'MEDIUM',
+    'HIGH',
+    'CRITICAL'
+);
+
+CREATE TYPE public.auth_error_type AS ENUM (
+    'USER_HOOK',
+    'AUTH_STATE',
+    'SESSION',
+    'TOKEN',
+    'NETWORK',
+    'RATE_LIMIT',
+    'UNKNOWN'
+);
+
+-- Alert and Monitoring Enums
+CREATE TYPE public.alert_severity AS ENUM (
+    'LOW',
+    'MEDIUM',
+    'HIGH',
+    'CRITICAL'
+);
+
+CREATE TYPE public.alert_category AS ENUM (
+    'SCHEDULE',
+    'COVERAGE',
+    'EMPLOYEE',
+    'SYSTEM',
+    'PERFORMANCE'
+);
+
+------ Core Functions ------
 -- Updated timestamp trigger function
 CREATE OR REPLACE FUNCTION public.update_updated_at()
 RETURNS TRIGGER AS $$
@@ -63,7 +101,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
------- CORE TABLES ------
+------ Core Tables ------
 -- Organizations table
 CREATE TABLE public.organizations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -111,14 +149,14 @@ CREATE TABLE public.organization_users (
     UNIQUE(organization_id, user_id)
 );
 
------- INDEXES ------
+------ Indexes ------
 CREATE INDEX idx_organization_users_user ON public.organization_users(user_id);
 CREATE INDEX idx_organization_users_org ON public.organization_users(organization_id);
 CREATE INDEX idx_organizations_slug ON public.organizations(slug);
 CREATE INDEX idx_profiles_role ON public.profiles(role);
 CREATE INDEX idx_profiles_status ON public.profiles(status);
 
------- TRIGGERS ------
+------ Triggers ------
 -- Organizations updated_at trigger
 CREATE TRIGGER update_organizations_updated_at
     BEFORE UPDATE ON public.organizations
@@ -137,7 +175,7 @@ CREATE TRIGGER update_organization_users_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
 
------- RLS POLICIES ------
+------ RLS Policies ------
 -- Enable RLS on all tables
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -195,7 +233,7 @@ CREATE POLICY "Users can view their organization memberships"
         )
     );
 
------- FUNCTIONS ------
+------ Functions ------
 -- Get full user profile function
 CREATE OR REPLACE FUNCTION public.get_user_profile(p_user_id UUID)
 RETURNS TABLE (
@@ -234,7 +272,7 @@ BEGIN
 END;
 $$;
 
------- GRANTS ------
+------ Grants ------
 -- Grant appropriate permissions
 GRANT SELECT ON public.organizations TO authenticated;
 GRANT SELECT ON public.profiles TO authenticated;

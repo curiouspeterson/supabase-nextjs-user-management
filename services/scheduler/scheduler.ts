@@ -918,4 +918,4 @@ export class Scheduler {
     const nextStart = new Date(nextShift.start_time);
     return (nextStart.getTime() - previousEnd.getTime()) / (1000 * 60 * 60);
   }
-}
+} 

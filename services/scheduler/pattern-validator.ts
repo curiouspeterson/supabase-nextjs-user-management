@@ -1,11 +1,10 @@
 'use client';
 
-import { differenceInDays, isSameDay } from 'date-fns';
+import { differenceInDays, isSameDay, differenceInHours, parseISO } from 'date-fns';
 import type { Schedule, ShiftPattern, Employee, Shift } from './types';
 import { createClient } from '@/utils/supabase/server';
 import { logger } from '@/lib/logger';
 import { AppError, DatabaseError } from '@/lib/errors';
-import { differenceInHours, parseISO } from 'date-fns';
 import { z } from 'zod';
 import type { Json } from '@/types/supabase';
 
