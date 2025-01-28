@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Schedule, Shift } from '@/types/schedule'
+import type { Schedule } from '@/types/schedule'
+import type { Shift } from '@/services/scheduler/types'
 
 interface ScheduleState {
   schedules: Schedule[]

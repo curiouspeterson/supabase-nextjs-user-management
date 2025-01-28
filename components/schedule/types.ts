@@ -1,4 +1,4 @@
-import { Employee, Shift, Schedule, CoverageReport } from '@/services/scheduler/types';
+import { Employee, Shift, Schedule, CoverageReport, ShiftDurationCategory } from '@/services/scheduler/types';
 import type { Shift as DatabaseShift } from '@/services/scheduler/types'
 
 export interface ScheduleViewProps {
@@ -88,6 +88,15 @@ export interface DisplayShift {
   time: string
   supervisor: string
   assignments: ShiftAssignment[]
+  shift_type_id: string
+  start_time: string
+  end_time: string
+  duration_hours: number
+  duration_category: ShiftDurationCategory | null
+  created_at: string
+  updated_at: string
+  department_id?: string
+  is_active?: boolean
 }
 
 export interface RequirementPeriod {
@@ -124,11 +133,28 @@ export function transformDatabaseShift(
   dbShift: DatabaseShift,
   assignments: ShiftAssignment[] = []
 ): DisplayShift {
+  // Ensure duration_category is one of the valid ShiftDurationCategory values
+  let duration_category: ShiftDurationCategory | null = null;
+  if (dbShift.duration_category === '4 hours' || 
+      dbShift.duration_category === '10 hours' || 
+      dbShift.duration_category === '12 hours') {
+    duration_category = dbShift.duration_category;
+  }
+
   return {
     id: dbShift.id,
-    name: `${dbShift.duration_category} Shift`,
+    name: duration_category ? `${duration_category} Shift` : 'Shift',
     time: `${dbShift.start_time} - ${dbShift.end_time}`,
     supervisor: 'TBD', // This should come from a join with employees table
-    assignments
+    assignments,
+    shift_type_id: dbShift.shift_type_id,
+    start_time: dbShift.start_time,
+    end_time: dbShift.end_time,
+    duration_hours: dbShift.duration_hours,
+    duration_category,
+    created_at: dbShift.created_at,
+    updated_at: dbShift.updated_at,
+    department_id: undefined,
+    is_active: true
   }
 } 

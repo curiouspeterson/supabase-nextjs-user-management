@@ -509,12 +509,17 @@ export class Scheduler {
           }
 
           try {
+            // Helper function to validate duration category
+            function validateDurationCategory(category: unknown): ShiftDurationCategory | null {
+              if (category === '4 hours' || category === '10 hours' || category === '12 hours') {
+                return category;
+              }
+              return null;
+            }
+
             // Insert shifts first
-            const shifts = schedules.reduce((acc: Shift[], schedule) => {
-              const shift = transformedPatterns
-                .flatMap(p => p.pattern_shifts || [])
-                .find(s => s?.shift_type_id === schedule.shift_id);
-              
+            const shifts = schedules.reduce((acc, schedule) => {
+              const shift = this.shifts.find(s => s.id === schedule.shift_id);
               if (shift) {
                 acc.push({
                   id: schedule.shift_id,
@@ -522,13 +527,22 @@ export class Scheduler {
                   start_time: shift.start_time,
                   end_time: shift.end_time,
                   duration_hours: shift.duration_hours,
-                  duration_category: shift.duration_category as ShiftDurationCategory,
+                  duration_category: validateDurationCategory(shift.duration_category),
                   created_at: new Date().toISOString(),
                   updated_at: new Date().toISOString()
                 });
               }
               return acc;
-            }, []);
+            }, [] as Array<{
+              id: string;
+              shift_type_id: string;
+              start_time: string;
+              end_time: string;
+              duration_hours: number;
+              duration_category: ShiftDurationCategory | null;
+              created_at: string;
+              updated_at: string;
+            }>);
 
             const { error: shiftsError } = await this.supabase
               .from('shifts')

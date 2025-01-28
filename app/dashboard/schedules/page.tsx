@@ -2,7 +2,7 @@ import { createClient } from '@/utils/supabase/server'
 import WeeklySchedule from '@/components/schedule/WeeklySchedule'
 import { getWeekStart } from '@/utils/schedule/helpers'
 import { addDays, format } from 'date-fns'
-import { EmployeeRole, ShiftDurationCategory, ScheduleStatus } from '@/services/scheduler/types'
+import { EmployeeRole, ShiftDurationUtils, ScheduleStatus } from '@/services/scheduler/types'
 import type { Employee, Shift, CoverageReport } from '@/services/scheduler/types'
 import type { Database } from '@/types/supabase'
 
@@ -87,7 +87,7 @@ export default async function SchedulesPage() {
 
   // Transform shifts data
   const shifts: Shift[] = shiftsData?.map(shift => {
-    const duration_category = ShiftDurationCategory.fromHours(shift.duration_hours);
+    const duration_category = ShiftDurationUtils.fromHours(shift.duration_hours);
     
     return {
       ...shift,

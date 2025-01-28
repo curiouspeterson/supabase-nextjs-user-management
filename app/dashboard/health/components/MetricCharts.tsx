@@ -1,8 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { format, subDays } from 'date-fns';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -18,9 +16,7 @@ import {
 } from 'chart.js';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 import { AlertCircle } from 'lucide-react';
-import { useHealthMonitor } from '@/hooks/use-health-monitor';
 import { fetchMetricsHistory } from '@/services/health/index';
 import type { HealthMetrics } from '@/services/health/types';
 

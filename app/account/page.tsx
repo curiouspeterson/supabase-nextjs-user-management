@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { AccountForm } from '@/components/account-form'
+import AccountForm from './account-form'
 
 export default async function Account() {
   const cookieStore = cookies()

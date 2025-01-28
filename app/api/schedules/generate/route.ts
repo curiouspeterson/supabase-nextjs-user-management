@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
-import { ApiError, DatabaseError, AuthError, ValidationError } from '@/lib/errors'
+import { DatabaseError, AuthError, ValidationError } from '@/lib/errors'
 import { ScheduleGenerator } from '@/services/scheduler/ScheduleGenerator'
 import type { Database } from '@/types/supabase'
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { addDays, differenceInDays, isSameDay } from 'date-fns';
+import { differenceInDays, isSameDay } from 'date-fns';
 import type { Schedule, ShiftPattern, Employee, Shift } from './types';
 import { createClient } from '@/utils/supabase/server';
 import { logger } from '@/lib/logger';

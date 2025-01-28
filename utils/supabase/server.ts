@@ -53,7 +53,7 @@ const handleCookieError = async (
   }
 }
 
-// For use in app directory
+// For use with App Router
 export function createClient() {
   const cookieStore = cookies()
 
@@ -65,18 +65,32 @@ export function createClient() {
         get(name: string) {
           return cookieStore.get(name)?.value
         },
-        set(name: string, value: string, options: any) {
+        set(name: string, value: string, options: CookieOptions) {
           try {
-            cookieStore.set({ name, value, ...options })
+            const cookieOptions = mergeCookieOptions(options)
+            cookieStore.set({ name, value, ...cookieOptions })
           } catch (error) {
-            // Handle cookie error
+            console.error('Failed to set cookie:', error)
+            throw new AuthenticationError(
+              AuthErrorType.COOKIE_SET,
+              'Failed to set authentication cookie',
+              'SET_FAILED',
+              { name, error }
+            )
           }
         },
-        remove(name: string, options: any) {
+        remove(name: string, options: CookieOptions) {
           try {
-            cookieStore.set({ name, value: '', ...options })
+            const cookieOptions = mergeCookieOptions(options)
+            cookieStore.set({ name, value: '', ...cookieOptions })
           } catch (error) {
-            // Handle cookie error
+            console.error('Failed to remove cookie:', error)
+            throw new AuthenticationError(
+              AuthErrorType.COOKIE_REMOVE,
+              'Failed to remove authentication cookie',
+              'REMOVE_FAILED',
+              { name, error }
+            )
           }
         },
       },

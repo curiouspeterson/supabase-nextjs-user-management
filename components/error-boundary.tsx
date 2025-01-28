@@ -9,6 +9,8 @@ import * as React from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { errorHandler } from '@/lib/errors'
+import { ErrorAnalyticsService } from '@/lib/error-analytics'
 
 type FallbackProps = {
   error: Error
@@ -25,7 +27,12 @@ interface ErrorBoundaryProps {
   children: React.ReactNode
   /** Fallback component to show when an error occurs */
   fallback?: React.ReactNode
+  /** Custom fallback component */
   FallbackComponent?: FallbackComponent
+  /** Component name for error tracking */
+  component?: string
+  /** Additional context for error tracking */
+  errorContext?: Record<string, unknown>
 }
 
 /**
@@ -51,7 +58,8 @@ interface ErrorBoundaryState {
  * @example
  * ```tsx
  * <ErrorBoundary
- *   fallback={ErrorFallbackComponent}
+ *   component="UserDashboard"
+ *   errorContext={{ userId: 'abc123' }}
  * >
  *   <YourComponent />
  * </ErrorBoundary>
@@ -61,9 +69,12 @@ export class ErrorBoundary extends React.Component<
   ErrorBoundaryProps,
   ErrorBoundaryState
 > {
+  private analyticsService: ErrorAnalyticsService
+
   constructor(props: ErrorBoundaryProps) {
     super(props)
     this.state = { hasError: false, error: null }
+    this.analyticsService = new ErrorAnalyticsService(props.component || 'error-boundary')
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
@@ -71,8 +82,15 @@ export class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Log error to monitoring service
-    console.error('Error caught by error boundary:', error, errorInfo)
+    // Handle and track the error
+    errorHandler.handleError(error, this.props.component)
+    
+    // Track error analytics
+    this.analyticsService.trackError(error, {
+      ...this.props.errorContext,
+      componentStack: errorInfo.componentStack,
+      component: this.props.component
+    }).catch(console.error) // Handle tracking errors silently
   }
 
   resetErrorBoundary = () => {
@@ -94,14 +112,14 @@ export class ErrorBoundary extends React.Component<
         return this.props.fallback
       }
 
+      const errorMessage = errorHandler.formatErrorMessage(this.state.error)
+
       return (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Something went wrong</AlertTitle>
           <AlertDescription>
-            <p className="mb-4">
-              {this.state.error?.message || 'An unexpected error occurred'}
-            </p>
+            <p className="mb-4">{errorMessage}</p>
             <Button
               variant="outline"
               onClick={() => {

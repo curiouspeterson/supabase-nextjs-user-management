@@ -4,6 +4,10 @@ import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { AlertTriangle } from 'lucide-react';
+import { errorHandler } from '@/lib/errors';
+import { ErrorAnalyticsService } from '@/lib/error-analytics';
+
+const analyticsService = new ErrorAnalyticsService('next-error-page');
 
 export default function Error({
   error,
@@ -13,9 +17,17 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Log the error to an error reporting service
-    console.error(error);
+    // Handle and track the error
+    errorHandler.handleError(error, 'next-error-page');
+    
+    // Track error analytics
+    analyticsService.trackError(error, {
+      digest: error.digest,
+      page: typeof window !== 'undefined' ? window.location.pathname : undefined
+    }).catch(console.error);
   }, [error]);
+
+  const errorMessage = errorHandler.formatErrorMessage(error);
 
   return (
     <div className="flex items-center justify-center min-h-[400px] p-4">
@@ -26,7 +38,7 @@ export default function Error({
         </div>
         
         <p className="text-sm text-gray-600">
-          {error.message || 'An unexpected error occurred. Please try again.'}
+          {errorMessage}
         </p>
 
         <div className="flex justify-end space-x-2">
@@ -37,7 +49,11 @@ export default function Error({
             Reload Page
           </Button>
           <Button
-            onClick={() => reset()}
+            onClick={() => {
+              // Clear any error state before retrying
+              errorHandler.handleError(error, 'next-error-page-reset');
+              reset();
+            }}
           >
             Try Again
           </Button>

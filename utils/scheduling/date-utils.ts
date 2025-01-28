@@ -2,7 +2,7 @@
  * Utility functions for date and time operations in the scheduling system
  */
 
-import { format, getISOWeek, parseISO, isValid, addDays } from 'date-fns';
+import { getISOWeek, parseISO, isValid, addDays } from 'date-fns';
 import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
 
 export class TimeFormatError extends Error {

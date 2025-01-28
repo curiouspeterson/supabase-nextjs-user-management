@@ -5,24 +5,26 @@ import { formatInTimeZone } from 'date-fns-tz';
 
 export type ShiftDurationCategory = '4 hours' | '10 hours' | '12 hours';
 
-export const ShiftDurationCategory = {
-  FOUR_HOURS: '4 hours' as const,
-  TEN_HOURS: '10 hours' as const,
-  TWELVE_HOURS: '12 hours' as const,
-  
+export const ShiftDurationCategoryEnum = {
+  FOUR_HOURS: '4 hours',
+  TEN_HOURS: '10 hours',
+  TWELVE_HOURS: '12 hours'
+} as const;
+
+export const ShiftDurationUtils = {
   fromHours(hours: number): ShiftDurationCategory {
-    if (hours <= 4) return this.FOUR_HOURS;
-    if (hours <= 10) return this.TEN_HOURS;
-    return this.TWELVE_HOURS;
+    if (hours <= 4) return ShiftDurationCategoryEnum.FOUR_HOURS;
+    if (hours <= 10) return ShiftDurationCategoryEnum.TEN_HOURS;
+    return ShiftDurationCategoryEnum.TWELVE_HOURS;
   },
   
   toHours(category: ShiftDurationCategory): number {
     switch (category) {
-      case this.FOUR_HOURS:
+      case ShiftDurationCategoryEnum.FOUR_HOURS:
         return 4;
-      case this.TEN_HOURS:
+      case ShiftDurationCategoryEnum.TEN_HOURS:
         return 10;
-      case this.TWELVE_HOURS:
+      case ShiftDurationCategoryEnum.TWELVE_HOURS:
         return 12;
       default:
         throw new Error(`Invalid duration category: ${category}`);
@@ -30,9 +32,9 @@ export const ShiftDurationCategory = {
   },
   
   values(): ShiftDurationCategory[] {
-    return [this.FOUR_HOURS, this.TEN_HOURS, this.TWELVE_HOURS];
+    return Object.values(ShiftDurationCategoryEnum);
   }
-} as const;
+};
 
 export enum ScheduleStatus {
   DRAFT = 'Draft',
@@ -78,6 +80,15 @@ export enum ScheduleAction {
   DELETE = 'DELETE'
 }
 
+export interface ShiftType {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DatabaseShift {
   id: string;
   shift_type_id: string;
@@ -87,31 +98,6 @@ export interface DatabaseShift {
   duration_category: ShiftDurationCategory | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface Shift {
-  id: string;
-  shift_type_id: string;
-  start_time: string;
-  end_time: string;
-  duration_hours: number;
-  duration_category: ShiftDurationCategory | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Employee {
-  id: string;
-  user_id: string | null;
-  employee_role: EmployeeRole;
-  weekly_hours_scheduled: number;
-  default_shift_type_id: string | null;
-  created_at: string;
-  updated_at: string;
-  full_name?: string;
-  avatar_url?: string | null;
-  username?: string | null;
-  user_role: 'Employee' | 'Admin';
 }
 
 export interface ShiftPattern {
@@ -145,7 +131,7 @@ export interface Pattern {
   days_off: number;
   shift_duration: number;
   shifts: PatternShift[];
-  pattern_shifts?: PatternShift[];
+  pattern_shifts: PatternShift[];
   created_at: string;
   updated_at: string;
 }
@@ -156,16 +142,6 @@ export interface EmployeePattern {
   pattern_id: string;
   start_date: string;
   end_date: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Schedule {
-  id: string;
-  employee_id: string;
-  shift_id: string;
-  date: string;
-  status: ScheduleStatus;
   created_at: string;
   updated_at: string;
 }
@@ -250,7 +226,7 @@ export interface ScheduleGenerationOptions {
   startDate: Date;
   endDate: Date;
   employees: Employee[];
-  shifts: Shift[];
+  shifts: DatabaseShift[];
   patterns: ShiftPattern[];
   preferences?: ShiftPreference[];
 }
@@ -303,14 +279,15 @@ export interface GenerationMetrics {
 
 export const ShiftSchema = z.object({
   id: z.string().uuid(),
+  shift_type_id: z.string().uuid(),
   start_time: z.string().datetime(),
   end_time: z.string().datetime(),
   duration_hours: z.number().positive().max(24),
-  duration_category: z.nativeEnum(ShiftDurationCategory),
-  department_id: z.string().uuid(),
+  duration_category: z.enum(['4 hours', '10 hours', '12 hours']).nullable(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
-  is_active: z.boolean()
+  department_id: z.string().uuid().optional(),
+  is_active: z.boolean().optional()
 }).refine(
   data => {
     const start = parseISO(data.start_time);
@@ -339,20 +316,23 @@ export const ScheduleSchema = z.object({
   status: z.nativeEnum(ScheduleStatus),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
-  department_id: z.string().uuid(),
+  department_id: z.string().uuid().optional(),
   notes: z.string().optional(),
-  is_active: z.boolean()
+  is_active: z.boolean().optional()
 });
 
 export const EmployeeSchema = z.object({
   id: z.string().uuid(),
+  user_id: z.string().uuid().nullable(),
   employee_role: z.nativeEnum(EmployeeRole),
-  department_id: z.string().uuid(),
   weekly_hours_scheduled: z.number().min(0).max(168),
-  max_consecutive_days: z.number().min(1).max(7),
+  default_shift_type_id: z.string().uuid().nullable(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
-  is_active: z.boolean()
+  full_name: z.string().optional(),
+  avatar_url: z.string().nullable().optional(),
+  username: z.string().nullable().optional(),
+  user_role: z.enum(['Employee', 'Admin'])
 });
 
 export const DepartmentSchema = z.object({
@@ -406,18 +386,15 @@ export const isValidStatusTransition = (
   newStatus: ScheduleStatus
 ): boolean => {
   const validTransitions: Record<ScheduleStatus, ScheduleStatus[]> = {
-    [ScheduleStatus.DRAFT]: [ScheduleStatus.PENDING, ScheduleStatus.CANCELLED],
-    [ScheduleStatus.PENDING]: [ScheduleStatus.APPROVED, ScheduleStatus.CANCELLED],
-    [ScheduleStatus.APPROVED]: [ScheduleStatus.PUBLISHED, ScheduleStatus.CANCELLED],
-    [ScheduleStatus.PUBLISHED]: [ScheduleStatus.CANCELLED],
-    [ScheduleStatus.CANCELLED]: []
+    [ScheduleStatus.DRAFT]: [ScheduleStatus.PUBLISHED],
+    [ScheduleStatus.PUBLISHED]: []
   };
 
   return validTransitions[currentStatus].includes(newStatus);
 };
 
 export function isShiftDurationCategory(value: unknown): value is ShiftDurationCategory {
-  return typeof value === 'string' && ShiftDurationCategory.values().includes(value as ShiftDurationCategory);
+  return typeof value === 'string' && ShiftDurationUtils.values().includes(value as ShiftDurationCategory);
 }
 
 export const calculateDurationCategory = (hours: number): ShiftDurationCategory => {

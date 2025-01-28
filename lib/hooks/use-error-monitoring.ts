@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useErrorHandler } from '@/lib/hooks/use-error-handler'
 import { useNetworkError } from '@/lib/hooks/use-network-error'
 import { rateLimiter } from '@/lib/rate-limiter'

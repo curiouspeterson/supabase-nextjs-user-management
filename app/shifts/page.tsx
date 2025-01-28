@@ -21,7 +21,8 @@ import { logger } from '@/lib/logger'
 import { AppError, DatabaseError } from '@/lib/errors'
 import type { 
   Shift as DatabaseShift, 
-  ShiftType as DatabaseShiftType 
+  ShiftType as DatabaseShiftType,
+  ShiftDurationCategory
 } from '@/services/scheduler/types'
 
 type DurationCategory = "4 hours" | "10 hours" | "12 hours";
@@ -36,7 +37,7 @@ interface ShiftDisplay {
   start_time: string
   end_time: string
   duration_hours: number
-  duration_category: DurationCategory | null
+  duration_category: ShiftDurationCategory | null
   shift_type_id: string
 }
 
@@ -52,14 +53,24 @@ function transformShiftType(dbType: DatabaseShiftTypeWithRelations): ShiftTypeDi
     description: dbType.description,
     created_at: dbType.created_at,
     updated_at: dbType.updated_at,
-    shifts: dbType.shifts.map(shift => ({
-      id: shift.id,
-      start_time: shift.start_time,
-      end_time: shift.end_time,
-      duration_hours: shift.duration_hours,
-      duration_category: shift.duration_category,
-      shift_type_id: shift.shift_type_id
-    }))
+    shifts: dbType.shifts.map(shift => {
+      // Ensure duration_category is one of the valid ShiftDurationCategory values
+      let duration_category: ShiftDurationCategory | null = null;
+      if (shift.duration_category === '4 hours' || 
+          shift.duration_category === '10 hours' || 
+          shift.duration_category === '12 hours') {
+        duration_category = shift.duration_category;
+      }
+
+      return {
+        id: shift.id,
+        start_time: shift.start_time,
+        end_time: shift.end_time,
+        duration_hours: shift.duration_hours,
+        duration_category,
+        shift_type_id: shift.shift_type_id
+      };
+    })
   }
 }
 

@@ -1,5 +1,7 @@
 /**
- * Error handling types and interfaces
+ * Error handling types and interfaces for the application's error management system.
+ * This module provides a comprehensive set of types for error tracking, monitoring,
+ * and internationalization.
  * @module types/error
  */
 
@@ -62,26 +64,33 @@ export enum ErrorCategory {
 }
 
 /**
- * Interface for error metadata
+ * Interface for error metadata that provides context about an error occurrence.
+ * This includes support for internationalization through the i18n property.
  */
 export interface ErrorMetadata {
-  /** Error code */
+  /** Unique error code for identification */
   code?: string;
-  /** Error context */
+  /** Context in which the error occurred */
   context?: string;
-  /** User ID if applicable */
+  /** ID of the user who encountered the error */
   userId?: string;
-  /** i18n data */
+  /** 
+   * Internationalization data for error messages.
+   * Used by getLocalizedMessage to provide translated error messages.
+   */
   i18n?: {
+    /** Translation key for looking up the localized message */
     key: string;
+    /** Values to interpolate into the translated message */
     values?: Record<string, string | number>;
   };
-  /** Additional data */
+  /** Additional contextual data */
   [key: string]: unknown;
 }
 
 /**
- * Interface for error metrics
+ * Interface for tracking error metrics and analytics.
+ * Used by the error monitoring system to track error patterns and recovery effectiveness.
  */
 export interface ErrorMetrics {
   /** Number of occurrences */
@@ -134,7 +143,8 @@ export interface ErrorMetrics {
 }
 
 /**
- * Interface for error trends
+ * Interface for analyzing error trends over time.
+ * Used by the analytics system to track error patterns and identify recurring issues.
  */
 export interface ErrorTrend {
   /** Trend timestamp */
@@ -150,14 +160,15 @@ export interface ErrorTrend {
 }
 
 /**
- * Interface for i18n error messages
+ * Interface for internationalized error messages.
+ * Used by error classes to support multiple languages through the translation system.
  */
 export interface I18nErrorMessage {
-  /** Default message in English */
+  /** Default message in English, used as fallback */
   defaultMessage: string;
-  /** Translation key for i18n */
+  /** Translation key for looking up the localized message */
   i18nKey: string;
-  /** Optional interpolation values */
+  /** Values to interpolate into the translated message */
   values?: Record<string, string | number>;
 }
 

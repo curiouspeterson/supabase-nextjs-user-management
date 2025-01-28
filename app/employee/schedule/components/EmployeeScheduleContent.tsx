@@ -4,7 +4,8 @@ import { createClient } from '@/utils/supabase/client'
 import WeeklySchedule from '@/components/schedule/WeeklySchedule'
 import { getWeekStart } from '@/utils/schedule/helpers'
 import { addDays, format } from 'date-fns'
-import { Employee, EmployeeRole, Shift, CoverageReport, ShiftDurationCategory } from '@/services/scheduler/types'
+import { EmployeeRole, ShiftDurationCategoryEnum } from '@/services/scheduler/types'
+import type { Employee, Shift, CoverageReport, ShiftDurationCategory } from '@/services/scheduler/types'
 import { useEffect, useState } from 'react'
 
 const mapLegacyRole = (role: string): EmployeeRole => {
@@ -122,10 +123,10 @@ export function EmployeeScheduleContent() {
 
         // Transform shifts data
         const shifts: Shift[] = shiftsData?.map(shift => {
-          let duration_category: ShiftDurationCategory = ShiftDurationCategory.TEN_HOURS // Default
+          let duration_category: ShiftDurationCategory = ShiftDurationCategoryEnum.TEN_HOURS // Default
           switch (shift.duration_hours) {
-            case 4: duration_category = ShiftDurationCategory.FOUR_HOURS; break
-            case 12: duration_category = ShiftDurationCategory.TWELVE_HOURS; break
+            case 4: duration_category = ShiftDurationCategoryEnum.FOUR_HOURS; break
+            case 12: duration_category = ShiftDurationCategoryEnum.TWELVE_HOURS; break
             // 10 hours is the default
           }
 

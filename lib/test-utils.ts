@@ -2,7 +2,7 @@ import type { Toast } from '@/types/toast'
 import type { SupabaseClient, User, Session } from '@supabase/supabase-js'
 import { ErrorSeverity, ErrorCategory, ErrorRecoveryStrategy } from './types/error'
 import { AppError } from './errors'
-import { Employee, Shift, Schedule, EmployeeRole, ShiftDurationCategory, ScheduleStatus } from '@/services/scheduler/types'
+import { Employee, Shift, Schedule, EmployeeRole, ShiftDurationCategory, ScheduleStatus, ShiftDurationCategoryEnum } from '@/services/scheduler/types'
 
 /**
  * Mock function for toast notifications
@@ -368,7 +368,7 @@ export const mockShift = (overrides?: Partial<Shift>): Shift => ({
   start_time: '07:00:00',
   end_time: '17:00:00',
   duration_hours: 10,
-  duration_category: ShiftDurationCategory.TEN_HOURS,
+  duration_category: ShiftDurationCategoryEnum.TEN_HOURS,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   ...overrides

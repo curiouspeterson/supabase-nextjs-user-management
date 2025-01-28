@@ -1,29 +1,23 @@
 'use client'
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { AlertCircle } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Error } from '@/components/ui/error'
+import { resetScheduleError } from '../actions'
 
-interface ScheduleErrorFallbackProps {
-  error: Error
-}
-
-export function ScheduleErrorFallback({ error }: ScheduleErrorFallbackProps) {
+export default function ScheduleErrorFallback({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string }
+  reset: () => void
+}) {
   return (
-    <Alert variant="destructive">
-      <AlertCircle className="h-4 w-4" />
-      <AlertTitle>Schedule Error</AlertTitle>
-      <AlertDescription>
-        <p className="mb-4">
-          {error?.message || 'An error occurred while loading your schedule'}
-        </p>
-        <Button
-          variant="outline"
-          onClick={() => window.location.reload()}
-        >
-          Try again
-        </Button>
-      </AlertDescription>
-    </Alert>
+    <Error
+      title="Schedule Error"
+      message={error.message || 'Failed to load schedule'}
+      retry={() => {
+        resetScheduleError()
+        reset()
+      }}
+    />
   )
 } 
