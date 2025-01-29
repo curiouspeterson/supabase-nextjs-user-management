@@ -1,160 +1,177 @@
 'use client'
 
-import * as React from 'react'
-import { format } from 'date-fns'
-import { Badge } from '@/components/ui/badge'
+import { useState, useEffect } from 'react'
+import { useSupabase } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
-import { TimeOffRequestDialog } from '@/components/time-off/time-off-request-dialog'
-import { useUser } from '@/lib/hooks'
-import { useErrorBoundary } from '@/lib/hooks/use-error-boundary'
-import { useTimeOffStore } from '@/lib/stores/time-off-store'
-import type { TimeOffRequest, TimeOffStatus } from '@/lib/types/time-off'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { Loader2 } from 'lucide-react'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { Badge } from '@/components/ui/badge'
+import { format } from 'date-fns'
 
-function LoadingSkeleton() {
-  return (
-    <div className="space-y-4">
-      {[1, 2, 3].map((i) => (
-        <Card key={i}>
-          <CardHeader>
-            <Skeleton className="h-4 w-24" />
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-function TimeOffRequestCard({ request }: { request: TimeOffRequest }) {
-  const [isDialogOpen, setIsDialogOpen] = React.useState(false)
-
-  const getStatusColor = (status: TimeOffStatus) => {
-    switch (status) {
-      case 'Approved':
-        return 'bg-green-100 text-green-800'
-      case 'Declined':
-        return 'bg-red-100 text-red-800'
-      default:
-        return 'bg-yellow-100 text-yellow-800'
-    }
+interface TimeOffRequest {
+  id: string
+  employee_id: string
+  start_date: string
+  end_date: string
+  status: 'pending' | 'approved' | 'rejected'
+  reason: string
+  employee: {
+    full_name: string
   }
-
-  return (
-    <>
-      <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-lg">{request.type}</CardTitle>
-            <Badge className={getStatusColor(request.status)}>
-              {request.status}
-            </Badge>
-          </div>
-          <CardDescription>
-            Submitted on {format(new Date(request.submitted_at), 'PPP')}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Start Date</span>
-            <span>{format(new Date(request.start_date), 'PPP')}</span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">End Date</span>
-            <span>{format(new Date(request.end_date), 'PPP')}</span>
-          </div>
-          {request.notes && (
-            <div className="mt-4">
-              <p className="text-sm text-muted-foreground">Notes</p>
-              <p className="text-sm mt-1">{request.notes}</p>
-            </div>
-          )}
-        </CardContent>
-        <CardFooter className="flex justify-end space-x-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsDialogOpen(true)}
-          >
-            Edit
-          </Button>
-        </CardFooter>
-      </Card>
-      <TimeOffRequestDialog
-        request={request}
-        open={isDialogOpen}
-        onOpenChange={setIsDialogOpen}
-      />
-    </>
-  )
 }
 
-export function TimeOffList() {
-  const [isLoading, setIsLoading] = React.useState(true)
+export default function TimeOffList() {
+  const [requests, setRequests] = useState<TimeOffRequest[]>([])
+  const [loading, setLoading] = useState(true)
+  const { supabase } = useSupabase()
   const { toast } = useToast()
-  const { handleError } = useErrorBoundary()
-  const { requests, updateRequest } = useTimeOffStore()
-  const supabase = createClientComponentClient()
 
-  React.useEffect(() => {
-    const fetchTimeOffRequests = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('time_off_requests')
-          .select('*')
-          .order('created_at', { ascending: false })
+  useEffect(() => {
+    fetchRequests()
+  }, [])
 
-        if (error) throw error
+  async function fetchRequests() {
+    try {
+      const { data, error } = await supabase
+        .from('time_off_requests')
+        .select(`
+          *,
+          employee:employees(full_name)
+        `)
+        .order('start_date', { ascending: false })
 
-        // Update store with fetched requests
-        requests.forEach(request => {
-          updateRequest(request)
-        })
-      } catch (error) {
-        handleError(error)
+      if (error) {
         toast({
-          title: 'Error',
-          description: error instanceof Error ? error.message : 'Failed to fetch time off requests',
-          variant: 'destructive'
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to fetch time off requests"
         })
-      } finally {
-        setIsLoading(false)
+        return
       }
+
+      setRequests(data || [])
+    } catch (error) {
+      console.error('Error fetching time off requests:', error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "An unexpected error occurred while fetching requests"
+      })
+    } finally {
+      setLoading(false)
     }
-
-    fetchTimeOffRequests()
-  }, [supabase, updateRequest, handleError, toast])
-
-  if (isLoading) {
-    return <LoadingSkeleton />
   }
 
-  if (!requests.length) {
+  async function updateRequestStatus(id: string, status: 'approved' | 'rejected') {
+    try {
+      const { error } = await supabase
+        .from('time_off_requests')
+        .update({ status })
+        .eq('id', id)
+
+      if (error) throw error
+
+      toast({
+        title: "Success",
+        description: `Request ${status} successfully`
+      })
+
+      // Refresh the list
+      fetchRequests()
+    } catch (error) {
+      console.error('Error updating request:', error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to update request status"
+      })
+    }
+  }
+
+  if (loading) {
     return (
-      <div className="text-center py-6">
-        <p className="text-muted-foreground">No time off requests found</p>
+      <div className="flex justify-center items-center p-4">
+        <Loader2 className="h-6 w-6 animate-spin" />
       </div>
     )
   }
 
   return (
     <div className="space-y-4">
-      {requests.map((request) => (
-        <TimeOffRequestCard key={request.id} request={request} />
-      ))}
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-bold">Time Off Requests</h2>
+        <Button onClick={fetchRequests}>Refresh</Button>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Employee</TableHead>
+            <TableHead>Start Date</TableHead>
+            <TableHead>End Date</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {requests.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center py-4">
+                No time off requests found
+              </TableCell>
+            </TableRow>
+          ) : (
+            requests.map((request) => (
+              <TableRow key={request.id}>
+                <TableCell>{request.employee?.full_name}</TableCell>
+                <TableCell>{format(new Date(request.start_date), 'PP')}</TableCell>
+                <TableCell>{format(new Date(request.end_date), 'PP')}</TableCell>
+                <TableCell>
+                  <Badge
+                    variant={
+                      request.status === 'approved'
+                        ? 'success'
+                        : request.status === 'rejected'
+                        ? 'destructive'
+                        : 'default'
+                    }
+                  >
+                    {request.status}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  {request.status === 'pending' && (
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => updateRequestStatus(request.id, 'approved')}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => updateRequestStatus(request.id, 'rejected')}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
     </div>
   )
 } 

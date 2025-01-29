@@ -1,10 +1,17 @@
+'use client'
+
 import { createBrowserClient } from '@supabase/ssr'
 import { SupabaseClient, User } from '@supabase/supabase-js'
 import { useState, useEffect } from 'react'
 import type { Database } from '@/types/supabase'
 
+// Singleton instance
 let supabaseInstance: SupabaseClient<Database> | null = null
 
+/**
+ * Creates a Supabase client with proper configuration
+ * This is the recommended way to create a client for most use cases
+ */
 export const createClient = () => {
   if (typeof window === 'undefined') {
     // Server-side: Return minimal client without cookie handling
@@ -54,41 +61,35 @@ export const createClient = () => {
       }
     }
   )
-  
+
   return supabaseInstance
 }
 
+/**
+ * React hook for accessing Supabase client and user state
+ * This is the recommended way to access Supabase in React components
+ */
 export function useSupabase() {
-  const [supabase] = useState(() => createClient())
-  const [user, setUser] = useState<User | null | undefined>(undefined)
-  const [isInitialized, setIsInitialized] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const [user, setUser] = useState<User | null>(null)
+  const supabase = createClient()
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
-      setIsLoading(false)
-      if (!isInitialized) setIsInitialized(true)
     })
 
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
-      setIsLoading(false)
-      if (!isInitialized) setIsInitialized(true)
     })
 
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [supabase, isInitialized])
+    return () => subscription.unsubscribe()
+  }, [])
 
-  return { 
-    supabase, 
-    user, 
-    isInitialized,
-    isLoading
-  }
-} 
+  return { supabase, user }
+}
+
+// Export types
+export type { Database } 

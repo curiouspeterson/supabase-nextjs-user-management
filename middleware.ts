@@ -34,6 +34,7 @@ export async function middleware(request: NextRequest) {
       // Continue with degraded functionality
     }
 
+    // Create Supabase client with improved cookie handling
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -43,61 +44,53 @@ export async function middleware(request: NextRequest) {
             return request.cookies.get(name)?.value
           },
           set(name: string, value: string, options: CookieOptions) {
-            try {
-              if (!validateCookieOptions({ name, value, ...options })) {
-                console.warn('Invalid cookie options, using defaults')
-              }
-              response.cookies.set({
-                name,
-                value,
-                ...options,
-                path: options.path ?? '/'
-              })
-            } catch (error) {
-              console.error('Failed to set cookie:', error)
-              // Continue with degraded functionality
-            }
+            // Only set cookies in response, not request
+            response.cookies.set({
+              name,
+              value,
+              ...options,
+              path: '/',
+              httpOnly: true,
+              secure: process.env.NODE_ENV === 'production',
+              sameSite: 'lax'
+            })
           },
           remove(name: string, options: CookieOptions) {
-            try {
-              response.cookies.delete({
-                name,
-                path: options.path ?? '/'
-              })
-            } catch (error) {
-              console.error('Failed to remove cookie:', error)
-              // Continue with degraded functionality
-            }
+            // Only remove cookies from response, not request
+            response.cookies.set({
+              name,
+              value: '',
+              ...options,
+              path: '/',
+              maxAge: 0
+            })
           },
         },
       }
     )
 
-    // Get session with retry logic
-    let session = null
-    let lastError: Error | null = null
+    // Get session with improved error handling
+    const {
+      data: { session },
+      error: sessionError
+    } = await supabase.auth.getSession()
 
-    try {
-      const result = await exponentialBackoff(
-        async () => {
-          const { data, error } = await supabase.auth.getSession()
-          if (error) throw error
-          return data.session
-        },
-        RETRY_OPTIONS
-      )
-      session = result
-    } catch (error) {
-      lastError = error as Error
-      console.error('Session refresh failed:', error)
+    if (sessionError) {
+      console.error('Session error:', sessionError)
+      // Don't throw, just redirect to login if needed
+    }
+
+    // Handle auth routes specially
+    if (request.nextUrl.pathname.startsWith('/auth/')) {
+      return response
     }
 
     // Handle routing based on session state
-    if (!session && !request.nextUrl.pathname.startsWith('/login')) {
-      return NextResponse.redirect(new URL('/login', request.nextUrl.origin))
-    }
-
-    if (session && request.nextUrl.pathname.startsWith('/login')) {
+    if (!session) {
+      if (!request.nextUrl.pathname.startsWith('/login')) {
+        return NextResponse.redirect(new URL('/login', request.nextUrl.origin))
+      }
+    } else if (request.nextUrl.pathname.startsWith('/login')) {
       return NextResponse.redirect(new URL('/', request.nextUrl.origin))
     }
 
@@ -106,7 +99,7 @@ export async function middleware(request: NextRequest) {
   } catch (error) {
     console.error('Middleware error:', error)
     
-    // Return degraded response
+    // Return degraded response but ensure cookies are preserved
     return NextResponse.next({
       request: {
         headers: request.headers,

@@ -20,36 +20,38 @@ const mergeCookieOptions = (options?: CookieOptions): CookieOptions => {
 }
 
 // Helper function to handle cookie errors
-const handleCookieError = async (
-  error: Error,
-  operation: string,
-  cookieName: string
-) => {
+const handleCookieError = (error: Error, operation: string, cookieName: string) => {
+  console.error(`Cookie ${operation} error for ${cookieName}:`, error)
+  // Log to error analytics
   try {
-    const supabase = createServerClient<Database>(
+    const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
           get: () => undefined,
           set: () => {},
-          remove: () => {},
-        },
+          remove: () => {}
+        }
       }
     )
-
-    await supabase.rpc('log_auth_error', {
-      p_action: 'cookie_operation',
-      p_error_code: ServerErrorCode.COOKIE_ERROR,
-      p_error_message: error.message,
-      p_error_details: {
+    
+    supabase.from('error_analytics_data').insert({
+      component: 'auth',
+      error_type: 'cookie_error',
+      error_message: error.message,
+      context: {
         operation,
         cookieName,
-        error: error.toString(),
-      },
+        error: error.toString()
+      }
+    }).then(() => {
+      console.log('Error logged to analytics')
+    }).catch((logError) => {
+      console.error('Failed to log error:', logError)
     })
   } catch (logError) {
-    console.error('Failed to log cookie error:', logError)
+    console.error('Failed to create client for error logging:', logError)
   }
 }
 
@@ -166,42 +168,55 @@ export function createServiceClient() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {
       cookies: {
-        getAll() {
+        get(name: string) {
           try {
-            return cookieStore.getAll().map(cookie => ({
-              name: cookie.name,
-              value: cookie.value,
-            }))
+            return cookieStore.get(name)?.value
           } catch (error) {
-            handleCookieError(error as Error, 'getAll', 'all')
-            return []
+            console.error('Failed to get cookie:', error)
+            return undefined
           }
         },
-        setAll(cookiesToSet) {
+        set(name: string, value: string, options: CookieOptions) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              // Validate each cookie value
-              const sanitizedValue = validateCookieValue(value)
-              
-              // Merge with default options
-              const cookieOptions = mergeCookieOptions(options)
-              
-              cookieStore.set({
-                name,
-                value: sanitizedValue,
-                ...cookieOptions,
-              })
+            // Validate and sanitize cookie value
+            const sanitizedValue = validateCookieValue(value)
+            
+            // Set cookie with secure defaults
+            cookieStore.set({
+              name,
+              value: sanitizedValue,
+              ...COOKIE_DEFAULTS,
+              ...options,
+              // Ensure critical security options are not overridden
+              httpOnly: true,
+              secure: process.env.NODE_ENV === 'production',
+              sameSite: 'lax',
+              path: '/'
             })
           } catch (error) {
-            handleCookieError(error as Error, 'setAll', 'multiple')
-            throw new AuthError(
-              'Failed to set multiple cookies',
-              ServerErrorCode.SET_ALL_FAILED,
-              { error }
-            )
+            handleCookieError(error as Error, 'set', name)
           }
         },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.delete({
+              name,
+              ...COOKIE_DEFAULTS,
+              ...options,
+              // Ensure path is set for proper removal
+              path: '/'
+            })
+          } catch (error) {
+            handleCookieError(error as Error, 'remove', name)
+          }
+        }
       },
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true,
+        flowType: 'pkce'
+      }
     }
   )
 }

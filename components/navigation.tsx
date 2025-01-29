@@ -6,19 +6,13 @@ import { useEffect, useState, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { useErrorHandler } from '@/lib/hooks/use-error-handler'
-import { AuthError, DatabaseError } from '@/lib/errors'
 import { useSupabase } from '@/lib/supabase/client'
 import { useRoleAccess } from '@/hooks/useRoleAccess'
+import { AlertCircle, Loader2 } from 'lucide-react'
 
 interface NavigationProps {
   className?: string
 }
-
-interface AuthSubscription {
-  unsubscribe: () => void
-}
-
-type Role = 'Manager' | 'Admin' | 'Employee'
 
 export function Navigation({ className }: NavigationProps) {
   const pathname = usePathname()
@@ -40,29 +34,27 @@ export function Navigation({ className }: NavigationProps) {
     try {
       setIsSigningOut(true)
       
-      // Call the sign-out API endpoint
-      const response = await fetch('/auth/signout', {
-        method: 'POST',
-        headers: {
-          'Cache-Control': 'no-cache'
-        },
-        credentials: 'include' // Important for cookie handling
-      })
+      if (!supabase) {
+        throw new Error('Supabase client not initialized')
+      }
 
-      // Force reload to ensure clean state
-      window.location.href = '/login'
-      
+      const { error: signOutError } = await supabase.auth.signOut()
+      if (signOutError) throw signOutError
+
+      // Redirect to login page
+      router.push('/login')
     } catch (error) {
       handleError(error, 'Navigation.handleSignOut')
+    } finally {
       setIsSigningOut(false)
     }
-  }, [handleError, isSigningOut])
+  }, [handleError, isSigningOut, router, supabase])
 
   const mainLinks = [
     {
       href: '/schedule',
       label: 'Schedule',
-      show: !!user, // Only show if authenticated
+      show: !!user,
     },
     {
       href: '/shifts',
@@ -93,6 +85,14 @@ export function Navigation({ className }: NavigationProps) {
 
   const filteredLinks = mainLinks.filter(link => link.show)
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center w-full p-4">
+        <Loader2 className="h-6 w-6 animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className={cn('flex items-center justify-between w-full', className)}>
       {/* Left - Site Title */}
@@ -122,6 +122,25 @@ export function Navigation({ className }: NavigationProps) {
             {link.label}
           </Link>
         ))}
+        <Link
+          href="/test-errors"
+          className={cn(
+            'text-sm font-medium transition-colors hover:text-primary flex items-center space-x-1',
+            pathname === '/test-errors' ? 'text-foreground' : 'text-foreground/60'
+          )}
+        >
+          <AlertCircle className="h-4 w-4" />
+          <span>Test Errors</span>
+        </Link>
+        <Link
+          href="/error-analytics"
+          className={cn(
+            'text-sm font-medium transition-colors hover:text-primary',
+            pathname === '/error-analytics' ? 'text-foreground' : 'text-foreground/60'
+          )}
+        >
+          Error Analytics
+        </Link>
       </nav>
 
       {/* Right - Account & Sign Out */}
@@ -151,13 +170,20 @@ export function Navigation({ className }: NavigationProps) {
               )}
               aria-busy={isSigningOut}
             >
-              {isSigningOut ? 'Signing Out...' : 'Sign Out'}
+              {isSigningOut ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin inline" />
+                  Signing Out...
+                </>
+              ) : (
+                'Sign Out'
+              )}
             </button>
           </>
         ) : (
           <>
             <Link
-              href="/login?mode=signin"
+              href="/login"
               className={cn(
                 'px-3 py-2 rounded-md text-sm font-medium transition-colors',
                 pathname === '/login' && !pathname.includes('signup')
@@ -168,10 +194,10 @@ export function Navigation({ className }: NavigationProps) {
               Sign In
             </Link>
             <Link
-              href="/login?mode=signup"
+              href="/signup"
               className={cn(
                 'px-3 py-2 rounded-md text-sm font-medium transition-colors bg-green-700',
-                pathname === '/login' && pathname.includes('signup')
+                pathname === '/signup'
                   ? 'bg-green-800 text-white'
                   : 'text-white hover:bg-green-800'
               )}

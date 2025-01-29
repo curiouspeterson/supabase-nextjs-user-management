@@ -2,7 +2,7 @@
 
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { LoginForm } from './login-form'
+import LoginForm from './login-form'
 import { SignUpForm } from './signup-form'
 
 export default function Login() {

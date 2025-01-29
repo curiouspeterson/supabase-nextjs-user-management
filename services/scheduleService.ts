@@ -1,4 +1,5 @@
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '@/lib/supabase/client'
+import type { Database } from '@/types/supabase'
 import { 
   ScheduleWithRelations,
   CreateScheduleInput,
@@ -8,18 +9,97 @@ import {
   GenerateScheduleResponse
 } from '@/types/schedule'
 
-const supabase = createClientComponentClient()
+type Schedule = Database['public']['Tables']['schedules']['Row']
+type Employee = Database['public']['Tables']['employees']['Row']
+type Shift = Database['public']['Tables']['shifts']['Row']
 
-interface ScheduleFilters {
-  weekStart?: string
-  employeeId?: string
-  status?: string
-  startDate?: string
-  endDate?: string
-  shiftId?: string
-}
+export class ScheduleService {
+  private supabase = createClient()
 
-export const scheduleService = {
+  async getSchedules() {
+    const { data, error } = await this.supabase
+      .from('schedules')
+      .select('*')
+      .order('start_date', { ascending: false })
+
+    if (error) throw error
+    return data
+  }
+
+  async getScheduleById(id: string) {
+    const { data, error } = await this.supabase
+      .from('schedules')
+      .select('*')
+      .eq('id', id)
+      .single()
+
+    if (error) throw error
+    return data
+  }
+
+  async createSchedule(schedule: Partial<Schedule>) {
+    const { data, error } = await this.supabase
+      .from('schedules')
+      .insert([schedule])
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  }
+
+  async updateSchedule(id: string, updates: Partial<Schedule>) {
+    const { data, error } = await this.supabase
+      .from('schedules')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  }
+
+  async deleteSchedule(id: string) {
+    const { error } = await this.supabase
+      .from('schedules')
+      .delete()
+      .eq('id', id)
+
+    if (error) throw error
+  }
+
+  async getEmployeeSchedule(employeeId: string, startDate: string, endDate: string) {
+    const { data, error } = await this.supabase
+      .from('shifts')
+      .select(`
+        *,
+        schedules (
+          id,
+          name,
+          start_date,
+          end_date
+        )
+      `)
+      .eq('employee_id', employeeId)
+      .gte('start_time', startDate)
+      .lte('end_time', endDate)
+
+    if (error) throw error
+    return data
+  }
+
+  async generateSchedule(startDate: string, endDate: string) {
+    const { data, error } = await this.supabase
+      .rpc('generate_schedule', {
+        p_start_date: startDate,
+        p_end_date: endDate
+      })
+
+    if (error) throw error
+    return data
+  }
+
   /**
    * Fetch schedules with optional filters
    */
@@ -34,7 +114,7 @@ export const scheduleService = {
       throw new Error('Failed to fetch schedules')
     }
     return response.json()
-  },
+  }
 
   /**
    * Create one or more schedules
@@ -54,28 +134,7 @@ export const scheduleService = {
       throw new Error('Failed to create schedule(s)')
     }
     return response.json()
-  },
-
-  /**
-   * Update a single schedule
-   */
-  async updateSchedule(
-    id: string,
-    data: UpdateScheduleInput
-  ): Promise<ScheduleWithRelations> {
-    const response = await fetch(`/api/schedules?id=${id}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    })
-
-    if (!response.ok) {
-      throw new Error('Failed to update schedule')
-    }
-    return response.json()
-  },
+  }
 
   /**
    * Update multiple schedules at once
@@ -95,7 +154,7 @@ export const scheduleService = {
       throw new Error('Failed to update schedules')
     }
     return response.json()
-  },
+  }
 
   /**
    * Delete one or more schedules
@@ -109,31 +168,13 @@ export const scheduleService = {
     if (!response.ok) {
       throw new Error('Failed to delete schedule(s)')
     }
-  },
-
-  /**
-   * Generate a new schedule
-   */
-  async generateSchedule(options: GenerateScheduleInput): Promise<GenerateScheduleResponse> {
-    const response = await fetch('/api/schedules/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(options),
-    })
-
-    if (!response.ok) {
-      throw new Error('Failed to generate schedule')
-    }
-    return response.json()
-  },
+  }
 
   /**
    * Get schedule statistics
    */
   async getScheduleStats(startDate: string, endDate: string) {
-    const { data: schedules, error } = await supabase
+    const { data: schedules, error } = await this.supabase
       .from('schedules')
       .select(`
         *,

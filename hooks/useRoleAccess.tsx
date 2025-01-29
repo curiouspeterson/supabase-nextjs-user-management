@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { createBrowserClient } from '@supabase/ssr';
+import { useSupabase } from '@/lib/supabase/client';
 
 type Role = 'Manager' | 'Admin' | 'Employee';
 
@@ -15,18 +15,16 @@ export function useRoleAccess(requiredRoles: Role[]): UseRoleAccessReturn {
   const [hasAccess, setHasAccess] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const { supabase, user } = useSupabase();
 
   useEffect(() => {
     async function checkAccess() {
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        
-        if (authError) throw authError;
+        if (!supabase) {
+          setError(new Error('Supabase client not initialized'));
+          return;
+        }
+
         if (!user) {
           setHasAccess(false);
           return;
@@ -50,8 +48,14 @@ export function useRoleAccess(requiredRoles: Role[]): UseRoleAccessReturn {
       }
     }
 
-    checkAccess();
-  }, [supabase, requiredRoles]);
+    // Only check access if we have a user
+    if (user) {
+      checkAccess();
+    } else {
+      setHasAccess(false);
+      setIsLoading(false);
+    }
+  }, [supabase, user, requiredRoles]);
 
   return { hasAccess, isLoading, error };
 }

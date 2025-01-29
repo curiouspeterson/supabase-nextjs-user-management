@@ -1,154 +1,100 @@
 'use client'
 
-import { useState } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { useState, useEffect } from 'react'
+import { useSupabase } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { toast } from '@/components/ui/use-toast'
-import { Skeleton } from '@/components/ui/skeleton'
-import { useRouter } from 'next/navigation'
-import type { Employee, EmployeeRole } from '@/types/employee'
+import { useToast } from '@/components/ui/use-toast'
+import { Loader2 } from 'lucide-react'
 
-interface EmployeeListProps {
-  employees: Employee[]
-  currentUserId: string
+interface Employee {
+  id: string
+  email: string
+  full_name: string
+  role: string
+  status: string
 }
 
-export function EmployeeList({ employees, currentUserId }: EmployeeListProps) {
-  const [loading, setLoading] = useState<Record<string, boolean>>({})
-  const supabase = createClientComponentClient()
-  const router = useRouter()
+export default function EmployeeList() {
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [loading, setLoading] = useState(true)
+  const { supabase } = useSupabase()
+  const { toast } = useToast()
 
-  const handleRoleUpdate = async (employeeId: string, newRole: EmployeeRole, reason: string = '') => {
+  useEffect(() => {
+    fetchEmployees()
+  }, [])
+
+  async function fetchEmployees() {
     try {
-      setLoading(prev => ({ ...prev, [employeeId]: true }))
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .order('full_name')
 
-      const { data: success, error } = await supabase
-        .rpc('update_employee_role', {
-          p_employee_id: employeeId,
-          p_new_role: newRole,
-          p_reason: reason,
-          p_client_info: {
-            userAgent: navigator.userAgent,
-            timestamp: new Date().toISOString()
-          }
-        })
-
-      if (error) throw error
-      if (!success) {
+      if (error) {
         toast({
-          title: 'Permission Denied',
-          description: 'You do not have permission to update this role',
-          variant: 'destructive',
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to fetch employees"
         })
         return
       }
 
-      toast({
-        title: 'Role Updated',
-        description: `Employee role has been updated to ${newRole}`,
-      })
-
-      router.refresh()
+      setEmployees(data || [])
     } catch (error) {
-      console.error('Error updating role:', error)
+      console.error('Error fetching employees:', error)
       toast({
-        title: 'Error',
-        description: 'Failed to update employee role',
-        variant: 'destructive',
+        variant: "destructive",
+        title: "Error",
+        description: "An unexpected error occurred while fetching employees"
       })
     } finally {
-      setLoading(prev => ({ ...prev, [employeeId]: false }))
+      setLoading(false)
     }
   }
 
-  const getRoleBadgeColor = (role: EmployeeRole) => {
-    switch (role) {
-      case 'Management':
-        return 'bg-red-500'
-      case 'Shift Supervisor':
-        return 'bg-blue-500'
-      case 'Dispatcher':
-        return 'bg-green-500'
-      default:
-        return 'bg-gray-500'
-    }
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center p-4">
+        <Loader2 className="h-6 w-6 animate-spin" />
+      </div>
+    )
   }
 
   return (
-    <div className="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>ID</TableHead>
-            <TableHead>Employee Role</TableHead>
-            <TableHead>User Role</TableHead>
-            <TableHead>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {employees.map((employee) => (
-            <TableRow key={employee.id}>
-              <TableCell>
-                <span className="font-medium">{employee.id}</span>
-              </TableCell>
-              <TableCell>{employee.employee_role}</TableCell>
-              <TableCell>
-                <Badge className={getRoleBadgeColor(employee.employee_role)}>
-                  {employee.employee_role}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <div className="flex gap-2">
-                  {employee.id !== currentUserId && (
-                    <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRoleUpdate(employee.id, 'Management')}
-                        disabled={loading[employee.id]}
-                      >
-                        {loading[employee.id] ? (
-                          <Skeleton className="h-4 w-4" />
-                        ) : (
-                          'Promote'
-                        )}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRoleUpdate(employee.id, 'Dispatcher')}
-                        disabled={loading[employee.id]}
-                      >
-                        {loading[employee.id] ? (
-                          <Skeleton className="h-4 w-4" />
-                        ) : (
-                          'Demote'
-                        )}
-                      </Button>
-                    </>
-                  )}
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-bold">Employees</h2>
+        <Button onClick={fetchEmployees}>Refresh</Button>
+      </div>
+      
+      <div className="grid gap-4">
+        {employees.length === 0 ? (
+          <p className="text-muted-foreground text-center py-4">
+            No employees found
+          </p>
+        ) : (
+          employees.map((employee) => (
+            <div
+              key={employee.id}
+              className="p-4 rounded-lg border bg-card text-card-foreground shadow-sm"
+            >
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-medium">{employee.full_name}</h3>
+                  <p className="text-sm text-muted-foreground">{employee.email}</p>
                 </div>
-              </TableCell>
-            </TableRow>
-          ))}
-          {employees.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={4} className="text-center py-4">
-                No employees found
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
+                <div className="text-right">
+                  <span className="text-sm font-medium">{employee.role}</span>
+                  <p className="text-xs text-muted-foreground">
+                    Status: {employee.status}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   )
 } 
