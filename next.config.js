@@ -3,7 +3,7 @@ const nextConfig = {
   transpilePackages: ['geist'],
   experimental: {
     esmExternals: 'loose',
-    serverComponentsExternalPackages: ['@supabase/supabase-js'],
+    serverComponentsExternalPackages: ['@supabase/auth-helpers-nextjs'],
     optimizePackageImports: ['@heroicons/react', '@radix-ui/react-icons'],
     serverActions: {
       bodySizeLimit: '2mb',

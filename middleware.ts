@@ -1,122 +1,70 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'
 import { NextResponse, type NextRequest } from 'next/server'
-import { exponentialBackoff } from '@/utils/supabase/utils'
-import { Database } from '@/types/supabase'
-import { checkDatabaseHealth } from '@/utils/supabase/health'
 
-// Retry configuration
-const RETRY_OPTIONS = {
-  maxAttempts: 3,
-  initialDelay: 1000,
-  maxDelay: 5000
+// Modern security configuration
+const SECURE_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/'
 }
 
-// Cookie validation
-const validateCookieOptions = (options: CookieOptions & { name?: string, value?: string }): boolean => {
-  if (!options.name || typeof options.name !== 'string') return false
-  if (options.value && typeof options.value !== 'string') return false
-  if (options.maxAge && typeof options.maxAge !== 'number') return false
-  return true
-}
+// Protected routes configuration
+const PROTECTED_ROUTES = [
+  '/dashboard',
+  '/account',
+  '/settings',
+  '/employees'
+]
+
+const PUBLIC_ROUTES = [
+  '/login',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
+  '/verify'
+]
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
+  console.log('🔒 Middleware starting:', request.url)
+  const response = NextResponse.next()
+  
+  // Modern initialization pattern
+  const supabase = createMiddlewareClient({
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    supabaseKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    req: request,
+    res: response,
+    cookieOptions: {
+      secure: process.env.NODE_ENV === 'production'
+    }
   })
 
   try {
-    // Check database health first
-    const health = await checkDatabaseHealth()
-    if (!health.healthy) {
-      console.error('Database health check failed:', health.error)
-      // Continue with degraded functionality
-    }
-
-    // Create Supabase client with improved cookie handling
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return request.cookies.get(name)?.value
-          },
-          set(name: string, value: string, options: CookieOptions) {
-            // Only set cookies in response, not request
-            response.cookies.set({
-              name,
-              value,
-              ...options,
-              path: '/',
-              httpOnly: true,
-              secure: process.env.NODE_ENV === 'production',
-              sameSite: 'lax'
-            })
-          },
-          remove(name: string, options: CookieOptions) {
-            // Only remove cookies from response, not request
-            response.cookies.set({
-              name,
-              value: '',
-              ...options,
-              path: '/',
-              maxAge: 0
-            })
-          },
-        },
-      }
-    )
-
-    // Get session with improved error handling
-    const {
-      data: { session },
-      error: sessionError
-    } = await supabase.auth.getSession()
-
-    if (sessionError) {
-      console.error('Session error:', sessionError)
-      // Don't throw, just redirect to login if needed
-    }
-
-    // Handle auth routes specially
-    if (request.nextUrl.pathname.startsWith('/auth/')) {
-      return response
-    }
-
-    // Handle routing based on session state
-    if (!session) {
-      if (!request.nextUrl.pathname.startsWith('/login')) {
-        return NextResponse.redirect(new URL('/login', request.nextUrl.origin))
-      }
-    } else if (request.nextUrl.pathname.startsWith('/login')) {
-      return NextResponse.redirect(new URL('/', request.nextUrl.origin))
-    }
-
-    return response
-
-  } catch (error) {
-    console.error('Middleware error:', error)
+    const { data: { session } } = await supabase.auth.getSession()
     
-    // Return degraded response but ensure cookies are preserved
-    return NextResponse.next({
-      request: {
-        headers: request.headers,
-      },
-    })
+    if (!session && !request.nextUrl.pathname.startsWith('/auth')) {
+      const redirectUrl = new URL('/auth/login', request.url)
+      redirectUrl.searchParams.set('redirect', request.nextUrl.pathname)
+      return NextResponse.redirect(redirectUrl)
+    }
+    
+    console.log('✅ Authentication successful')
+    response.headers.set('x-middleware-cache', 'no-cache')
+  } catch (error) {
+    console.error('Middleware auth error:', error)
+    return NextResponse.redirect(new URL('/error', request.url))
   }
+
+  return response
 }
 
+// Configure middleware matching
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
+    '/dashboard/:path*',
+    '/account/:path*',
+    '/settings/:path*',
+    '/((?!auth|_next/static|_next/image|favicon.ico).*)',
+  ]
 }

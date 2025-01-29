@@ -384,4 +384,15 @@ export class ConflictError extends AppError {
     this.name = 'ConflictError';
     Object.setPrototypeOf(this, ConflictError.prototype);
   }
+}
+
+export class ServerError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+    public details?: Record<string, unknown>
+  ) {
+    super(message)
+    this.name = 'ServerError'
+  }
 } 

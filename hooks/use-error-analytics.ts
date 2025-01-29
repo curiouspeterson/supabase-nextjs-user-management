@@ -85,17 +85,17 @@ export function useErrorAnalytics(): UseErrorAnalytics {
       setIsLoading(true)
       setError(null)
 
-      const { data: orgData } = await supabase
-        .from('user_organizations')
-        .select('org_id')
-        .eq('user_id', user?.id)
+      const { data } = await supabase
+        .from('error_analytics_config')
+        .select('*')
+        .limit(1)
         .single()
 
-      if (!orgData?.org_id) {
+      if (!data) {
         throw new Error('User must belong to an organization')
       }
 
-      const result = await service.getErrorSummary(orgData.org_id, {
+      const result = await service.getErrorSummary(data.org_id, {
         environment: process.env.NEXT_PUBLIC_ENVIRONMENT || 'development',
         ...options
       })
@@ -124,17 +124,17 @@ export function useErrorAnalytics(): UseErrorAnalytics {
       setIsLoading(true)
       setError(null)
 
-      const { data: orgData } = await supabase
-        .from('user_organizations')
-        .select('org_id')
-        .eq('user_id', user?.id)
+      const { data } = await supabase
+        .from('error_analytics_config')
+        .select('*')
+        .limit(1)
         .single()
 
-      if (!orgData?.org_id) {
+      if (!data) {
         throw new Error('User must belong to an organization')
       }
 
-      const result = await service.getErrorTrends(orgData.org_id, {
+      const result = await service.getErrorTrends(data.org_id, {
         environment: process.env.NEXT_PUBLIC_ENVIRONMENT || 'development',
         ...options
       })

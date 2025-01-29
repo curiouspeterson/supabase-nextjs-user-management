@@ -1,103 +1,138 @@
 'use client'
 
-import { createBrowserClient } from '@supabase/ssr'
+import { createBrowserClient } from '@supabase/supabase-js'
 import { SupabaseClient, User } from '@supabase/supabase-js'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { Database } from '@/types/supabase'
+import { isServer } from '@/utils/env'
 
-// Singleton instance
-let supabaseInstance: SupabaseClient<Database> | null = null
+// Modern global type for enhanced type safety
+declare global {
+  var supabaseClient: SupabaseClient<Database> | undefined
+}
+
+// Cookie configuration with enhanced security
+const createSecureCookieConfig = () => ({
+  get(name: string) {
+    if (typeof document === 'undefined') return ''
+    const value = document.cookie
+      .split('; ')
+      .find((row) => row.startsWith(`${name}=`))
+      ?.split('=')[1]
+    return value ? decodeURIComponent(value) : ''
+  },
+  set(name: string, value: string, options: { 
+    path?: string; 
+    domain?: string; 
+    maxAge?: number; 
+    sameSite?: 'lax' | 'strict' | 'none';
+    secure?: boolean;
+    httpOnly?: boolean;
+  }) {
+    if (typeof document === 'undefined') return
+    const secureOptions = {
+      ...options,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      path: '/',
+      httpOnly: true
+    }
+    let cookie = `${name}=${encodeURIComponent(value)}`
+    Object.entries(secureOptions).forEach(([key, value]) => {
+      if (value) cookie += `; ${key}=${value}`
+    })
+    document.cookie = cookie
+  },
+  remove(name: string, options: { path?: string; domain?: string }) {
+    if (typeof document === 'undefined') return
+    this.set(name, '', { ...options, maxAge: -1 })
+  }
+})
 
 /**
- * Creates a Supabase client with proper configuration
- * This is the recommended way to create a client for most use cases
+ * Creates a Supabase client with modern security practices
+ * @returns SupabaseClient instance
+ * @throws Error if called on server
  */
-export const createClient = () => {
+export function createClient(): SupabaseClient<Database> {
   if (typeof window === 'undefined') {
-    // Server-side: Return minimal client without cookie handling
-    return createBrowserClient<Database>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
+    throw new Error('Browser client cannot be used in server environment')
   }
 
-  if (supabaseInstance) return supabaseInstance
+  // Verify environment variables
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL')
+  }
   
-  // Client-side: Full client with cookie handling
-  supabaseInstance = createBrowserClient<Database>(
+  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY')
+  }
+  
+  if (globalThis.supabaseClient) return globalThis.supabaseClient
+  
+  const client = createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          try {
-            const cookie = document.cookie
-              .split('; ')
-              .find((row) => row.startsWith(`${name}=`))
-            return cookie ? decodeURIComponent(cookie.split('=')[1]) : undefined
-          } catch (error) {
-            console.error('Error parsing cookie:', error)
-            return undefined
-          }
-        },
-        set(name: string, value: string, options: { expires?: number; path?: string; domain?: string }) {
-          try {
-            let cookie = `${name}=${encodeURIComponent(value)}`
-            if (options.expires) {
-              const date = new Date()
-              date.setTime(date.getTime() + options.expires * 1000)
-              cookie += `; expires=${date.toUTCString()}`
-            }
-            if (options.path) cookie += `; path=${options.path}`
-            if (options.domain) cookie += `; domain=${options.domain}`
-            document.cookie = cookie
-          } catch (error) {
-            console.error('Error setting cookie:', error)
-          }
-        },
-        remove(name: string, options: { path?: string; domain?: string }) {
-          this.set(name, '', { ...options, expires: -1 })
-        }
-      }
-    }
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  return supabaseInstance
+  // Store in global for singleton pattern
+  globalThis.supabaseClient = client
+  return client
 }
 
 /**
- * React hook for accessing Supabase client and user state
- * This is the recommended way to access Supabase in React components
+ * Modern React hook for Supabase with TypeScript support
+ * @returns Object containing supabase client and user
  */
 export function useSupabase() {
   const [user, setUser] = useState<User | null>(null)
-  const supabase = createClient()
+  const supabase = useMemo(() => {
+    try {
+      return createClient()
+    } catch (e) {
+      console.error('Failed to create Supabase client:', e)
+      return null
+    }
+  }, [])
 
   useEffect(() => {
+    if (!supabase) return
+
+    // Modern auth state handling with proper cleanup
+    let mounted = true
+    
     const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (mounted) {
+        setUser(session?.user ?? null)
+      }
     })
 
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
+      if (mounted) {
+        setUser(session?.user ?? null)
+      }
     })
 
-    return () => subscription.unsubscribe()
-  }, [supabase.auth])
+    return () => {
+      mounted = false
+      subscription?.unsubscribe()
+    }
+  }, [supabase])
 
   return { supabase, user }
 }
 
-// Export types
-export type { Database }
+// Export types for better type safety
+export type { Database, User }
 
-// Export singleton instance getter
-export const getSupabaseClient = () => {
-  if (!supabaseInstance) {
-    supabaseInstance = createClient()
+if (process.env.NODE_ENV === 'development') {
+  // Reset global instance on hot reload
+  if (module.hot) {
+    module.hot.dispose(() => {
+      globalThis.supabaseClient = undefined
+    })
   }
-  return supabaseInstance
 } 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase/client';
 import { AuthError } from '@supabase/supabase-js';
 
@@ -15,116 +15,81 @@ interface UseRoleAccessReturn {
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // 1 second
-const LOADING_TIMEOUT = 5000; // 5 seconds
+const LOADING_TIMEOUT = 5000;
 
-export function useRoleAccess(requiredRoles: Role[]): UseRoleAccessReturn {
-  const [hasAccess, setHasAccess] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
+export function useRoleAccess(requiredRole: Role): UseRoleAccessReturn {
   const { supabase, user } = useSupabase();
+  const [hasAccess, setHasAccess] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [retryCount, setRetryCount] = useState<number>(0);
 
   const checkAccess = useCallback(async () => {
+    if (!supabase || !user) {
+      setIsLoading(false);
+      setHasAccess(false);
+      return;
+    }
+
     try {
-      setIsLoading(true);
-      setError(null);
-
-      // If no user, immediately return without access
-      if (!user) {
-        setHasAccess(false);
-        setIsLoading(false);
-        return;
-      }
-
-      // If no supabase client, handle as auth error
-      if (!supabase) {
-        throw new AuthError('Auth client not initialized');
-      }
-
-      // Set a timeout to prevent infinite loading
-      const timeoutId = setTimeout(() => {
-        if (isLoading) {
-          setIsLoading(false);
-          setError(new Error('Request timed out'));
-        }
-      }, LOADING_TIMEOUT);
-
-      const { data: profile, error: profileError } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select('role')
         .eq('id', user.id)
         .single();
 
-      // Clear timeout since we got a response
-      clearTimeout(timeoutId);
+      if (error) throw error;
 
-      if (profileError) {
-        // Handle 404 (no profile) differently
-        if (profileError.code === 'PGRST116') {
-          console.warn('No profile found for user:', user.id);
-          setHasAccess(false);
-          return;
-        }
+      const userRole = data?.role as Role;
+      const roleHierarchy: Record<Role, number> = {
+        'Admin': 3,
+        'Manager': 2,
+        'Employee': 1
+      };
 
-        // Handle unauthorized access
-        if (profileError.code === '42501' || profileError.message?.includes('access control')) {
-          console.warn('Unauthorized access to profiles table');
-          setHasAccess(false);
-          return;
-        }
-
-        throw profileError;
-      }
-
-      const userRole = profile?.role as Role;
-      setHasAccess(requiredRoles.includes(userRole));
-      
-      // Reset retry count on success
+      setHasAccess(roleHierarchy[userRole] >= roleHierarchy[requiredRole]);
+      setError(null);
       setRetryCount(0);
     } catch (err) {
-      console.error('Error checking role access:', err);
-      setError(err as Error);
-      setHasAccess(false);
-
-      // Only retry on network errors or auth errors
-      const isRetryableError = 
-        err instanceof AuthError || 
-        (err as any)?.message?.includes('network') ||
-        (err as any)?.message?.includes('timeout');
-
-      if (retryCount < MAX_RETRIES && isRetryableError) {
+      setError(err instanceof Error ? err : new Error('Failed to check role access'));
+      if (retryCount < MAX_RETRIES) {
         setTimeout(() => {
           setRetryCount(prev => prev + 1);
           checkAccess();
-        }, RETRY_DELAY * Math.pow(2, retryCount)); // Exponential backoff
+        }, RETRY_DELAY * Math.pow(2, retryCount));
       }
     } finally {
       setIsLoading(false);
     }
-  }, [supabase, user, requiredRoles, retryCount, isLoading]);
+  }, [supabase, user, requiredRole, retryCount]);
 
-  // Initial check
-  useEffect(() => {
-    let mounted = true;
-
-    if (user) {
-      checkAccess();
-    } else {
-      setHasAccess(false);
-      setIsLoading(false);
-      setError(null);
-    }
-
-    // Cleanup function
-    return () => {
-      mounted = false;
-    };
-  }, [user, checkAccess]);
-
-  // Expose retry function
   const retry = useCallback(() => {
+    setError(null);
+    setIsLoading(true);
     setRetryCount(0);
     checkAccess();
+  }, [checkAccess]);
+
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+
+    const init = async () => {
+      setIsLoading(true);
+      timeoutId = setTimeout(() => {
+        if (isLoading) {
+          setError(new Error('Role check timed out'));
+          setIsLoading(false);
+        }
+      }, LOADING_TIMEOUT);
+
+      await checkAccess();
+    };
+
+    init();
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, [checkAccess]);
 
   return { hasAccess, isLoading, error, retry };
@@ -137,7 +102,7 @@ interface RoleGuardProps {
 }
 
 export function RoleGuard({ children, requiredRoles, fallback }: RoleGuardProps) {
-  const { hasAccess, isLoading, error } = useRoleAccess(requiredRoles);
+  const { hasAccess, isLoading, error } = useRoleAccess(requiredRoles[0]);
 
   if (isLoading) {
     return fallback || null;

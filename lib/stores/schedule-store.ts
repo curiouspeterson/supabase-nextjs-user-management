@@ -47,12 +47,8 @@ export const useScheduleStore = create<ScheduleState>()(
         set({ selectedShift: shift })
     }),
     {
-      name: 'schedule-store',
-      version: 1,
-      partialize: (state) => ({
-        schedules: state.schedules,
-        selectedShift: state.selectedShift
-      })
+      name: 'schedule-storage',
+      skipHydration: true
     }
   )
 ) 

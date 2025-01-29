@@ -1,13 +1,32 @@
 import { createClient } from '@/lib/supabase/client'
 import type { HealthStatus, HealthMetrics, HealthCheckConfig } from '@/types/health'
+import { isServer } from '@/utils/env'
 
 export async function fetchHealthStatus(): Promise<{
   status: HealthStatus
   metrics: HealthMetrics
 }> {
-  const supabase = createClient()
-  
+  // Return degraded status during SSR
+  if (isServer()) {
+    return {
+      status: {
+        status: 'unknown',
+        message: 'Health check not available during SSR',
+        timestamp: new Date().toISOString()
+      },
+      metrics: {
+        cpu_usage: 0,
+        memory_usage: 0,
+        active_connections: 0,
+        request_latency: 0,
+        error_rate: 0
+      }
+    }
+  }
+
   try {
+    const supabase = createClient()
+    
     const { data, error } = await supabase
       .from('system_health')
       .select('*')

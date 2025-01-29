@@ -5,6 +5,9 @@ import Link from 'next/link'
 import LoginForm from './login-form'
 import { SignUpForm } from './signup-form'
 
+export const revalidate = 0
+export const dynamic = 'force-dynamic'
+
 export default function Login() {
   const searchParams = useSearchParams()
   const mode = searchParams.get('mode') || 'signin'

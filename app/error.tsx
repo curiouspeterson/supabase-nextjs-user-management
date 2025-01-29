@@ -5,27 +5,22 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { AlertTriangle } from 'lucide-react';
 import { errorHandler } from '@/lib/errors';
-import { ErrorAnalyticsService } from '@/lib/error-analytics';
+import { useErrorAnalytics } from '@/hooks/use-error-analytics';
 
-const analyticsService = new ErrorAnalyticsService('next-error-page');
-
-export default function Error({
-  error,
-  reset,
-}: {
+interface ErrorPageProps {
   error: Error & { digest?: string };
   reset: () => void;
-}) {
+}
+
+export default function Error({ error, reset }: ErrorPageProps) {
+  const { trackError } = useErrorAnalytics();
+
   useEffect(() => {
-    // Handle and track the error
-    errorHandler.handleError(error, 'next-error-page');
-    
-    // Track error analytics
-    analyticsService.trackError(error, {
-      digest: error.digest,
-      page: typeof window !== 'undefined' ? window.location.pathname : undefined
-    }).catch(console.error);
-  }, [error]);
+    // Only track client-side errors
+    if (typeof window !== 'undefined') {
+      trackError(error);
+    }
+  }, [error, trackError]);
 
   const errorMessage = errorHandler.formatErrorMessage(error);
 
@@ -48,13 +43,7 @@ export default function Error({
           >
             Reload Page
           </Button>
-          <Button
-            onClick={() => {
-              // Clear any error state before retrying
-              errorHandler.handleError(error, 'next-error-page-reset');
-              reset();
-            }}
-          >
+          <Button onClick={reset}>
             Try Again
           </Button>
         </div>

@@ -1,8 +1,10 @@
 'use client'
 
-import { createContext, useContext, ReactNode } from 'react'
+import { createContext, useContext, ReactNode, useEffect, useRef, useState } from 'react'
 import { useErrorAnalytics } from '@/hooks/use-error-analytics'
 import type { ErrorAnalyticsData, ErrorSeverity } from '@/services/error-analytics'
+import { ErrorAnalyticsService } from '@/lib/error-analytics'
+import { createClient } from '@/lib/supabase/client'
 
 interface ErrorAnalyticsContextType {
   isLoading: boolean
@@ -25,8 +27,30 @@ interface ErrorAnalyticsContextType {
 
 const ErrorAnalyticsContext = createContext<ErrorAnalyticsContextType | null>(null)
 
-export function ErrorAnalyticsProvider({ children }: { children: ReactNode }) {
+export const ErrorAnalyticsProvider = ({ children }) => {
   const errorAnalytics = useErrorAnalytics()
+  const initialized = useRef(false)
+  const [isInitializing, setIsInitializing] = useState(true)
+
+  // Initialize error analytics service only once
+  useEffect(() => {
+    if (!initialized.current) {
+      setIsInitializing(true)
+      const service = ErrorAnalyticsService.getInstance()
+      service.initialize()
+        .catch(error => {
+          console.error('Failed to initialize error analytics:', error)
+        })
+        .finally(() => {
+          initialized.current = true
+          setIsInitializing(false)
+        })
+    }
+  }, [])
+
+  if (isInitializing) {
+    return null // Or a loading spinner
+  }
 
   return (
     <ErrorAnalyticsContext.Provider value={errorAnalytics}>

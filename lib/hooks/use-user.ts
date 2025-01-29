@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '@/utils/supabase/client'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { User, AuthError } from '@supabase/supabase-js'
 import { AppError, AuthError as CustomAuthError, NetworkError } from '@/lib/types/error'
 import { z } from 'zod'
@@ -62,7 +62,14 @@ const defaultRetryConfig: RetryConfig = {
 
 export function useUser(retryConfig: Partial<RetryConfig> = {}) {
   const [state, setState] = useState<UserState>(initialState)
-  const supabase = createClient()
+  const supabase = useMemo(() => {
+    try {
+      return createClient()
+    } catch (e) {
+      // Return null during SSR
+      return null
+    }
+  }, [])
   
   // Merge retry config with defaults
   const config = { ...defaultRetryConfig, ...retryConfig }
@@ -173,6 +180,8 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
 
   // Function to get user profile
   const getUserProfile = useCallback(async (userId: string) => {
+    if (!supabase) return null
+    
     try {
       const { data, error } = await supabase.rpc('get_user_profile', {
         p_user_id: userId
@@ -191,6 +200,11 @@ export function useUser(retryConfig: Partial<RetryConfig> = {}) {
 
   // Function to get initial user
   const getInitialUser = useCallback(async () => {
+    if (!supabase) {
+      updateState({ loading: false })
+      return
+    }
+    
     try {
       const { data: { user }, error } = await supabase.auth.getUser()
       
