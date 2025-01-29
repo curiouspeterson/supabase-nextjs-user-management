@@ -86,10 +86,18 @@ export function useSupabase() {
     })
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [supabase.auth])
 
   return { supabase, user }
 }
 
 // Export types
-export type { Database } 
+export type { Database }
+
+// Export singleton instance getter
+export const getSupabaseClient = () => {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient()
+  }
+  return supabaseInstance
+} 

@@ -32,7 +32,8 @@ CREATE TABLE error_analytics_data (
   url TEXT,
   batch_id UUID NOT NULL,
   timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  organization_id UUID REFERENCES organizations(id)
 );
 
 -- Create error analytics trends table
@@ -119,4 +120,10 @@ CREATE TRIGGER set_timestamp
 CREATE TRIGGER set_timestamp
   BEFORE UPDATE ON error_analytics_trends
   FOR EACH ROW
-  EXECUTE FUNCTION trigger_set_timestamp(); 
+  EXECUTE FUNCTION trigger_set_timestamp();
+
+-- Update existing rows to use default organization (if needed)
+-- This assumes you want to keep existing data. Remove if not needed.
+-- UPDATE error_analytics_data
+-- SET organization_id = (SELECT id FROM organizations LIMIT 1)
+-- WHERE organization_id IS NULL; 

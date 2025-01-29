@@ -9,6 +9,7 @@ import { useErrorHandler } from '@/lib/hooks/use-error-handler'
 import { useSupabase } from '@/lib/supabase/client'
 import { useRoleAccess } from '@/hooks/useRoleAccess'
 import { AlertCircle, Loader2 } from 'lucide-react'
+import { AuthError } from '@supabase/supabase-js'
 
 interface NavigationProps {
   className?: string
@@ -18,39 +19,59 @@ export function Navigation({ className }: NavigationProps) {
   const pathname = usePathname()
   const { supabase, user } = useSupabase()
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const [authError, setAuthError] = useState<Error | null>(null)
   const router = useRouter()
   const { handleError } = useErrorHandler()
-  const { hasAccess: isManager, isLoading, error } = useRoleAccess(['Manager', 'Admin'])
+  
+  // Only check role access if user is logged in
+  const { 
+    hasAccess: isManager, 
+    isLoading: roleLoading, 
+    error: roleError 
+  } = useRoleAccess(['Manager', 'Admin'])
 
+  // Handle role access errors
   useEffect(() => {
-    if (error) {
-      handleError(error, 'Navigation.roleAccess')
+    if (roleError && user) {
+      console.warn('Role access error:', roleError)
+      handleError(roleError, 'Navigation.roleAccess')
     }
-  }, [error, handleError])
+  }, [roleError, handleError, user])
+
+  // Handle auth errors
+  useEffect(() => {
+    if (authError) {
+      handleError(authError, 'Navigation.auth')
+    }
+  }, [authError, handleError])
 
   const handleSignOut = useCallback(async () => {
     if (isSigningOut) return
     
     try {
       setIsSigningOut(true)
+      setAuthError(null)
       
       if (!supabase) {
-        throw new Error('Supabase client not initialized')
+        throw new Error('Auth client not initialized')
       }
 
       const { error: signOutError } = await supabase.auth.signOut()
       if (signOutError) throw signOutError
 
+      // Clear any cached data
+      router.refresh()
+      
       // Redirect to login page
       router.push('/login')
     } catch (error) {
-      handleError(error, 'Navigation.handleSignOut')
-    } finally {
+      setAuthError(error as Error)
       setIsSigningOut(false)
     }
-  }, [handleError, isSigningOut, router, supabase])
+  }, [supabase, router, isSigningOut])
 
-  const mainLinks = [
+  // Basic links that don't require role check
+  const basicLinks = [
     {
       href: '/schedule',
       label: 'Schedule',
@@ -71,27 +92,41 @@ export function Navigation({ className }: NavigationProps) {
       label: 'Staffing Requirements',
       show: !!user,
     },
+  ]
+
+  // Manager-only links
+  const managerLinks = [
     {
       href: '/dashboard/patterns',
       label: 'Shift Patterns',
-      show: isManager && !isLoading,
+      show: isManager && !roleLoading,
     },
     {
       href: '/employees',
       label: 'Employees',
-      show: isManager && !isLoading,
+      show: isManager && !roleLoading,
     },
   ]
 
-  const filteredLinks = mainLinks.filter(link => link.show)
+  // Development-only links
+  const devLinks = process.env.NODE_ENV === 'development' ? [
+    {
+      href: '/test-errors',
+      label: 'Test Errors',
+      icon: <AlertCircle className="h-4 w-4" />,
+    },
+    {
+      href: '/error-analytics',
+      label: 'Error Analytics',
+    },
+  ] : []
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center w-full p-4">
-        <Loader2 className="h-6 w-6 animate-spin" />
-      </div>
-    )
-  }
+  // Combine all visible links
+  const visibleLinks = [
+    ...basicLinks.filter(link => link.show),
+    ...managerLinks.filter(link => link.show),
+    ...devLinks,
+  ]
 
   return (
     <div className={cn('flex items-center justify-between w-full', className)}>
@@ -107,40 +142,22 @@ export function Navigation({ className }: NavigationProps) {
 
       {/* Center - Main Navigation */}
       <nav className="flex space-x-4" role="navigation" aria-label="Main navigation">
-        {filteredLinks.map(link => (
+        {visibleLinks.map(link => (
           <Link
             key={link.href}
             href={link.href}
             className={cn(
-              'px-3 py-2 rounded-md text-sm font-medium transition-colors',
+              'px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-1',
               pathname === link.href
                 ? 'bg-gray-900 text-white'
                 : 'text-gray-300 hover:bg-gray-700 hover:text-white'
             )}
             aria-current={pathname === link.href ? 'page' : undefined}
           >
-            {link.label}
+            {link.icon && <span>{link.icon}</span>}
+            <span>{link.label}</span>
           </Link>
         ))}
-        <Link
-          href="/test-errors"
-          className={cn(
-            'text-sm font-medium transition-colors hover:text-primary flex items-center space-x-1',
-            pathname === '/test-errors' ? 'text-foreground' : 'text-foreground/60'
-          )}
-        >
-          <AlertCircle className="h-4 w-4" />
-          <span>Test Errors</span>
-        </Link>
-        <Link
-          href="/error-analytics"
-          className={cn(
-            'text-sm font-medium transition-colors hover:text-primary',
-            pathname === '/error-analytics' ? 'text-foreground' : 'text-foreground/60'
-          )}
-        >
-          Error Analytics
-        </Link>
       </nav>
 
       {/* Right - Account & Sign Out */}
@@ -173,7 +190,7 @@ export function Navigation({ className }: NavigationProps) {
               {isSigningOut ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin inline" />
-                  Signing Out...
+                  <span>Signing Out...</span>
                 </>
               ) : (
                 'Sign Out'
@@ -186,7 +203,7 @@ export function Navigation({ className }: NavigationProps) {
               href="/login"
               className={cn(
                 'px-3 py-2 rounded-md text-sm font-medium transition-colors',
-                pathname === '/login' && !pathname.includes('signup')
+                pathname === '/login'
                   ? 'bg-gray-900 text-white'
                   : 'text-gray-300 hover:bg-gray-700 hover:text-white'
               )}
