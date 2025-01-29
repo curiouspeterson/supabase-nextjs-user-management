@@ -105,11 +105,19 @@ export function createClient(): SupabaseClient<Database> {
  * @returns Object containing supabase client and user
  */
 export function useSupabase() {
+  const [isClient, setIsClient] = useState(false)
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 
+  // Initialize client only after component mounts
+  useEffect(() => {
+    setIsClient(true)
+  }, [])
+
   const supabase = useMemo(() => {
+    if (!isClient) return null
+
     try {
       return createBrowserSupabaseClient()
     } catch (e) {
@@ -117,10 +125,10 @@ export function useSupabase() {
       setError(e instanceof Error ? e : new Error('Unknown error'))
       return null
     }
-  }, [])
+  }, [isClient])
 
   useEffect(() => {
-    if (!supabase) return
+    if (!isClient || !supabase) return
 
     let mounted = true
     
@@ -157,7 +165,12 @@ export function useSupabase() {
       mounted = false
       subscription?.unsubscribe()
     }
-  }, [supabase])
+  }, [isClient, supabase])
+
+  // Return early if not on client
+  if (!isClient) {
+    return { supabase: null, user: null, loading: true, error: null }
+  }
 
   return { supabase, user, loading, error }
 }

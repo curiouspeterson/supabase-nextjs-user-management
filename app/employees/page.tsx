@@ -1,45 +1,33 @@
 import { Suspense } from 'react'
-import { EmployeeList } from './components/EmployeeList'
-import { EmployeeForm } from './components/employee-form'
-import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { ErrorBoundary } from '@/components/error-boundary'
+import { getEmployees } from '@/app/actions/employees'
+import EmployeeList from './components/EmployeeList'
+import ErrorBoundary from '@/components/error-boundary'
+import { Loader2 } from 'lucide-react'
 import { Metadata } from 'next'
 
 export const dynamic = 'force-dynamic'
 
 // Define metadata for the page
 export const metadata: Metadata = {
-  title: 'Employee Management | Schedule Master',
-  description: 'Manage employees, roles, and team assignments',
+  title: 'Employee Management',
+  description: 'Manage employee information and status',
 }
 
-export default function EmployeesPage() {
+export default async function EmployeesPage() {
+  const initialEmployees = await getEmployees()
+  
   return (
-    <div className="container mx-auto py-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold">Employee Management</h1>
-        <p className="text-muted-foreground">
-          Manage employees, roles, and team assignments
-        </p>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        <ErrorBoundary>
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Employee List</h2>
-            <Suspense fallback={<LoadingSpinner />}>
-              <EmployeeList />
-            </Suspense>
+    <div className="container mx-auto py-8">
+      <h1 className="text-2xl font-bold mb-6">Employee Management</h1>
+      <ErrorBoundary>
+        <Suspense fallback={
+          <div className="flex justify-center items-center p-4">
+            <Loader2 className="h-6 w-6 animate-spin" />
           </div>
-        </ErrorBoundary>
-
-        <ErrorBoundary>
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Add Employee</h2>
-            <EmployeeForm />
-          </div>
-        </ErrorBoundary>
-      </div>
+        }>
+          <EmployeeList initialEmployees={initialEmployees} />
+        </Suspense>
+      </ErrorBoundary>
     </div>
   )
 } 

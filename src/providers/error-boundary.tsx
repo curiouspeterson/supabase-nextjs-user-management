@@ -2,29 +2,33 @@
 
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary'
 import { ErrorFallback } from '@/components/error-fallback'
-import { useLogError } from '@/contexts/error-analytics-context'
+import { useErrorAnalyticsContext } from '@/contexts/error-analytics-context'
 
-interface ErrorBoundaryProviderProps {
+interface ErrorBoundaryProps {
   children: React.ReactNode
 }
 
-export function ErrorBoundaryProvider({ children }: ErrorBoundaryProviderProps) {
-  const logError = useLogError()
+export function AppErrorBoundary({ children }: ErrorBoundaryProps) {
+  const { logError } = useErrorAnalyticsContext()
 
-  const handleError = (error: Error, info: { componentStack: string }) => {
-    // Log to error analytics service
-    logError(error, {
-      severity: 'high',
-      component: info.componentStack,
-      metadata: {
-        componentStack: info.componentStack,
-      }
-    }).catch(e => {
+  const handleError = async (error: Error, info: { componentStack: string }) => {
+    try {
+      await logError({
+        error_type: error.name,
+        message: error.message,
+        severity: 'high',
+        component: info.componentStack,
+        stack_trace: error.stack,
+        metadata: {
+          componentStack: info.componentStack,
+        },
+      })
+    } catch (e) {
       // Fallback to console if error analytics fails
       console.error('Failed to log error to analytics:', e)
       console.error('Original error:', error)
       console.error('Component stack:', info.componentStack)
-    })
+    }
   }
 
   return (

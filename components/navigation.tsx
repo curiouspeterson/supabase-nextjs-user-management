@@ -6,10 +6,9 @@ import { useEffect, useState, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { useErrorHandler } from '@/lib/hooks/use-error-handler'
-import { useSupabase } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth/hooks'
 import { useRoleAccess } from '@/hooks/useRoleAccess'
 import { AlertCircle, Loader2 } from 'lucide-react'
-import { AuthError } from '@supabase/supabase-js'
 
 interface NavigationProps {
   className?: string
@@ -17,16 +16,15 @@ interface NavigationProps {
 
 export function Navigation({ className }: NavigationProps) {
   const pathname = usePathname()
-  const { supabase, user } = useSupabase()
+  const { user, signOut, loading: authLoading } = useAuth()
   const [isSigningOut, setIsSigningOut] = useState(false)
-  const [authError, setAuthError] = useState<Error | null>(null)
   const router = useRouter()
   const { handleError } = useErrorHandler()
   
   // Only check role access if user is logged in
   const { 
     hasAccess: isManager, 
-    isLoading: roleLoading, 
+    isLoading: roleLoading,
     error: roleError 
   } = useRoleAccess(['Manager', 'Admin'])
 
@@ -38,37 +36,29 @@ export function Navigation({ className }: NavigationProps) {
     }
   }, [roleError, handleError, user])
 
-  // Handle auth errors
-  useEffect(() => {
-    if (authError) {
-      handleError(authError, 'Navigation.auth')
-    }
-  }, [authError, handleError])
-
   const handleSignOut = useCallback(async () => {
     if (isSigningOut) return
     
     try {
       setIsSigningOut(true)
-      setAuthError(null)
-      
-      if (!supabase) {
-        throw new Error('Auth client not initialized')
-      }
-
-      const { error: signOutError } = await supabase.auth.signOut()
-      if (signOutError) throw signOutError
-
-      // Clear any cached data
+      await signOut()
       router.refresh()
-      
-      // Redirect to login page
-      router.push('/login')
+      router.push('/auth/login')
     } catch (error) {
-      setAuthError(error as Error)
+      handleError(error as Error, 'Navigation.signOut')
+    } finally {
       setIsSigningOut(false)
     }
-  }, [supabase, router, isSigningOut])
+  }, [signOut, router, isSigningOut, handleError])
+
+  // Show loading state
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center w-full py-4">
+        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+      </div>
+    )
+  }
 
   // Basic links that don't require role check
   const basicLinks = [
@@ -129,7 +119,7 @@ export function Navigation({ className }: NavigationProps) {
   ]
 
   return (
-    <div className={cn('flex items-center justify-between w-full', className)}>
+    <div className={cn('flex items-center justify-between w-full bg-gray-800 text-white px-4 py-2', className)}>
       {/* Left - Site Title */}
       <div className="flex-shrink-0">
         <Link
@@ -200,10 +190,10 @@ export function Navigation({ className }: NavigationProps) {
         ) : (
           <>
             <Link
-              href="/login"
+              href="/auth/login"
               className={cn(
                 'px-3 py-2 rounded-md text-sm font-medium transition-colors',
-                pathname === '/login'
+                pathname === '/auth/login'
                   ? 'bg-gray-900 text-white'
                   : 'text-gray-300 hover:bg-gray-700 hover:text-white'
               )}
@@ -211,10 +201,10 @@ export function Navigation({ className }: NavigationProps) {
               Sign In
             </Link>
             <Link
-              href="/signup"
+              href="/auth/signup"
               className={cn(
                 'px-3 py-2 rounded-md text-sm font-medium transition-colors bg-green-700',
-                pathname === '/signup'
+                pathname === '/auth/signup'
                   ? 'bg-green-800 text-white'
                   : 'text-white hover:bg-green-800'
               )}
