@@ -1,37 +1,57 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { useSupabase } from '@/lib/supabase/client'
-import { login } from './actions'
 
-export function LoginForm() {
+export function SignUpForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const message = searchParams.get('message')
   const { supabase } = useSupabase()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError(null)
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters')
+      return
+    }
+
     setLoading(true)
 
     try {
-      const result = await login(email, password)
-      
-      if (!result.success) {
-        throw new Error(result.error?.message || 'Authentication failed')
+      const { error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: {
+            username: email.split('@')[0],
+            full_name: email.split('@')[0],
+            employee_role: 'STAFF'
+          }
+        }
+      })
+
+      if (signUpError) {
+        throw signUpError
       }
 
-      router.refresh()
-      router.push('/')
+      // Show success message and redirect to sign in
+      router.push('/login?mode=signin&message=check-email')
     } catch (err) {
-      console.error('Sign in error:', err)
-      setError(err instanceof Error ? err.message : 'Failed to sign in')
+      console.error('Sign up error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to create account')
     } finally {
       setLoading(false)
     }
@@ -39,12 +59,6 @@ export function LoginForm() {
 
   return (
     <form onSubmit={handleSubmit} className="animate-in flex-1 flex flex-col w-full justify-center gap-2 text-foreground">
-      {message === 'check-email' && (
-        <div className="mt-4 p-4 bg-green-100 text-green-700 text-center rounded-md mb-4">
-          Check your email for a confirmation link.
-        </div>
-      )}
-
       <div>
         <label className="text-md" htmlFor="email">
           Email
@@ -75,6 +89,21 @@ export function LoginForm() {
         />
       </div>
 
+      <div>
+        <label className="text-md" htmlFor="confirmPassword">
+          Confirm Password
+        </label>
+        <input
+          className="rounded-md px-4 py-2 bg-inherit border mb-6 w-full"
+          type="password"
+          name="confirmPassword"
+          placeholder="••••••••"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          required
+        />
+      </div>
+
       {error && (
         <div className="mt-4 p-4 bg-foreground/10 text-foreground text-center">
           {error}
@@ -85,7 +114,7 @@ export function LoginForm() {
         className="bg-green-700 rounded-md px-4 py-2 text-foreground mb-2 hover:bg-green-800 transition-colors"
         disabled={loading}
       >
-        {loading ? 'Signing In...' : 'Sign In'}
+        {loading ? 'Creating Account...' : 'Create Account'}
       </button>
     </form>
   )

@@ -1,0 +1,4 @@
+[{"id":"a0bb0dda-bc73-4126-ac66-5d331f0fac27","name":"Day Shift Early","description":"Early morning shift starting at 5 AM","created_at":"2025-01-26T23:02:39.000517+00:00","updated_at":"2025-01-26T23:02:39.000517+00:00"}, 
+ {"id":"b1cc1eeb-cd84-5237-bd77-6e442f1fbd38","name":"Day Shift","description":"Standard day shift starting at 9 AM","created_at":"2025-01-26T23:02:39.000517+00:00","updated_at":"2025-01-26T23:02:39.000517+00:00"}, 
+ {"id":"c2dd2ffc-de95-6348-ce88-7f553f2fce49","name":"Swing Shift","description":"Afternoon to evening shift","created_at":"2025-01-26T23:02:39.000517+00:00","updated_at":"2025-01-26T23:02:39.000517+00:00"}, 
+ {"id":"d3ee3ffd-ef06-7459-df99-8f664f3fdf50","name":"Night Shift","description":"Overnight shift","created_at":"2025-01-26T23:02:39.000517+00:00","updated_at":"2025-01-26T23:02:39.000517+00:00"}]

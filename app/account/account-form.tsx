@@ -59,11 +59,20 @@ export default function AccountForm({ initialProfile }: AccountFormProps) {
 
   const handleSignOut = async () => {
     try {
-      const { error: signOutError } = await supabase.auth.signOut()
-      if (signOutError) {
-        throw signOutError
-      }
-      router.push('/login')
+      setError(null)
+      
+      // Call the sign-out API endpoint
+      await fetch('/auth/signout', {
+        method: 'POST',
+        headers: {
+          'Cache-Control': 'no-cache'
+        },
+        credentials: 'include' // Important for cookie handling
+      })
+
+      // Force reload to ensure clean state
+      window.location.href = '/login'
+      
     } catch (err) {
       console.error('Error signing out:', err)
       setError('Failed to sign out. Please try again.')

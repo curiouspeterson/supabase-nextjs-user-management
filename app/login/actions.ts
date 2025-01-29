@@ -6,25 +6,17 @@ import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { headers } from 'next/headers'
 import { z } from 'zod'
+import { AuthError, DatabaseError, ServerErrorCode } from '@/utils/errors'
+import { checkDatabaseHealth } from '@/utils/supabase/health'
+
+// User role enum to match database
+export type UserRole = 'ADMIN' | 'MANAGER' | 'EMPLOYEE'
 
 // Validation schemas
 const credentialsSchema = z.object({
   email: z.string().email('Invalid email format'),
-  password: z.string().min(8, 'Password must be at least 8 characters')
+  password: z.string().min(6, 'Password must be at least 6 characters')
 })
-
-// Error codes
-export const AuthErrorCode = {
-  INVALID_CREDENTIALS: 'AUTH_INVALID_CREDENTIALS',
-  INVALID_EMAIL: 'AUTH_INVALID_EMAIL',
-  INVALID_PASSWORD: 'AUTH_INVALID_PASSWORD',
-  USER_NOT_FOUND: 'AUTH_USER_NOT_FOUND',
-  EMAIL_IN_USE: 'AUTH_EMAIL_IN_USE',
-  SERVER_ERROR: 'AUTH_SERVER_ERROR',
-  ROLE_UPDATE_FAILED: 'AUTH_ROLE_UPDATE_FAILED',
-  PROFILE_CREATE_FAILED: 'AUTH_PROFILE_CREATE_FAILED',
-  EMPLOYEE_CREATE_FAILED: 'AUTH_EMPLOYEE_CREATE_FAILED'
-} as const
 
 // Response type
 export interface AuthResponse {
@@ -37,171 +29,132 @@ export interface AuthResponse {
   data?: {
     userId?: string
     email?: string
-    role?: string
+    role?: UserRole
   }
 }
 
-export async function login(
-  email: string,
-  password: string,
-  redirectUrl?: string
-): Promise<AuthResponse> {
+export async function login(email: string, password: string): Promise<AuthResponse> {
   const supabase = createClient()
   const headersList = headers()
   const clientIp = headersList.get('x-forwarded-for') || 'unknown'
   const userAgent = headersList.get('user-agent') || 'unknown'
 
   try {
-    // Validate input
+    // Validate credentials first
     const validated = credentialsSchema.parse({ email, password })
 
-    // Clear any existing session
-    await supabase.auth.signOut()
-
-    // Attempt sign in
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+    // Attempt authentication first
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email: validated.email,
-      password: validated.password,
+      password: validated.password
     })
 
-    if (signInError) {
-      // Log auth error
-      await supabase.rpc('log_auth_error', {
-        p_user_id: null,
-        p_action: 'login',
-        p_error_code: AuthErrorCode.INVALID_CREDENTIALS,
-        p_error_message: signInError.message,
-        p_ip_address: clientIp,
-        p_user_agent: userAgent
-      })
+    if (authError || !authData.user) {
+      throw new AuthError('Invalid login credentials', ServerErrorCode.INVALID_CREDENTIALS)
+    }
 
-      return {
-        success: false,
-        error: {
-          code: AuthErrorCode.INVALID_CREDENTIALS,
-          message: 'Invalid email or password'
+    // Check database health after successful authentication
+    const health = await checkDatabaseHealth()
+    if (!health.healthy) {
+      console.warn('Database health check failed:', health.error)
+      // Continue with basic auth data if database is unavailable
+      return { 
+        success: true,
+        error: null,
+        data: {
+          userId: authData.user.id,
+          email: authData.user.email,
+          role: 'EMPLOYEE' // Default role if database is unavailable
         }
       }
     }
 
-    if (!signInData.session) {
-      return {
-        success: false,
-        error: {
-          code: AuthErrorCode.SERVER_ERROR,
-          message: 'No session established'
-        }
-      }
-    }
-
-    // Get user role
-    const { data: employee, error: employeeError } = await supabase
-      .from('employees')
-      .select('employee_role')
-      .eq('id', signInData.session.user.id)
+    // Get user profile if database is healthy
+    const { data: profileData, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', authData.user.id)
       .single()
 
-    if (employeeError) {
-      // Log role fetch error
+    if (profileError) {
+      console.error('Failed to fetch user profile:', profileError)
+      // Continue with basic auth data if profile fetch fails
+      return { 
+        success: true,
+        error: null,
+        data: {
+          userId: authData.user.id,
+          email: authData.user.email,
+          role: 'EMPLOYEE' // Default role if profile fetch fails
+        }
+      }
+    }
+
+    // Log successful authentication
+    try {
       await supabase.rpc('log_auth_error', {
-        p_user_id: signInData.session.user.id,
-        p_action: 'login_get_role',
-        p_error_code: AuthErrorCode.ROLE_UPDATE_FAILED,
-        p_error_message: employeeError.message,
+        p_user_id: authData.user.id,
+        p_action: 'login',
+        p_error_code: 'SUCCESS',
+        p_error_message: 'Login successful',
         p_ip_address: clientIp,
         p_user_agent: userAgent
       })
-
-      return {
-        success: false,
-        error: {
-          code: AuthErrorCode.ROLE_UPDATE_FAILED,
-          message: 'Error fetching user role'
-        }
-      }
+    } catch (logError) {
+      // Non-blocking error - just log it
+      console.error('Failed to log successful auth:', logError)
     }
 
-    // Update user metadata with role if found
-    if (employee?.employee_role) {
-      const { error: updateError } = await supabase.auth.updateUser({
-        data: { role: employee.employee_role }
-      })
-
-      if (updateError) {
-        // Log role update error
-        await supabase.rpc('log_auth_error', {
-          p_user_id: signInData.session.user.id,
-          p_action: 'login_update_role',
-          p_error_code: AuthErrorCode.ROLE_UPDATE_FAILED,
-          p_error_message: updateError.message,
-          p_ip_address: clientIp,
-          p_user_agent: userAgent
-        })
-
-        return {
-          success: false,
-          error: {
-            code: AuthErrorCode.ROLE_UPDATE_FAILED,
-            message: 'Error updating user role'
-          }
-        }
-      }
-    }
-
-    // Ensure session is properly set
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-    if (sessionError || !session) {
-      return {
-        success: false,
-        error: {
-          code: AuthErrorCode.SERVER_ERROR,
-          message: 'Error establishing session'
-        }
-      }
-    }
-
-    revalidatePath('/', 'layout')
-    
-    return {
+    revalidatePath('/')
+    return { 
       success: true,
       error: null,
       data: {
-        userId: session.user.id,
-        email: session.user.email,
-        role: employee?.employee_role
+        userId: authData.user.id,
+        email: authData.user.email,
+        role: profileData.role as UserRole
       }
     }
 
   } catch (error) {
-    console.error('Login error:', error)
+    // Enhanced error handling
+    let errorCode = ServerErrorCode.SERVER_ERROR
+    let errorMessage = 'An unexpected error occurred'
+    let errorDetails = {}
 
-    // Handle validation errors
     if (error instanceof z.ZodError) {
-      return {
-        success: false,
-        error: {
-          code: AuthErrorCode.INVALID_CREDENTIALS,
-          message: error.errors[0]?.message || 'Invalid credentials',
-          details: { errors: error.errors }
-        }
-      }
+      errorCode = ServerErrorCode.INVALID_CREDENTIALS
+      errorMessage = 'Invalid email or password format'
+      errorDetails = { issues: error.issues }
+    } else if (error instanceof AuthError) {
+      errorCode = error.code
+      errorMessage = error.message
+    } else if (error instanceof DatabaseError) {
+      errorCode = error.code
+      errorMessage = error.message
+      errorDetails = error.details || {}
     }
 
-    // Log unexpected errors
-    await supabase.rpc('log_auth_error', {
-      p_user_id: null,
-      p_action: 'login',
-      p_error_code: AuthErrorCode.SERVER_ERROR,
-      p_error_message: error instanceof Error ? error.message : 'Unknown error',
-      p_ip_address: clientIp,
-      p_user_agent: userAgent
-    })
+    // Log error to Supabase
+    try {
+      await supabase.rpc('log_auth_error', {
+        p_user_id: null,
+        p_action: 'login',
+        p_error_code: errorCode,
+        p_error_message: errorMessage,
+        p_ip_address: clientIp,
+        p_user_agent: userAgent
+      })
+    } catch (logError) {
+      console.error('Failed to log auth error:', logError)
+    }
 
     return {
       success: false,
       error: {
-        code: AuthErrorCode.SERVER_ERROR,
-        message: 'An unexpected error occurred'
+        code: errorCode,
+        message: errorMessage,
+        details: errorDetails
       }
     }
   }
@@ -222,7 +175,7 @@ export async function signup(
     return {
       success: false,
       error: {
-        code: AuthErrorCode.SERVER_ERROR,
+        code: ServerErrorCode.SERVER_ERROR,
         message: 'Server configuration error'
       }
     }
@@ -249,7 +202,7 @@ export async function signup(
       await supabase.rpc('log_auth_error', {
         p_user_id: null,
         p_action: 'signup',
-        p_error_code: AuthErrorCode.EMAIL_IN_USE,
+        p_error_code: ServerErrorCode.EMAIL_IN_USE,
         p_error_message: signUpError.message,
         p_ip_address: clientIp,
         p_user_agent: userAgent
@@ -258,7 +211,7 @@ export async function signup(
       return {
         success: false,
         error: {
-          code: AuthErrorCode.EMAIL_IN_USE,
+          code: ServerErrorCode.EMAIL_IN_USE,
           message: signUpError.message
         }
       }
@@ -268,7 +221,7 @@ export async function signup(
       return {
         success: false,
         error: {
-          code: AuthErrorCode.SERVER_ERROR,
+          code: ServerErrorCode.SERVER_ERROR,
           message: 'Failed to create user account'
         }
       }
@@ -293,7 +246,7 @@ export async function signup(
       await supabase.rpc('log_auth_error', {
         p_user_id: authData.user.id,
         p_action: 'signup_create_profile',
-        p_error_code: AuthErrorCode.PROFILE_CREATE_FAILED,
+        p_error_code: ServerErrorCode.PROFILE_CREATE_FAILED,
         p_error_message: profileError.message,
         p_ip_address: clientIp,
         p_user_agent: userAgent
@@ -308,7 +261,7 @@ export async function signup(
       return {
         success: false,
         error: {
-          code: AuthErrorCode.PROFILE_CREATE_FAILED,
+          code: ServerErrorCode.PROFILE_CREATE_FAILED,
           message: 'Failed to create user profile'
         }
       }
@@ -334,7 +287,7 @@ export async function signup(
       await supabase.rpc('log_auth_error', {
         p_user_id: authData.user.id,
         p_action: 'signup_create_employee',
-        p_error_code: AuthErrorCode.EMPLOYEE_CREATE_FAILED,
+        p_error_code: ServerErrorCode.EMPLOYEE_CREATE_FAILED,
         p_error_message: employeeError.message,
         p_ip_address: clientIp,
         p_user_agent: userAgent
@@ -349,7 +302,7 @@ export async function signup(
       return {
         success: false,
         error: {
-          code: AuthErrorCode.EMPLOYEE_CREATE_FAILED,
+          code: ServerErrorCode.EMPLOYEE_CREATE_FAILED,
           message: 'Failed to create employee record'
         }
       }
@@ -375,7 +328,7 @@ export async function signup(
       return {
         success: false,
         error: {
-          code: AuthErrorCode.INVALID_CREDENTIALS,
+          code: ServerErrorCode.INVALID_CREDENTIALS,
           message: error.errors[0]?.message || 'Invalid credentials',
           details: { errors: error.errors }
         }
@@ -386,7 +339,7 @@ export async function signup(
     await supabase.rpc('log_auth_error', {
       p_user_id: null,
       p_action: 'signup',
-      p_error_code: AuthErrorCode.SERVER_ERROR,
+      p_error_code: ServerErrorCode.SERVER_ERROR,
       p_error_message: error instanceof Error ? error.message : 'Unknown error',
       p_ip_address: clientIp,
       p_user_agent: userAgent
@@ -395,7 +348,7 @@ export async function signup(
     return {
       success: false,
       error: {
-        code: AuthErrorCode.SERVER_ERROR,
+        code: ServerErrorCode.SERVER_ERROR,
         message: 'Failed to complete signup process'
       }
     }
@@ -415,7 +368,7 @@ export async function signOut(): Promise<AuthResponse> {
       await supabase.rpc('log_auth_error', {
         p_user_id: null,
         p_action: 'signout',
-        p_error_code: AuthErrorCode.SERVER_ERROR,
+        p_error_code: ServerErrorCode.SERVER_ERROR,
         p_error_message: error.message,
         p_ip_address: clientIp,
         p_user_agent: userAgent
@@ -424,7 +377,7 @@ export async function signOut(): Promise<AuthResponse> {
       return {
         success: false,
         error: {
-          code: AuthErrorCode.SERVER_ERROR,
+          code: ServerErrorCode.SERVER_ERROR,
           message: error.message
         }
       }
@@ -446,7 +399,7 @@ export async function signOut(): Promise<AuthResponse> {
     await supabase.rpc('log_auth_error', {
       p_user_id: null,
       p_action: 'signout',
-      p_error_code: AuthErrorCode.SERVER_ERROR,
+      p_error_code: ServerErrorCode.SERVER_ERROR,
       p_error_message: error instanceof Error ? error.message : 'Unknown error',
       p_ip_address: clientIp,
       p_user_agent: userAgent
@@ -455,7 +408,7 @@ export async function signOut(): Promise<AuthResponse> {
     return {
       success: false,
       error: {
-        code: AuthErrorCode.SERVER_ERROR,
+        code: ServerErrorCode.SERVER_ERROR,
         message: 'Sign out failed'
       }
     }

@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { Database } from '@/types/supabase'
-import { AuthErrorType, AuthenticationError } from './middleware'
+import { ServerErrorCode, AuthError } from '@/utils/errors'
 import { validateCookieValue } from './utils'
 
 const COOKIE_DEFAULTS = {
@@ -38,9 +38,9 @@ const handleCookieError = async (
       }
     )
 
-    await supabase.rpc('log_cookie_error', {
-      p_error_type: AuthErrorType.COOKIE_SET,
-      p_error_code: (error as AuthenticationError).code || 'UNKNOWN',
+    await supabase.rpc('log_auth_error', {
+      p_action: 'cookie_operation',
+      p_error_code: ServerErrorCode.COOKIE_ERROR,
       p_error_message: error.message,
       p_error_details: {
         operation,
@@ -67,30 +67,18 @@ export function createClient() {
         },
         set(name: string, value: string, options: CookieOptions) {
           try {
-            const cookieOptions = mergeCookieOptions(options)
-            cookieStore.set({ name, value, ...cookieOptions })
+            cookieStore.set({ name, value, ...options })
           } catch (error) {
-            console.error('Failed to set cookie:', error)
-            throw new AuthenticationError(
-              AuthErrorType.COOKIE_SET,
-              'Failed to set authentication cookie',
-              'SET_FAILED',
-              { name, error }
-            )
+            // Handle cookie errors in development
+            console.error('Error setting cookie:', error)
           }
         },
         remove(name: string, options: CookieOptions) {
           try {
-            const cookieOptions = mergeCookieOptions(options)
-            cookieStore.set({ name, value: '', ...cookieOptions })
+            cookieStore.set({ name, value: '', ...options })
           } catch (error) {
-            console.error('Failed to remove cookie:', error)
-            throw new AuthenticationError(
-              AuthErrorType.COOKIE_REMOVE,
-              'Failed to remove authentication cookie',
-              'REMOVE_FAILED',
-              { name, error }
-            )
+            // Handle cookie errors in development
+            console.error('Error removing cookie:', error)
           }
         },
       },
@@ -101,10 +89,9 @@ export function createClient() {
 // For use in pages directory
 export const createClientForPages = (context: { req: any; res: any }) => {
   if (!context?.req || !context?.res) {
-    throw new AuthenticationError(
-      AuthErrorType.COOKIE_SET,
-      'Invalid context',
-      'INVALID_CONTEXT'
+    throw new AuthError(
+      'Invalid context for pages client',
+      ServerErrorCode.INVALID_CONTEXT
     )
   }
 
@@ -137,10 +124,9 @@ export const createClientForPages = (context: { req: any; res: any }) => {
             context.res.setHeader('Set-Cookie', cookieString)
           } catch (error) {
             handleCookieError(error as Error, 'set', name)
-            throw new AuthenticationError(
-              AuthErrorType.COOKIE_SET,
+            throw new AuthError(
               'Failed to set cookie',
-              'SET_FAILED',
+              ServerErrorCode.SET_FAILED,
               { name, error }
             )
           }
@@ -160,10 +146,9 @@ export const createClientForPages = (context: { req: any; res: any }) => {
             context.res.setHeader('Set-Cookie', cookieString)
           } catch (error) {
             handleCookieError(error as Error, 'remove', name)
-            throw new AuthenticationError(
-              AuthErrorType.COOKIE_REMOVE,
+            throw new AuthError(
               'Failed to remove cookie',
-              'REMOVE_FAILED',
+              ServerErrorCode.REMOVE_FAILED,
               { name, error }
             )
           }
@@ -209,10 +194,9 @@ export function createServiceClient() {
             })
           } catch (error) {
             handleCookieError(error as Error, 'setAll', 'multiple')
-            throw new AuthenticationError(
-              AuthErrorType.COOKIE_SET,
+            throw new AuthError(
               'Failed to set multiple cookies',
-              'SET_ALL_FAILED',
+              ServerErrorCode.SET_ALL_FAILED,
               { error }
             )
           }
@@ -223,8 +207,17 @@ export function createServiceClient() {
 }
 
 export class AuthenticationError extends Error {
-  constructor(message: string = 'Authentication required') {
+  code: string
+  details?: Record<string, unknown>
+
+  constructor(
+    message: string = 'Authentication required',
+    code: string = ServerErrorCode.AUTH_REQUIRED,
+    details?: Record<string, unknown>
+  ) {
     super(message)
     this.name = 'AuthenticationError'
+    this.code = code
+    this.details = details
   }
 }

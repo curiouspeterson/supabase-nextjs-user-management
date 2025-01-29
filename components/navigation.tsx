@@ -136,18 +136,27 @@ export function Navigation({ className }: NavigationProps) {
     
     try {
       setIsSigningOut(true)
-      const { error } = await supabase.auth.signOut()
       
-      if (error) {
-        throw new AuthError('Failed to sign out')
-      }
+      // Call the sign-out API endpoint
+      const response = await fetch('/auth/signout', {
+        method: 'POST',
+        headers: {
+          'Cache-Control': 'no-cache'
+        },
+        credentials: 'include' // Important for cookie handling
+      })
+
+      // Clear any client-side state
+      setRole(null)
       
-      window.location.href = '/'
+      // Force reload to ensure clean state
+      window.location.href = '/login'
+      
     } catch (error) {
       handleError(error, 'Navigation.handleSignOut')
       setIsSigningOut(false)
     }
-  }, [supabase, handleError, isSigningOut])
+  }, [handleError, isSigningOut])
 
   const filteredLinks = mainLinks.filter(link => link.show)
 
@@ -213,12 +222,30 @@ export function Navigation({ className }: NavigationProps) {
             </button>
           </>
         ) : (
-          <Link
-            href="/login?mode=signin"
-            className="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
-          >
-            Sign In
-          </Link>
+          <>
+            <Link
+              href="/login?mode=signin"
+              className={cn(
+                'px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                pathname === '/login' && !pathname.includes('signup')
+                  ? 'bg-gray-900 text-white'
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+              )}
+            >
+              Sign In
+            </Link>
+            <Link
+              href="/login?mode=signup"
+              className={cn(
+                'px-3 py-2 rounded-md text-sm font-medium transition-colors bg-green-700',
+                pathname === '/login' && pathname.includes('signup')
+                  ? 'bg-green-800 text-white'
+                  : 'text-white hover:bg-green-800'
+              )}
+            >
+              Sign Up
+            </Link>
+          </>
         )}
       </div>
     </div>

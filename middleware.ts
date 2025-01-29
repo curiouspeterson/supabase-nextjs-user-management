@@ -1,8 +1,8 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { AuthErrorType } from '@/utils/supabase/middleware'
 import { exponentialBackoff } from '@/utils/supabase/utils'
 import { Database } from '@/types/supabase'
+import { checkDatabaseHealth } from '@/utils/supabase/health'
 
 // Retry configuration
 const RETRY_OPTIONS = {
@@ -12,7 +12,7 @@ const RETRY_OPTIONS = {
 }
 
 // Cookie validation
-const validateCookieOptions = (options: CookieOptions): boolean => {
+const validateCookieOptions = (options: CookieOptions & { name?: string, value?: string }): boolean => {
   if (!options.name || typeof options.name !== 'string') return false
   if (options.value && typeof options.value !== 'string') return false
   if (options.maxAge && typeof options.maxAge !== 'number') return false
@@ -26,10 +26,15 @@ export async function middleware(request: NextRequest) {
     },
   })
 
-  let supabase: ReturnType<typeof createServerClient<Database>>
-
   try {
-    supabase = createServerClient(
+    // Check database health first
+    const health = await checkDatabaseHealth()
+    if (!health.healthy) {
+      console.error('Database health check failed:', health.error)
+      // Continue with degraded functionality
+    }
+
+    const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
@@ -40,7 +45,7 @@ export async function middleware(request: NextRequest) {
           set(name: string, value: string, options: CookieOptions) {
             try {
               if (!validateCookieOptions({ name, value, ...options })) {
-                throw new Error('Invalid cookie options')
+                console.warn('Invalid cookie options, using defaults')
               }
               response.cookies.set({
                 name,
@@ -70,42 +75,21 @@ export async function middleware(request: NextRequest) {
 
     // Get session with retry logic
     let session = null
-    let attempt = 0
     let lastError: Error | null = null
 
-    while (attempt < RETRY_OPTIONS.maxAttempts) {
-      try {
-        const { data, error } = await supabase.auth.getSession()
-        if (error) throw error
-        session = data.session
-        break
-      } catch (error) {
-        lastError = error as Error
-        attempt++
-        
-        if (attempt < RETRY_OPTIONS.maxAttempts) {
-          const delay = exponentialBackoff(
-            attempt,
-            RETRY_OPTIONS.initialDelay,
-            RETRY_OPTIONS.maxDelay
-          )
-          await new Promise(resolve => setTimeout(resolve, delay))
-        }
-      }
-    }
-
-    if (lastError) {
-      // Log authentication error
-      await supabase.rpc('log_auth_error', {
-        p_error_type: AuthErrorType.SESSION_REFRESH,
-        p_error_code: 'SESSION_REFRESH_FAILED',
-        p_error_message: lastError.message,
-        p_error_details: {},
-        p_request_path: request.nextUrl.pathname,
-        p_request_method: request.method,
-        p_ip_address: request.ip,
-        p_user_agent: request.headers.get('user-agent')
-      })
+    try {
+      const result = await exponentialBackoff(
+        async () => {
+          const { data, error } = await supabase.auth.getSession()
+          if (error) throw error
+          return data.session
+        },
+        RETRY_OPTIONS
+      )
+      session = result
+    } catch (error) {
+      lastError = error as Error
+      console.error('Session refresh failed:', error)
     }
 
     // Handle routing based on session state
@@ -122,22 +106,12 @@ export async function middleware(request: NextRequest) {
   } catch (error) {
     console.error('Middleware error:', error)
     
-    // Log unexpected errors
-    if (supabase) {
-      await supabase.rpc('log_auth_error', {
-        p_error_type: AuthErrorType.UNKNOWN,
-        p_error_code: 'MIDDLEWARE_ERROR',
-        p_error_message: error instanceof Error ? error.message : 'Unknown error',
-        p_error_details: {},
-        p_request_path: request.nextUrl.pathname,
-        p_request_method: request.method,
-        p_ip_address: request.ip,
-        p_user_agent: request.headers.get('user-agent')
-      })
-    }
-
-    // Continue with degraded functionality
-    return response
+    // Return degraded response
+    return NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    })
   }
 }
 

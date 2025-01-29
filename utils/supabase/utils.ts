@@ -1,11 +1,11 @@
 /**
- * Calculate exponential backoff delay
- * @param attempt Current attempt number (1-based)
+ * Calculate exponential backoff delay with jitter
+ * @param attempt Current attempt number
  * @param initialDelay Initial delay in milliseconds
  * @param maxDelay Maximum delay in milliseconds
  * @returns Delay in milliseconds
  */
-export function exponentialBackoff(
+export function calculateExponentialDelay(
   attempt: number,
   initialDelay: number,
   maxDelay: number
@@ -124,4 +124,63 @@ export function validateRedirectUrl(
     // Return null for invalid URLs
     return null;
   }
+}
+
+export type RetryConfig = {
+  maxAttempts?: number
+  initialDelay?: number
+  maxDelay?: number
+  factor?: number
+  jitter?: boolean
+}
+
+export async function exponentialBackoff<T>(
+  operation: () => Promise<T>,
+  config: RetryConfig = {}
+): Promise<T> {
+  const {
+    maxAttempts = 3,
+    initialDelay = 1000,
+    maxDelay = 5000,
+    factor = 2,
+    jitter = true
+  } = config;
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      
+      if (attempt === maxAttempts) {
+        break;
+      }
+
+      // Calculate delay using the helper function
+      const delay = calculateExponentialDelay(attempt, initialDelay, maxDelay);
+      
+      // Wait before next attempt
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError || new Error('Operation failed after maximum retries');
+}
+
+export function isAuthError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    'message' in error
+  )
+}
+
+export function getErrorMessage(error: unknown): string {
+  if (isAuthError(error)) {
+    return (error as { message: string }).message
+  }
+  return 'An unexpected error occurred'
 } 

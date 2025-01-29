@@ -1,20 +1,57 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
 async function signOutUser(req: NextRequest) {
-  const supabase = await createClient()
+  const cookieStore = cookies()
+  const supabase = createClient()
 
-  // Sign out user from all devices
-  await supabase.auth.signOut({ scope: 'global' })
+  try {
+    // First try to sign out the current session only
+    const { error } = await supabase.auth.signOut({
+      scope: 'local'
+    })
 
-  // Revalidate all pages that use user data
-  revalidatePath('/', 'layout')
+    if (error) {
+      console.error('Sign out error:', error)
+    }
 
-  // Redirect to login page
-  return NextResponse.redirect(new URL('/login', req.url), {
-    status: 302,
-  })
+    // Clear all Supabase-related cookies
+    const cookieNames = cookieStore.getAll().map(cookie => cookie.name)
+    for (const name of cookieNames) {
+      if (name.includes('supabase') || name.includes('sb-')) {
+        cookieStore.delete(name)
+      }
+    }
+
+    // Revalidate all pages that use user data
+    revalidatePath('/', 'layout')
+    revalidatePath('/account')
+    revalidatePath('/shifts')
+    revalidatePath('/schedule')
+
+    // Redirect to login page with cache-control headers
+    return new NextResponse(null, {
+      status: 302,
+      headers: {
+        'Location': '/login',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    })
+  } catch (error) {
+    console.error('Sign out error:', error)
+    // Still redirect to login on error, but with error param
+    return new NextResponse(null, {
+      status: 302,
+      headers: {
+        'Location': '/login?error=signout_failed',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      }
+    })
+  }
 }
 
 // Handle both GET and POST requests

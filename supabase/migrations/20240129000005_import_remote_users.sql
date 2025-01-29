@@ -1,0 +1,26 @@
+-- Migration: Import Remote Users
+BEGIN;
+
+-- Import remote users
+-- Add managers
+SELECT public.create_user_with_profile('88e36666-a465-4865-983b-bf11533d308d'::uuid, 'manager1@example.com'::varchar, '{"full_name": "Manager 1", "employee_role": "Management"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('58e6399e-e881-4b03-8946-2cb7f2ea32dd'::uuid, 'manager2@example.com'::varchar, '{"full_name": "Manager 2", "employee_role": "Management"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('ea3ffafe-f9a4-4374-bf2a-731acd5e476e'::uuid, 'manager3@example.com'::varchar, '{"full_name": "Manager 3", "employee_role": "Management"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('b21fc993-ffe8-47e3-9b54-729affa5907d'::uuid, 'manager4@example.com'::varchar, '{"full_name": "Manager 4", "employee_role": "Management"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('f3d38766-63e9-4d68-ba89-1a751ece2ed8'::uuid, 'manager5@example.com'::varchar, '{"full_name": "Manager 5", "employee_role": "Management"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+
+-- Add supervisors
+SELECT public.create_user_with_profile('8305ddc4-7ffe-44cd-b0b2-6e416414313c'::uuid, 'supervisor1@example.com'::varchar, '{"full_name": "Supervisor 1", "employee_role": "SUPERVISOR"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('db7901ec-5f52-4d15-8594-a108a411b2ff'::uuid, 'supervisor2@example.com'::varchar, '{"full_name": "Supervisor 2", "employee_role": "SUPERVISOR"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('06a6b20d-7e34-43f4-b157-95a61334ecd5'::uuid, 'supervisor3@example.com'::varchar, '{"full_name": "Supervisor 3", "employee_role": "SUPERVISOR"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('a90bb78a-fe75-4ec9-8b95-4c1c044237ba'::uuid, 'supervisor4@example.com'::varchar, '{"full_name": "Supervisor 4", "employee_role": "SUPERVISOR"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('15de29ce-373d-48e6-9925-be7a57f2f38b'::uuid, 'supervisor5@example.com'::varchar, '{"full_name": "Supervisor 5", "employee_role": "SUPERVISOR"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+
+-- Add staff members
+SELECT public.create_user_with_profile('ba2eb797-a295-4373-95ee-c22eeef99efd'::uuid, 'staff1@example.com'::varchar, '{"full_name": "Staff 1", "employee_role": "STAFF"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('df238850-9d79-4716-8863-38f99f1caa02'::uuid, 'staff2@example.com'::varchar, '{"full_name": "Staff 2", "employee_role": "STAFF"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('38f5416a-e72c-47e8-92d5-37022274dac1'::uuid, 'staff3@example.com'::varchar, '{"full_name": "Staff 3", "employee_role": "STAFF"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('c504a092-4883-4b9f-b270-a7259ccb0980'::uuid, 'staff4@example.com'::varchar, '{"full_name": "Staff 4", "employee_role": "STAFF"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+SELECT public.create_user_with_profile('51643b51-9603-4151-bbae-1c44037773ba'::uuid, 'staff5@example.com'::varchar, '{"full_name": "Staff 5", "employee_role": "STAFF"}'::jsonb, '{"provider": "email", "providers": ["email"]}'::jsonb, '2025-01-26 23:02:39.000517+00'::timestamptz, '2025-01-26 23:02:39.000517+00'::timestamptz);
+
+COMMIT; 
