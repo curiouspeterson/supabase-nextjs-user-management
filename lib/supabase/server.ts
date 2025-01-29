@@ -107,4 +107,45 @@ export async function createAdminClient() {
       { cause: error }
     )
   }
+}
+
+export function createServerSupabaseClient() {
+  const cookieStore = cookies()
+
+  return createServerClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+        set(name: string, value: string, options) {
+          try {
+            cookieStore.set({
+              name,
+              value,
+              ...COOKIE_OPTIONS,
+              ...options,
+            })
+          } catch (error) {
+            console.error('Cookie set error:', error)
+          }
+        },
+        remove(name: string, options) {
+          try {
+            cookieStore.set({
+              name,
+              value: '',
+              ...COOKIE_OPTIONS,
+              ...options,
+              maxAge: 0,
+            })
+          } catch (error) {
+            console.error('Cookie remove error:', error)
+          }
+        },
+      },
+    }
+  )
 } 

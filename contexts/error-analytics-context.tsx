@@ -1,10 +1,9 @@
 'use client'
 
 import { createContext, useContext, ReactNode, useEffect, useRef, useState } from 'react'
-import { useErrorAnalytics } from '@/hooks/use-error-analytics'
 import type { ErrorAnalyticsData, ErrorSeverity } from '@/services/error-analytics'
 import { ErrorAnalyticsService } from '@/lib/error-analytics'
-import { createClient } from '@/lib/supabase/client'
+import { createBrowserSupabaseClient } from '@/lib/supabase/client'
 
 interface ErrorAnalyticsContextType {
   isLoading: boolean
@@ -25,12 +24,69 @@ interface ErrorAnalyticsContextType {
   }) => Promise<any>
 }
 
+interface ErrorAnalyticsProviderProps {
+  children: ReactNode
+}
+
 const ErrorAnalyticsContext = createContext<ErrorAnalyticsContextType | null>(null)
 
-export const ErrorAnalyticsProvider = ({ children }) => {
-  const errorAnalytics = useErrorAnalytics()
+export const ErrorAnalyticsProvider = ({ children }: ErrorAnalyticsProviderProps) => {
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
   const initialized = useRef(false)
   const [isInitializing, setIsInitializing] = useState(true)
+
+  const logError = async (data: ErrorAnalyticsData) => {
+    try {
+      const service = ErrorAnalyticsService.getInstance()
+      await service.logError(data)
+    } catch (e) {
+      console.error('Failed to log error:', e)
+      setError(e instanceof Error ? e : new Error('Failed to log error'))
+    }
+  }
+
+  const resolveError = async (errorId: string, notes?: string) => {
+    try {
+      const service = ErrorAnalyticsService.getInstance()
+      await service.resolveError(errorId, notes)
+    } catch (e) {
+      console.error('Failed to resolve error:', e)
+      setError(e instanceof Error ? e : new Error('Failed to resolve error'))
+    }
+  }
+
+  const getErrorSummary = async (options?: {
+    environment?: string
+    startDate?: Date
+    endDate?: Date
+  }) => {
+    try {
+      const service = ErrorAnalyticsService.getInstance()
+      return await service.getErrorSummary(options)
+    } catch (e) {
+      console.error('Failed to get error summary:', e)
+      setError(e instanceof Error ? e : new Error('Failed to get error summary'))
+      return null
+    }
+  }
+
+  const getErrorTrends = async (options?: {
+    environment?: string
+    component?: string
+    errorType?: string
+    startDate?: Date
+    endDate?: Date
+  }) => {
+    try {
+      const service = ErrorAnalyticsService.getInstance()
+      return await service.getErrorTrends(options)
+    } catch (e) {
+      console.error('Failed to get error trends:', e)
+      setError(e instanceof Error ? e : new Error('Failed to get error trends'))
+      return null
+    }
+  }
 
   // Initialize error analytics service only once
   useEffect(() => {
@@ -40,10 +96,12 @@ export const ErrorAnalyticsProvider = ({ children }) => {
       service.initialize()
         .catch(error => {
           console.error('Failed to initialize error analytics:', error)
+          setError(error instanceof Error ? error : new Error('Failed to initialize error analytics'))
         })
         .finally(() => {
           initialized.current = true
           setIsInitializing(false)
+          setIsLoading(false)
         })
     }
   }, [])
@@ -52,8 +110,17 @@ export const ErrorAnalyticsProvider = ({ children }) => {
     return null // Or a loading spinner
   }
 
+  const value = {
+    isLoading,
+    error,
+    logError,
+    resolveError,
+    getErrorSummary,
+    getErrorTrends
+  }
+
   return (
-    <ErrorAnalyticsContext.Provider value={errorAnalytics}>
+    <ErrorAnalyticsContext.Provider value={value}>
       {children}
     </ErrorAnalyticsContext.Provider>
   )

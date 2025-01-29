@@ -1,83 +1,103 @@
 'use client'
 
-import { createBrowserClient } from '@supabase/supabase-js'
-import { SupabaseClient, User } from '@supabase/supabase-js'
-import { useState, useEffect, useMemo } from 'react'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import type { Database } from '@/types/supabase'
-import { isServer } from '@/utils/env'
+import { useState, useEffect, useMemo } from 'react'
+import { type User } from '@supabase/supabase-js'
 
-// Modern global type for enhanced type safety
-declare global {
-  var supabaseClient: SupabaseClient<Database> | undefined
-}
-
-// Cookie configuration with enhanced security
-const createSecureCookieConfig = () => ({
-  get(name: string) {
-    if (typeof document === 'undefined') return ''
-    const value = document.cookie
-      .split('; ')
-      .find((row) => row.startsWith(`${name}=`))
-      ?.split('=')[1]
-    return value ? decodeURIComponent(value) : ''
-  },
-  set(name: string, value: string, options: { 
-    path?: string; 
-    domain?: string; 
-    maxAge?: number; 
-    sameSite?: 'lax' | 'strict' | 'none';
-    secure?: boolean;
-    httpOnly?: boolean;
-  }) {
-    if (typeof document === 'undefined') return
-    const secureOptions = {
-      ...options,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const,
-      path: '/',
-      httpOnly: true
-    }
-    let cookie = `${name}=${encodeURIComponent(value)}`
-    Object.entries(secureOptions).forEach(([key, value]) => {
-      if (value) cookie += `; ${key}=${value}`
-    })
-    document.cookie = cookie
-  },
-  remove(name: string, options: { path?: string; domain?: string }) {
-    if (typeof document === 'undefined') return
-    this.set(name, '', { ...options, maxAge: -1 })
-  }
-})
+let supabaseClient: ReturnType<typeof createClientComponentClient<Database>>
 
 /**
- * Creates a Supabase client with modern security practices
- * @returns SupabaseClient instance
+ * Creates a Supabase client for client-side use
+ * @returns Supabase client instance
  * @throws Error if called on server
  */
-export function createClient(): SupabaseClient<Database> {
+export function createBrowserSupabaseClient() {
   if (typeof window === 'undefined') {
     throw new Error('Browser client cannot be used in server environment')
   }
 
-  // Verify environment variables
+  if (!supabaseClient) {
+    supabaseClient = createClientComponentClient<Database>({
+      options: {
+        auth: {
+          persistSession: true,
+          storageKey: 'supabase.auth.token',
+          detectSessionInUrl: true,
+          flowType: 'pkce'
+        }
+      }
+    })
+  }
+
+  return supabaseClient
+}
+
+// Modern security configuration
+const COOKIE_CONFIG = {
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/'
+}
+
+// Modern error types
+class ClientError extends Error {
+  constructor(message: string, public code: string) {
+    super(message)
+    this.name = 'ClientError'
+  }
+}
+
+let globalClient: SupabaseClient<Database> | undefined
+
+/**
+ * Creates a Supabase client with modern security practices
+ * @returns SupabaseClient instance
+ * @throws ClientError if called on server or missing env vars
+ */
+export function createClient(): SupabaseClient<Database> {
+  if (typeof window === 'undefined') {
+    throw new ClientError(
+      'Browser client cannot be used in server environment',
+      'SERVER_CLIENT_ERROR'
+    )
+  }
+
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL')
+    throw new ClientError(
+      'Missing NEXT_PUBLIC_SUPABASE_URL',
+      'MISSING_ENV_ERROR'
+    )
   }
   
   if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    throw new Error('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY')
+    throw new ClientError(
+      'Missing NEXT_PUBLIC_SUPABASE_ANON_KEY',
+      'MISSING_ENV_ERROR'
+    )
   }
   
-  if (globalThis.supabaseClient) return globalThis.supabaseClient
+  if (globalClient) return globalClient
   
-  const client = createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  globalClient = createSupabaseClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    {
+      auth: {
+        persistSession: true,
+        storageKey: 'supabase.auth.token',
+        detectSessionInUrl: true,
+        flowType: 'pkce'
+      },
+      cookies: {
+        name: 'sb-auth',
+        lifetime: 60 * 60 * 24 * 7, // 1 week
+        ...COOKIE_CONFIG
+      }
+    }
   )
 
-  // Store in global for singleton pattern
-  globalThis.supabaseClient = client
-  return client
+  return globalClient
 }
 
 /**
@@ -86,11 +106,15 @@ export function createClient(): SupabaseClient<Database> {
  */
 export function useSupabase() {
   const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+
   const supabase = useMemo(() => {
     try {
-      return createClient()
+      return createBrowserSupabaseClient()
     } catch (e) {
       console.error('Failed to create Supabase client:', e)
+      setError(e instanceof Error ? e : new Error('Unknown error'))
       return null
     }
   }, [])
@@ -98,23 +122,36 @@ export function useSupabase() {
   useEffect(() => {
     if (!supabase) return
 
-    // Modern auth state handling with proper cleanup
     let mounted = true
     
+    async function getInitialSession() {
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError) throw sessionError
+        
+        if (mounted) {
+          setUser(session?.user ?? null)
+          setLoading(false)
+        }
+      } catch (e) {
+        console.error('Session error:', e)
+        if (mounted) {
+          setError(e instanceof Error ? e : new Error('Session error'))
+          setLoading(false)
+        }
+      }
+    }
+
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       if (mounted) {
         setUser(session?.user ?? null)
+        setLoading(false)
       }
     })
 
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (mounted) {
-        setUser(session?.user ?? null)
-      }
-    })
+    getInitialSession()
 
     return () => {
       mounted = false
@@ -122,17 +159,17 @@ export function useSupabase() {
     }
   }, [supabase])
 
-  return { supabase, user }
+  return { supabase, user, loading, error }
 }
 
 // Export types for better type safety
 export type { Database, User }
 
+// Development-only hot reload handling
 if (process.env.NODE_ENV === 'development') {
-  // Reset global instance on hot reload
   if (module.hot) {
     module.hot.dispose(() => {
-      globalThis.supabaseClient = undefined
+      supabaseClient = undefined
     })
   }
 } 

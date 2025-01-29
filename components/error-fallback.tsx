@@ -11,40 +11,19 @@ interface ErrorFallbackProps {
 
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <Alert variant="destructive" className="max-w-lg w-full">
-        <AlertCircle className="h-4 w-4" />
-        <AlertTitle>Something went wrong</AlertTitle>
-        <AlertDescription>
-          <div className="mt-2 text-sm text-gray-600">
-            {error.message}
-          </div>
-          {process.env.NODE_ENV === 'development' && (
-            <div className="mt-4 p-4 bg-gray-100 rounded text-xs font-mono overflow-auto max-h-48">
-              {error.stack}
-            </div>
-          )}
-          <div className="mt-6 flex gap-4">
-            <Button
-              variant="default"
-              onClick={() => {
-                resetError()
-                window.location.reload()
-              }}
-            >
-              Try again
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                window.location.href = '/'
-              }}
-            >
-              Go to homepage
-            </Button>
-          </div>
-        </AlertDescription>
-      </Alert>
+    <div role="alert" className="p-4 bg-white rounded-lg shadow-lg max-w-lg mx-auto mt-8">
+      <h2 className="text-lg font-semibold text-gray-900 mb-2">
+        Something went wrong
+      </h2>
+      <pre className="text-sm bg-gray-50 p-3 rounded mb-4 overflow-auto max-h-40 text-gray-700">
+        {error.message}
+      </pre>
+      <button
+        onClick={resetError}
+        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+      >
+        Try again
+      </button>
     </div>
   )
 } 
