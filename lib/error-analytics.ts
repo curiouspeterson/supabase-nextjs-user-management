@@ -24,13 +24,13 @@ interface ErrorContext {
 }
 
 interface ErrorAnalyticsConfig {
-  maxContexts: number
-  maxUserAgents: number
-  maxUrls: number
-  maxTrends: number
-  trendPeriodMs: number
-  retentionDays: number
-  batchSize: number
+  max_contexts: number
+  max_user_agents: number
+  max_urls: number
+  max_trends: number
+  trend_period_ms: number
+  retention_days: number
+  batch_size: number
 }
 
 interface ErrorTrend {
@@ -62,23 +62,21 @@ export class ErrorAnalyticsError extends AppError {
     super(
       message,
       'ERROR_ANALYTICS_FAILED',
-      {
-        severity: ErrorSeverity.ERROR,
-        category: ErrorCategory.MONITORING,
-        cause
-      }
+      ErrorSeverity.ERROR,
+      ErrorCategory.MONITORING,
+      { cause }
     )
   }
 }
 
 const DEFAULT_CONFIG: ErrorAnalyticsConfig = {
-  maxContexts: 100,
-  maxUserAgents: 50,
-  maxUrls: 50,
-  maxTrends: 1000,
-  trendPeriodMs: 24 * 60 * 60 * 1000, // 24 hours
-  retentionDays: 30,
-  batchSize: 50
+  max_contexts: 100,
+  max_user_agents: 50,
+  max_urls: 50,
+  max_trends: 1000,
+  trend_period_ms: 24 * 60 * 60 * 1000, // 24 hours
+  retention_days: 30,
+  batch_size: 50
 }
 
 export class ErrorAnalyticsService {
@@ -101,6 +99,10 @@ export class ErrorAnalyticsService {
     return ErrorAnalyticsService.instance
   }
 
+  public getSupabaseClient(): SupabaseClient<Database> | null {
+    return this.supabase
+  }
+
   private async initializeSupabase(): Promise<void> {
     try {
       this.supabase = createClient()
@@ -116,21 +118,42 @@ export class ErrorAnalyticsService {
     }
 
     try {
+      // Check authentication status
+      const { data: { session } } = await this.supabase.auth.getSession()
+      
+      if (!session) {
+        console.warn('No active session. Using default config.')
+        return
+      }
+
       const { data, error } = await this.supabase
         .from('error_analytics_config')
-        .select('*')
-        .single()
+        .select()
+        .eq('component', this.component)
+        .maybeSingle()
 
-      if (error) throw error
+      if (error) {
+        if (error.code === '42501') {
+          console.warn('Insufficient permissions for error analytics config. Using default config.')
+        } else {
+          console.warn('Error loading analytics config:', error)
+        }
+        return
+      }
 
       if (data) {
         this.config = {
-          ...DEFAULT_CONFIG,
-          ...data
+          max_contexts: data.max_contexts,
+          max_user_agents: data.max_user_agents,
+          max_urls: data.max_urls,
+          max_trends: data.max_trends,
+          trend_period_ms: data.trend_period_ms,
+          retention_days: data.retention_days,
+          batch_size: data.batch_size
         }
       }
     } catch (error) {
-      console.error('Failed to load error analytics config:', error)
+      console.error('Failed to initialize config:', error)
       // Continue with default config
     }
   }
@@ -206,7 +229,7 @@ export class ErrorAnalyticsService {
       batch.push(errorItem)
       this.batchQueue.set(errorType, batch)
 
-      if (batch.length >= this.config.batchSize) {
+      if (batch.length >= this.config.batch_size) {
         await this.processBatch(batchId)
       } else {
         this.scheduleBatchProcessing()
@@ -230,6 +253,28 @@ export class ErrorAnalyticsService {
     }, 5000)
   }
 
+  public async resolveError(errorId: string, notes?: string): Promise<void> {
+    if (!this.supabase) {
+      throw new ErrorAnalyticsError('Supabase client not initialized')
+    }
+
+    if (!this.isInitialized) {
+      await this.initialize()
+    }
+
+    try {
+      const { error } = await this.supabase
+        .from('error_analytics_data')
+        .update({ resolved_at: new Date().toISOString(), resolution_notes: notes })
+        .eq('id', errorId)
+
+      if (error) throw error
+    } catch (error) {
+      console.error('Failed to resolve error:', error)
+      throw new ErrorAnalyticsError('Failed to resolve error', error)
+    }
+  }
+
   public async getTrends(
     startTime?: Date,
     endTime: Date = new Date()
@@ -241,7 +286,7 @@ export class ErrorAnalyticsService {
     }
 
     try {
-      startTime = startTime ?? new Date(endTime.getTime() - this.config.trendPeriodMs)
+      startTime = startTime ?? new Date(endTime.getTime() - this.config.trend_period_ms)
 
       const { data, error } = await this.supabase
         .from('error_analytics_trends')
@@ -281,7 +326,7 @@ export class ErrorAnalyticsService {
 
       // Clear old data
       const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() - this.config.retentionDays)
+      cutoff.setDate(cutoff.getDate() - this.config.retention_days)
 
       await Promise.all([
         this.supabase

@@ -112,7 +112,7 @@ export async function createAdminClient() {
 export function createServerSupabaseClient() {
   const cookieStore = cookies()
 
-  return createServerClient<Database>(
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -120,30 +120,11 @@ export function createServerSupabaseClient() {
         get(name: string) {
           return cookieStore.get(name)?.value
         },
-        set(name: string, value: string, options) {
-          try {
-            cookieStore.set({
-              name,
-              value,
-              ...COOKIE_OPTIONS,
-              ...options,
-            })
-          } catch (error) {
-            console.error('Cookie set error:', error)
-          }
+        set(name: string, value: string, options: CookieOptions) {
+          cookieStore.set({ name, value, ...options })
         },
-        remove(name: string, options) {
-          try {
-            cookieStore.set({
-              name,
-              value: '',
-              ...COOKIE_OPTIONS,
-              ...options,
-              maxAge: 0,
-            })
-          } catch (error) {
-            console.error('Cookie remove error:', error)
-          }
+        remove(name: string, options: CookieOptions) {
+          cookieStore.set({ name, value: '', ...options })
         },
       },
     }

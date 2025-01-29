@@ -1,216 +1,141 @@
 'use server'
 
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
 import { createServerClient } from '@supabase/ssr'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import type { Database } from '@/types/supabase'
-import { AppError, ErrorSeverity, ErrorCategory } from '@/lib/types/error'
 
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  path: '/'
-}
-
-/**
- * Creates a Supabase server client for auth actions
- */
 function createAuthClient() {
-  try {
-    const cookieStore = cookies()
+  const cookieStore = cookies()
     
-    return createServerClient<Database>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            try {
-              return cookieStore.get(name)?.value
-            } catch (error) {
-              console.error('Failed to get cookie:', error)
-              return undefined
-            }
-          },
-          set(name: string, value: string, options) {
-            try {
-              cookieStore.set({ name, value, ...COOKIE_OPTIONS, ...options })
-            } catch (error) {
-              console.error('Failed to set cookie:', error)
-            }
-          },
-          remove(name: string, options) {
-            try {
-              cookieStore.set({ 
-                name, 
-                value: '', 
-                ...COOKIE_OPTIONS, 
-                ...options,
-                maxAge: 0 
-              })
-            } catch (error) {
-              console.error('Failed to remove cookie:', error)
-            }
+  return createServerClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+        set(name: string, value: string, options) {
+          try {
+            cookieStore.set({ name, value, ...options })
+          } catch (error) {
+            console.error('Failed to set cookie:', error)
+          }
+        },
+        remove(name: string, options) {
+          try {
+            cookieStore.set({ name, value: '', ...options, maxAge: 0 })
+          } catch (error) {
+            console.error('Failed to remove cookie:', error)
           }
         }
       }
-    )
-  } catch (error) {
-    console.error('Failed to create auth client:', error)
-    throw new AppError(
-      'Failed to initialize auth',
-      'AUTH_INIT_ERROR',
-      ErrorSeverity.ERROR,
-      ErrorCategory.AUTH,
-      { cause: error }
-    )
-  }
+    }
+  )
 }
 
-/**
- * Server action for user login
- */
-export async function login(formData: FormData) {
+export async function login(prevState: any, formData: FormData) {
   try {
-    const email = formData.get('email')
-    const password = formData.get('password')
-    
+    const email = formData.get('email') as string
+    const password = formData.get('password') as string
+    const redirectTo = (formData.get('redirect_to') as string) || '/dashboard'
+
     if (!email || !password) {
-      return {
-        error: new AppError(
-          'Email and password are required',
-          'VALIDATION_ERROR',
-          ErrorSeverity.WARNING,
-          ErrorCategory.AUTH
-        )
+      return { 
+        error: 'Email and password are required'
       }
     }
 
     const supabase = createAuthClient()
     
     const { error } = await supabase.auth.signInWithPassword({
-      email: email.toString(),
-      password: password.toString()
+      email,
+      password
     })
 
     if (error) {
-      return {
-        error: new AppError(
-          error.message,
-          'AUTH_ERROR',
-          ErrorSeverity.ERROR,
-          ErrorCategory.AUTH,
-          { cause: error }
-        )
+      console.error('Auth error:', error)
+      return { 
+        error: 'Invalid email or password'
       }
     }
 
-    revalidatePath('/')
-    redirect('/dashboard')
+    revalidatePath('/', 'layout')
+    redirect(redirectTo)
   } catch (error) {
     console.error('Login error:', error)
-    return {
-      error: error instanceof AppError ? error : new AppError(
-        'Failed to login',
-        'LOGIN_ERROR',
-        ErrorSeverity.ERROR,
-        ErrorCategory.AUTH,
-        { cause: error }
-      )
+    return { 
+      error: 'An unexpected error occurred'
     }
   }
 }
 
-/**
- * Server action for user logout
- */
 export async function logout() {
   try {
     const supabase = createAuthClient()
     const { error } = await supabase.auth.signOut()
     
     if (error) {
-      return {
-        error: new AppError(
-          error.message,
-          'AUTH_ERROR',
-          ErrorSeverity.ERROR,
-          ErrorCategory.AUTH,
-          { cause: error }
-        )
+      console.error('Signout error:', error)
+      return { 
+        error: 'Failed to sign out'
       }
     }
 
-    revalidatePath('/')
+    revalidatePath('/', 'layout')
     redirect('/auth/login')
   } catch (error) {
     console.error('Logout error:', error)
-    return {
-      error: error instanceof AppError ? error : new AppError(
-        'Failed to logout',
-        'LOGOUT_ERROR',
-        ErrorSeverity.ERROR,
-        ErrorCategory.AUTH,
-        { cause: error }
-      )
+    return { 
+      error: 'An unexpected error occurred'
     }
   }
 }
 
-/**
- * Server action for user signup
- */
-export async function signup(formData: FormData) {
+export async function signup(prevState: any, formData: FormData) {
   try {
-    const email = formData.get('email')
-    const password = formData.get('password')
-    
+    const email = formData.get('email') as string
+    const password = formData.get('password') as string
+
     if (!email || !password) {
+      return { 
+        error: 'Email and password are required'
+      }
+    }
+
+    if (password.length < 8) {
       return {
-        error: new AppError(
-          'Email and password are required',
-          'VALIDATION_ERROR',
-          ErrorSeverity.WARNING,
-          ErrorCategory.AUTH
-        )
+        error: 'Password must be at least 8 characters'
       }
     }
 
     const supabase = createAuthClient()
     
     const { error } = await supabase.auth.signUp({
-      email: email.toString(),
-      password: password.toString(),
+      email,
+      password,
       options: {
         emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
       }
     })
 
     if (error) {
-      return {
-        error: new AppError(
-          error.message,
-          'AUTH_ERROR',
-          ErrorSeverity.ERROR,
-          ErrorCategory.AUTH,
-          { cause: error }
-        )
+      console.error('Signup error:', error)
+      return { 
+        error: error.message 
       }
     }
 
-    return { success: true }
+    return { 
+      success: true,
+      message: 'Check your email to confirm your account'
+    }
   } catch (error) {
     console.error('Signup error:', error)
-    return {
-      error: error instanceof AppError ? error : new AppError(
-        'Failed to signup',
-        'SIGNUP_ERROR',
-        ErrorSeverity.ERROR,
-        ErrorCategory.AUTH,
-        { cause: error }
-      )
+    return { 
+      error: 'An unexpected error occurred'
     }
   }
 } 

@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { useSupabase } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth/hooks'
 import { Avatar } from '@/components/avatar'
 
 interface AccountFormProps {
@@ -22,7 +22,8 @@ export default function AccountForm({ initialProfile }: AccountFormProps) {
   const [username, setUsername] = useState(initialProfile?.username ?? '')
   const [website, setWebsite] = useState(initialProfile?.website ?? '')
   const router = useRouter()
-  const { supabase, user } = useSupabase()
+  const { user, signOut } = useAuth()
+  const supabase = createClient()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -60,19 +61,8 @@ export default function AccountForm({ initialProfile }: AccountFormProps) {
   const handleSignOut = async () => {
     try {
       setError(null)
-      
-      // Call the sign-out API endpoint
-      await fetch('/auth/signout', {
-        method: 'POST',
-        headers: {
-          'Cache-Control': 'no-cache'
-        },
-        credentials: 'include' // Important for cookie handling
-      })
-
-      // Force reload to ensure clean state
-      window.location.href = '/login'
-      
+      await signOut()
+      router.push('/auth/login')
     } catch (err) {
       console.error('Error signing out:', err)
       setError('Failed to sign out. Please try again.')

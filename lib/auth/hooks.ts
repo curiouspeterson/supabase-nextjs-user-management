@@ -1,9 +1,8 @@
 'use client'
 
+import { createClient } from '@/lib/supabase/client'
 import { useCallback, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { type User } from '@supabase/supabase-js'
-import { createBrowserSupabaseClient } from '@/lib/supabase/client'
+import type { User } from '@supabase/supabase-js'
 import { AppError, ErrorSeverity, ErrorCategory } from '@/lib/types/error'
 
 export interface AuthState {
@@ -22,28 +21,66 @@ export interface UseAuthReturn extends AuthState {
  * Custom hook for managing authentication state and operations
  */
 export function useAuth(): UseAuthReturn {
-  const router = useRouter()
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    loading: true,
-    error: null
-  })
-  const [isClient, setIsClient] = useState(false)
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+  const supabase = createClient()
 
-  // Handle client-side only rendering
   useEffect(() => {
-    setIsClient(true)
-  }, [])
+    let mounted = true
 
-  // Initialize Supabase client
-  const supabase = isClient ? createBrowserSupabaseClient() : null
+    async function getUser() {
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        
+        if (sessionError) throw sessionError
 
-  // Reset error state
+        if (mounted) {
+          setUser(session?.user ?? null)
+          setLoading(false)
+        }
+      } catch (e) {
+        console.error('Auth error:', e)
+        if (mounted) {
+          setError(e instanceof Error ? e : new Error('Auth error'))
+          setLoading(false)
+        }
+      }
+    }
+
+    // Get initial session
+    getUser()
+
+    // Listen for auth changes
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (mounted) {
+        setUser(session?.user ?? null)
+        setLoading(false)
+      }
+    })
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
+  }, [supabase])
+
+  const signOut = useCallback(async () => {
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+    } catch (e) {
+      console.error('Sign out error:', e)
+      setError(e instanceof Error ? e : new Error('Sign out failed'))
+    }
+  }, [supabase])
+
   const resetError = useCallback(() => {
-    setState(prev => ({ ...prev, error: null }))
+    setError(null)
   }, [])
 
-  // Sign in handler
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) {
       throw new AppError(
@@ -55,7 +92,8 @@ export function useAuth(): UseAuthReturn {
     }
 
     try {
-      setState(prev => ({ ...prev, loading: true, error: null }))
+      setLoading(true)
+      setError(null)
       
       const { error } = await supabase.auth.signInWithPassword({
         email,
@@ -63,124 +101,27 @@ export function useAuth(): UseAuthReturn {
       })
 
       if (error) throw error
-
-      router.refresh()
     } catch (error) {
       console.error('Sign in error:', error)
-      setState(prev => ({
-        ...prev,
-        error: error instanceof Error ? error : new AppError(
-          'Failed to sign in',
-          'SIGN_IN_ERROR',
-          ErrorSeverity.ERROR,
-          ErrorCategory.AUTH,
-          { cause: error }
-        )
-      }))
-    } finally {
-      setState(prev => ({ ...prev, loading: false }))
-    }
-  }, [supabase, router])
-
-  // Sign out handler
-  const signOut = useCallback(async () => {
-    if (!supabase) {
-      throw new AppError(
-        'Auth client not initialized',
-        'AUTH_INIT_ERROR',
+      setError(error instanceof Error ? error : new AppError(
+        'Failed to sign in',
+        'SIGN_IN_ERROR',
         ErrorSeverity.ERROR,
-        ErrorCategory.AUTH
-      )
-    }
-
-    try {
-      setState(prev => ({ ...prev, loading: true, error: null }))
-      
-      const { error } = await supabase.auth.signOut()
-      if (error) throw error
-
-      router.refresh()
-      router.push('/auth/login')
-    } catch (error) {
-      console.error('Sign out error:', error)
-      setState(prev => ({
-        ...prev,
-        error: error instanceof Error ? error : new AppError(
-          'Failed to sign out',
-          'SIGN_OUT_ERROR',
-          ErrorSeverity.ERROR,
-          ErrorCategory.AUTH,
-          { cause: error }
-        )
-      }))
+        ErrorCategory.AUTH,
+        { cause: error }
+      ))
     } finally {
-      setState(prev => ({ ...prev, loading: false }))
+      setLoading(false)
     }
-  }, [supabase, router])
-
-  // Initialize and subscribe to auth state changes
-  useEffect(() => {
-    if (!isClient || !supabase) return
-
-    let mounted = true
-
-    // Get initial session
-    const initializeAuth = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession()
-        if (error) throw error
-        
-        if (mounted) {
-          setState(prev => ({
-            ...prev,
-            user: session?.user ?? null,
-            loading: false
-          }))
-        }
-      } catch (error) {
-        console.error('Session error:', error)
-        if (mounted) {
-          setState(prev => ({
-            ...prev,
-            error: error instanceof Error ? error : new AppError(
-              'Failed to get session',
-              'SESSION_ERROR',
-              ErrorSeverity.ERROR,
-              ErrorCategory.AUTH,
-              { cause: error }
-            ),
-            loading: false
-          }))
-        }
-      }
-    }
-
-    // Subscribe to auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (mounted) {
-          setState(prev => ({
-            ...prev,
-            user: session?.user ?? null,
-            loading: false
-          }))
-        }
-      }
-    )
-
-    initializeAuth()
-
-    // Cleanup
-    return () => {
-      mounted = false
-      subscription?.unsubscribe()
-    }
-  }, [isClient, supabase])
+  }, [supabase])
 
   return {
-    ...state,
-    signIn,
+    user,
+    loading,
+    error,
     signOut,
-    resetError
+    resetError,
+    signIn,
+    supabase
   }
 } 

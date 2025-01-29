@@ -42,17 +42,15 @@ export function Navigation({ className }: NavigationProps) {
     try {
       setIsSigningOut(true)
       await signOut()
-      router.refresh()
-      router.push('/auth/login')
     } catch (error) {
       handleError(error as Error, 'Navigation.signOut')
     } finally {
       setIsSigningOut(false)
     }
-  }, [signOut, router, isSigningOut, handleError])
+  }, [signOut, isSigningOut, handleError])
 
-  // Show loading state
-  if (authLoading) {
+  // Show loading state during initial load or role check
+  if (authLoading || (user && roleLoading)) {
     return (
       <div className="flex items-center justify-center w-full py-4">
         <Loader2 className="h-6 w-6 animate-spin text-gray-400" />

@@ -3,14 +3,27 @@ import { NextResponse, type NextRequest } from 'next/server'
 import type { Database } from '@/types/supabase'
 import { AppError, ErrorSeverity, ErrorCategory } from '@/lib/types/error'
 
-// Configuration
-const AUTH_CONFIG = {
-  timeout: 5000,
+// Security Configuration
+const SECURITY_CONFIG = {
+  auth: {
+    timeout: 5000,
+    maxAttempts: 5,
+    lockoutDuration: 15 * 60 * 1000, // 15 minutes
+    rateLimit: {
+      window: 60 * 1000, // 1 minute
+      maxRequests: 100
+    }
+  },
   cookie: {
     sameSite: 'lax' as const,
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     path: '/'
+  },
+  csrf: {
+    headerName: 'X-CSRF-Token',
+    cookieName: 'csrf-token',
+    tokenLength: 32
   }
 }
 
@@ -26,6 +39,10 @@ const PUBLIC_PATHS = new Set([
   '/favicon.ico'
 ])
 
+// Rate limiting map
+const rateLimitMap = new Map<string, { count: number, timestamp: number }>()
+const loginAttemptsMap = new Map<string, { attempts: number, lockoutUntil?: number }>()
+
 // Helper Functions
 export function isPublicPath(path: string): boolean {
   if (!path) return false
@@ -33,6 +50,71 @@ export function isPublicPath(path: string): boolean {
     path.startsWith('/_next/') || 
     path.startsWith('/static/') ||
     path.includes('.')
+}
+
+// Generate CSRF token
+function generateCSRFToken(): string {
+  const array = new Uint8Array(SECURITY_CONFIG.csrf.tokenLength)
+  crypto.getRandomValues(array)
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+// Validate CSRF token
+function validateCSRFToken(request: NextRequest): boolean {
+  const token = request.headers.get(SECURITY_CONFIG.csrf.headerName)
+  const cookie = request.cookies.get(SECURITY_CONFIG.csrf.cookieName)
+  return token === cookie?.value
+}
+
+// Check rate limit
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now()
+  const record = rateLimitMap.get(ip)
+
+  if (!record) {
+    rateLimitMap.set(ip, { count: 1, timestamp: now })
+    return true
+  }
+
+  if (now - record.timestamp > SECURITY_CONFIG.auth.rateLimit.window) {
+    rateLimitMap.set(ip, { count: 1, timestamp: now })
+    return true
+  }
+
+  if (record.count >= SECURITY_CONFIG.auth.rateLimit.maxRequests) {
+    return false
+  }
+
+  record.count++
+  return true
+}
+
+// Check login attempts
+function checkLoginAttempts(ip: string): boolean {
+  const record = loginAttemptsMap.get(ip)
+  const now = Date.now()
+
+  if (!record) {
+    loginAttemptsMap.set(ip, { attempts: 0 })
+    return true
+  }
+
+  if (record.lockoutUntil && now < record.lockoutUntil) {
+    return false
+  }
+
+  if (record.lockoutUntil && now >= record.lockoutUntil) {
+    loginAttemptsMap.set(ip, { attempts: 0 })
+    return true
+  }
+
+  if (record.attempts >= SECURITY_CONFIG.auth.maxAttempts) {
+    record.lockoutUntil = now + SECURITY_CONFIG.auth.lockoutDuration
+    return false
+  }
+
+  record.attempts++
+  return true
 }
 
 function createSupabaseClient(request: NextRequest) {
@@ -57,7 +139,7 @@ function createSupabaseClient(request: NextRequest) {
             response.cookies.set({
               name,
               value,
-              ...AUTH_CONFIG.cookie,
+              ...SECURITY_CONFIG.cookie,
               ...options,
             })
           } catch (error) {
@@ -69,7 +151,7 @@ function createSupabaseClient(request: NextRequest) {
             response.cookies.set({
               name,
               value: '',
-              ...AUTH_CONFIG.cookie,
+              ...SECURITY_CONFIG.cookie,
               ...options,
               maxAge: 0
             })
@@ -93,7 +175,7 @@ export async function getAuthSession(request: NextRequest) {
     const timeoutId = setTimeout(() => {
       controller.abort()
       console.log('Auth Middleware - Session check timed out')
-    }, AUTH_CONFIG.timeout)
+    }, SECURITY_CONFIG.auth.timeout)
 
     try {
       // Add signal to fetch requests
@@ -151,11 +233,56 @@ export function handleAuthRedirect(
   request: NextRequest,
   baseResponse: NextResponse
 ): NextResponse {
+  // Get client IP for rate limiting
+  const ip = request.headers.get('x-forwarded-for') || 
+             request.headers.get('x-real-ip') || 
+             request.ip || 
+             'unknown'
+
+  // Check rate limit
+  if (!checkRateLimit(ip)) {
+    const response = NextResponse.json(
+      { error: 'Too many requests' },
+      { status: 429 }
+    )
+    return response
+  }
+
+  // For login attempts, check brute force protection
+  if (path === '/auth/login' && request.method === 'POST') {
+    if (!checkLoginAttempts(ip)) {
+      const response = NextResponse.json(
+        { error: 'Account locked. Please try again later.' },
+        { status: 429 }
+      )
+      return response
+    }
+  }
+
+  // For non-GET requests, validate CSRF token
+  if (request.method !== 'GET' && !isPublicPath(path)) {
+    if (!validateCSRFToken(request)) {
+      const response = NextResponse.json(
+        { error: 'Invalid CSRF token' },
+        { status: 403 }
+      )
+      return response
+    }
+  }
+
   // Redirect to login if no session and not on login page
   if (!session && !path.startsWith('/auth/login')) {
     const redirectUrl = new URL('/auth/login', request.url)
     redirectUrl.searchParams.set('redirect_to', path)
     const redirectResponse = NextResponse.redirect(redirectUrl)
+    
+    // Set new CSRF token
+    const csrfToken = generateCSRFToken()
+    redirectResponse.cookies.set(
+      SECURITY_CONFIG.csrf.cookieName,
+      csrfToken,
+      SECURITY_CONFIG.cookie
+    )
     
     // Copy cookies if they exist
     if (baseResponse.cookies) {
@@ -163,7 +290,7 @@ export function handleAuthRedirect(
         redirectResponse.cookies.set({
           name: cookie.name,
           value: cookie.value,
-          ...AUTH_CONFIG.cookie,
+          ...SECURITY_CONFIG.cookie,
           ...cookie
         })
       })
@@ -182,13 +309,23 @@ export function handleAuthRedirect(
         redirectResponse.cookies.set({
           name: cookie.name,
           value: cookie.value,
-          ...AUTH_CONFIG.cookie,
+          ...SECURITY_CONFIG.cookie,
           ...cookie
         })
       })
     }
     
     return redirectResponse
+  }
+
+  // For regular responses, set CSRF token if needed
+  if (!isPublicPath(path)) {
+    const csrfToken = generateCSRFToken()
+    baseResponse.cookies.set(
+      SECURITY_CONFIG.csrf.cookieName,
+      csrfToken,
+      SECURITY_CONFIG.cookie
+    )
   }
 
   return baseResponse
@@ -212,8 +349,10 @@ export async function middleware(request: NextRequest) {
     
     if (error) {
       console.error('Auth Middleware - Error:', error)
-      // Allow request on timeout/auth error to prevent complete lockout
-      return response
+      // Don't allow requests on auth errors
+      const loginUrl = new URL('/auth/login', request.url)
+      loginUrl.searchParams.set('error', 'auth_error')
+      return NextResponse.redirect(loginUrl)
     }
 
     console.log('Auth Middleware - Session:', session ? 'Found' : 'Not found')
@@ -222,7 +361,7 @@ export async function middleware(request: NextRequest) {
   } catch (error) {
     console.error('Auth Middleware - Critical error:', error)
     
-    // On critical error, allow public paths
+    // On critical error, only allow public paths
     if (isPublicPath(request.nextUrl.pathname)) {
       return NextResponse.next()
     }
@@ -235,5 +374,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|public/).*)',]
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|public/).*)'],
 } 

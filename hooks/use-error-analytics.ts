@@ -1,26 +1,20 @@
+'use client'
+
 import { useCallback, useState } from 'react'
-import { useSupabase } from '@/lib/supabase/client'
-import { ErrorAnalyticsService } from '@/services/error-analytics'
-import { z } from 'zod'
+import { useAuth } from '@/lib/auth/hooks'
+import { ErrorAnalyticsService } from '@/lib/error-analytics'
+import type { ErrorContext } from '@/lib/error-analytics'
 
 // Re-export types from the service
-export type { ErrorSeverity } from '@/services/error-analytics'
+export type { ErrorSeverity } from '@/lib/types/error'
 
 // Hook return type
 interface UseErrorAnalytics {
   isLoading: boolean
   error: Error | null
-  logError: (data: z.infer<typeof ErrorAnalyticsData>) => Promise<void>
+  trackError: (error: Error, context?: ErrorContext) => Promise<void>
   resolveError: (errorId: string, notes?: string) => Promise<void>
-  getErrorSummary: (options?: {
-    environment?: string
-    startDate?: Date
-    endDate?: Date
-  }) => Promise<any>
-  getErrorTrends: (options?: {
-    environment?: string
-    component?: string
-    errorType?: string
+  getTrends: (options?: {
     startDate?: Date
     endDate?: Date
   }) => Promise<any>
@@ -29,30 +23,32 @@ interface UseErrorAnalytics {
 export function useErrorAnalytics(): UseErrorAnalytics {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
-  const { supabase, user } = useSupabase()
-  const service = new ErrorAnalyticsService()
+  const { user } = useAuth()
+  const service = ErrorAnalyticsService.getInstance()
 
-  const logError = useCallback(async (data: z.infer<typeof ErrorAnalyticsData>) => {
+  const trackError = useCallback(async (error: Error, context?: ErrorContext) => {
     try {
       setIsLoading(true)
       setError(null)
 
-      const result = await service.logError({
-        ...data,
-        user_id: user?.id,
-        environment: process.env.NEXT_PUBLIC_ENVIRONMENT || 'development'
+      await service.trackError(error, {
+        ...context,
+        component: context?.component || 'default',
+        browserInfo: {
+          ...context?.browserInfo,
+          userAgent: window.navigator?.userAgent,
+          url: window.location?.href,
+          timestamp: new Date().toISOString()
+        }
       })
-
-      if (!result.success) {
-        throw new Error('Failed to log error')
-      }
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('An unexpected error occurred'))
+      console.error('Failed to track error:', err)
+      setError(err instanceof Error ? err : new Error('Failed to track error'))
       throw err
     } finally {
       setIsLoading(false)
     }
-  }, [user])
+  }, [service])
 
   const resolveError = useCallback(async (errorId: string, notes?: string) => {
     try {
@@ -63,21 +59,17 @@ export function useErrorAnalytics(): UseErrorAnalytics {
         throw new Error('User must be authenticated to resolve errors')
       }
 
-      const result = await service.resolveError(errorId, user.id, notes)
-
-      if (!result.success) {
-        throw new Error('Failed to resolve error')
-      }
+      await service.resolveError(errorId, notes)
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('An unexpected error occurred'))
+      console.error('Failed to resolve error:', err)
+      setError(err instanceof Error ? err : new Error('Failed to resolve error'))
       throw err
     } finally {
       setIsLoading(false)
     }
-  }, [user])
+  }, [user, service])
 
-  const getErrorSummary = useCallback(async (options?: {
-    environment?: string
+  const getTrends = useCallback(async (options?: {
     startDate?: Date
     endDate?: Date
   }) => {
@@ -85,79 +77,21 @@ export function useErrorAnalytics(): UseErrorAnalytics {
       setIsLoading(true)
       setError(null)
 
-      const { data } = await supabase
-        .from('error_analytics_config')
-        .select('*')
-        .limit(1)
-        .single()
-
-      if (!data) {
-        throw new Error('User must belong to an organization')
-      }
-
-      const result = await service.getErrorSummary(data.org_id, {
-        environment: process.env.NEXT_PUBLIC_ENVIRONMENT || 'development',
-        ...options
-      })
-
-      if (!result.success) {
-        throw new Error('Failed to get error summary')
-      }
-
-      return result.data
+      return await service.getTrends(options?.startDate, options?.endDate)
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('An unexpected error occurred'))
+      console.error('Failed to get error trends:', err)
+      setError(err instanceof Error ? err : new Error('Failed to get error trends'))
       throw err
     } finally {
       setIsLoading(false)
     }
-  }, [user, supabase])
-
-  const getErrorTrends = useCallback(async (options?: {
-    environment?: string
-    component?: string
-    errorType?: string
-    startDate?: Date
-    endDate?: Date
-  }) => {
-    try {
-      setIsLoading(true)
-      setError(null)
-
-      const { data } = await supabase
-        .from('error_analytics_config')
-        .select('*')
-        .limit(1)
-        .single()
-
-      if (!data) {
-        throw new Error('User must belong to an organization')
-      }
-
-      const result = await service.getErrorTrends(data.org_id, {
-        environment: process.env.NEXT_PUBLIC_ENVIRONMENT || 'development',
-        ...options
-      })
-
-      if (!result.success) {
-        throw new Error('Failed to get error trends')
-      }
-
-      return result.data
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error('An unexpected error occurred'))
-      throw err
-    } finally {
-      setIsLoading(false)
-    }
-  }, [user, supabase])
+  }, [service])
 
   return {
     isLoading,
     error,
-    logError,
+    trackError,
     resolveError,
-    getErrorSummary,
-    getErrorTrends
+    getTrends
   }
 } 

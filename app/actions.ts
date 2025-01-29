@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import { ErrorCategory, ErrorSeverity } from '@/lib/types/error'
 import { redirect } from 'next/navigation'
 import { logger } from '@/lib/logger'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 
 /**
  * Server action to reset error state and refresh the current page
@@ -151,4 +152,28 @@ export async function clearError(id: string) {
       error: 'Failed to clear error',
     }
   }
-} 
+}
+
+export async function login(formData: FormData) {
+  const supabase = createServerSupabaseClient()
+  
+  try {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: formData.get('email') as string,
+      password: formData.get('password') as string,
+    })
+
+    if (error) {
+      return redirect('/auth/login?error=' + encodeURIComponent(error.message))
+    }
+
+    // Get the intended destination
+    const redirectTo = formData.get('redirect_to')?.toString() || '/dashboard'
+    
+    // Use relative redirect
+    return redirect(redirectTo)
+  } catch (error) {
+    console.error('Login error:', error)
+    return redirect('/auth/login?error=Invalid+credentials')
+  }
+}

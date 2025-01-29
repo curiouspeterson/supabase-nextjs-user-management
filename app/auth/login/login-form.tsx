@@ -1,15 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
 import { useFormState, useFormStatus } from 'react-dom'
+import { useSearchParams } from 'next/navigation'
 import { login } from '@/lib/auth/actions'
-import { AppError } from '@/lib/types/error'
-import FullPageLoader from '@/components/FullPageLoader'
 
 function SubmitButton() {
   const { pending } = useFormStatus()
-  
+
   return (
     <button
       type="submit"
@@ -24,50 +21,7 @@ function SubmitButton() {
 export default function LoginForm() {
   const searchParams = useSearchParams()
   const redirectTo = searchParams.get('redirect_to')
-  const urlError = searchParams.get('error')
   const [state, formAction] = useFormState(login, null)
-  const [isClient, setIsClient] = useState(false)
-
-  // Handle client-side only rendering
-  useEffect(() => {
-    setIsClient(true)
-  }, [])
-
-  // Debug logging
-  useEffect(() => {
-    console.log('LoginForm - Mounted')
-    console.log('LoginForm - Redirect:', redirectTo)
-    
-    if (urlError) {
-      console.error('LoginForm - URL Error:', urlError)
-    }
-    if (state?.error) {
-      console.error('LoginForm - Form Error:', state.error)
-    }
-    
-    return () => {
-      console.log('LoginForm - Unmounted')
-    }
-  }, [urlError, state?.error, redirectTo])
-
-  // Show loading state during SSR
-  if (!isClient) {
-    return <FullPageLoader />
-  }
-
-  // Format error message
-  const errorMessage = (() => {
-    if (state?.error instanceof AppError) {
-      return state.error.message
-    }
-    if (urlError === 'auth_error') {
-      return 'Authentication failed. Please try again.'
-    }
-    if (urlError) {
-      return 'An error occurred. Please try again.'
-    }
-    return null
-  })()
 
   return (
     <form action={formAction} className="mt-8 space-y-6">
@@ -104,7 +58,7 @@ export default function LoginForm() {
         </div>
       </div>
 
-      {errorMessage && (
+      {state?.error && (
         <div className="rounded-md bg-red-50 p-4">
           <div className="flex">
             <div className="flex-shrink-0">
@@ -114,7 +68,7 @@ export default function LoginForm() {
             </div>
             <div className="ml-3">
               <p className="text-sm text-red-700" role="alert">
-                {errorMessage}
+                {state.error}
               </p>
             </div>
           </div>
