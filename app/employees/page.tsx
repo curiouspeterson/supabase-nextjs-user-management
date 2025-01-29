@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { EmployeeList } from './components/employee-list'
+import { EmployeeList } from './components/EmployeeList'
 import { EmployeeForm } from './components/employee-form'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { ErrorBoundary } from '@/components/error-boundary'

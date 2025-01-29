@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/client'
 import type { Employee } from '@/types/employee'
 import type { Database } from '@/types/supabase'
+import { DatabaseError } from '@/lib/errors'
 
 const supabase = createClient()
 
@@ -19,7 +20,10 @@ function transformEmployee(dbEmployee: DbEmployeeWithProfile): Employee {
     weekly_hours_scheduled: dbEmployee.weekly_hours_scheduled,
     default_shift_type_id: dbEmployee.default_shift_type_id,
     created_at: dbEmployee.created_at,
-    updated_at: dbEmployee.updated_at
+    updated_at: dbEmployee.updated_at,
+    // Add profile data if available
+    full_name: dbEmployee.profiles?.full_name || null,
+    avatar_url: dbEmployee.profiles?.avatar_url || null
   }
 }
 
@@ -79,35 +83,67 @@ export async function deleteEmployee(id: string): Promise<void> {
 }
 
 /**
- * Fetch all employees
+ * Fetch all employees with their profiles
  */
 export async function getEmployees(): Promise<Employee[]> {
-  const { data, error } = await supabase
-    .from('employees')
-    .select('*, profiles(*)')
-    .order('created_at', { ascending: false })
+  const supabase = createClient()
 
-  if (error) {
-    throw new Error(`Failed to fetch employees: ${error.message}`)
+  try {
+    const { data, error, status } = await supabase
+      .from('employees')
+      .select('*, profiles(*)')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      if (status === 401) {
+        throw new DatabaseError('Not authenticated', { cause: error })
+      }
+      throw new DatabaseError(`Failed to fetch employees: ${error.message}`, { cause: error })
+    }
+
+    // Always return an array, even if empty
+    return (data || []).map(employee => transformEmployee(employee as DbEmployeeWithProfile))
+  } catch (err) {
+    // Log the error for debugging
+    console.error('Error in getEmployees:', err)
+    
+    // Re-throw database errors
+    if (err instanceof DatabaseError) {
+      throw err
+    }
+    
+    // Wrap unknown errors
+    throw new DatabaseError('Unexpected error fetching employees', { cause: err })
   }
-
-  return (data || []).map(employee => transformEmployee(employee as DbEmployeeWithProfile))
 }
 
 /**
  * Fetch a single employee by ID
  */
 export async function getEmployee(id: string): Promise<Employee | null> {
-  const { data, error } = await supabase
-    .from('employees')
-    .select('*, profiles(*)')
-    .eq('id', id)
-    .single()
+  const supabase = createClient()
 
-  if (error) {
-    if (error.code === 'PGRST116') return null // Row not found
-    throw new Error(`Failed to fetch employee: ${error.message}`)
+  try {
+    const { data, error, status } = await supabase
+      .from('employees')
+      .select('*, profiles(*)')
+      .eq('id', id)
+      .single()
+
+    if (error) {
+      if (error.code === 'PGRST116') return null // Row not found
+      if (status === 401) {
+        throw new DatabaseError('Not authenticated', { cause: error })
+      }
+      throw new DatabaseError(`Failed to fetch employee: ${error.message}`, { cause: error })
+    }
+
+    return data ? transformEmployee(data as DbEmployeeWithProfile) : null
+  } catch (err) {
+    console.error('Error in getEmployee:', err)
+    if (err instanceof DatabaseError) {
+      throw err
+    }
+    throw new DatabaseError('Unexpected error fetching employee', { cause: err })
   }
-
-  return data ? transformEmployee(data as DbEmployeeWithProfile) : null
 }

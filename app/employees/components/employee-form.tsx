@@ -1,3 +1,5 @@
+'use client'
+
 import * as React from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from '@/components/ui/form'
@@ -22,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
-import { useErrorBoundary } from 'react-error-boundary'
+import { ErrorBoundary } from '@/components/error-boundary'
 import { createEmployee } from '@/services/employees'
 import type { EmployeeInsert } from '@/types/employee'
 
@@ -38,7 +40,7 @@ type EmployeeFormValues = z.infer<typeof employeeSchema>
 
 export function EmployeeForm() {
   const { toast } = useToast()
-  const { showBoundary } = useErrorBoundary()
+  const [error, setError] = React.useState<Error | null>(null)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
 
   const form = useForm<EmployeeFormValues>({
@@ -65,16 +67,23 @@ export function EmployeeForm() {
 
       form.reset()
     } catch (error) {
-      showBoundary(error)
+      if (error instanceof Error) {
+        setError(error)
+        throw error
+      }
       toast({
         title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to create employee',
+        description: 'Failed to create employee',
         variant: 'destructive'
       })
     } finally {
       setIsSubmitting(false)
     }
-  }, [form, showBoundary, toast])
+  }, [form, toast])
+
+  if (error) {
+    throw error
+  }
 
   return (
     <Form {...form}>

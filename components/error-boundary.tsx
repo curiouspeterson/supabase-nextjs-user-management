@@ -74,19 +74,22 @@ export class ErrorBoundary extends React.Component<
   constructor(props: ErrorBoundaryProps) {
     super(props)
     this.state = { hasError: false, error: null }
-    this.analyticsService = new ErrorAnalyticsService(props.component || 'error-boundary')
+    this.analyticsService = ErrorAnalyticsService.getInstance(props.component || 'error-boundary')
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error }
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+  async componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Initialize analytics service if needed
+    await this.analyticsService.initialize()
+
     // Handle and track the error
     errorHandler.handleError(error, this.props.component)
     
     // Track error analytics
-    this.analyticsService.trackError(error, {
+    await this.analyticsService.trackError(error, {
       ...this.props.errorContext,
       componentStack: errorInfo.componentStack,
       component: this.props.component

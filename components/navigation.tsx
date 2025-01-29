@@ -2,13 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { useErrorHandler } from '@/lib/hooks/use-error-handler'
 import { AuthError, DatabaseError } from '@/lib/errors'
 import { useSupabase } from '@/lib/supabase/client'
+import { useRoleAccess } from '@/hooks/useRoleAccess'
 
 interface NavigationProps {
   className?: string
@@ -18,118 +18,21 @@ interface AuthSubscription {
   unsubscribe: () => void
 }
 
-type Role = 'manager' | 'supervisor' | 'employee'
+type Role = 'Manager' | 'Admin' | 'Employee'
 
 export function Navigation({ className }: NavigationProps) {
   const pathname = usePathname()
   const { supabase, user } = useSupabase()
-  const [role, setRole] = useState<Role | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
   const [isSigningOut, setIsSigningOut] = useState(false)
   const router = useRouter()
   const { handleError } = useErrorHandler()
-
-  const getUserRole = useCallback(async () => {
-    if (!user) {
-      setRole(null)
-      return
-    }
-
-    try {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single()
-
-      if (error) throw error
-      setRole(profile?.role as Role)
-    } catch (error) {
-      console.error('Error fetching user role:', error)
-      setRole(null)
-    }
-  }, [user, supabase])
-
-  const setupAuthListener = useCallback(async (): Promise<AuthSubscription> => {
-    try {
-      const {
-        data: { subscription },
-      } = await supabase.auth.onAuthStateChange((event, session) => {
-        if (event === 'SIGNED_IN') {
-          getUserRole()
-          router.refresh()
-        }
-        if (event === 'SIGNED_OUT') {
-          setRole(null)
-          router.refresh()
-        }
-      })
-
-      return {
-        unsubscribe: () => {
-          subscription.unsubscribe()
-        }
-      }
-    } catch (error) {
-      handleError(new AuthError('Failed to setup auth listener'), 'Navigation.setupAuthListener')
-      return { unsubscribe: () => {} }
-    }
-  }, [supabase, router, handleError, getUserRole])
+  const { hasAccess: isManager, isLoading, error } = useRoleAccess(['Manager', 'Admin'])
 
   useEffect(() => {
-    let subscription: AuthSubscription | null = null
-
-    const setupSubscription = async () => {
-      subscription = await setupAuthListener()
-      // Get initial role
-      await getUserRole()
+    if (error) {
+      handleError(error, 'Navigation.roleAccess')
     }
-
-    setupSubscription()
-
-    return () => {
-      subscription?.unsubscribe()
-    }
-  }, [setupAuthListener, getUserRole])
-
-  const isManager = !isLoading && role && (
-    role === 'manager' || 
-    role === 'supervisor' || 
-    role === 'employee'
-  )
-
-  const mainLinks = [
-    {
-      href: '/schedule',
-      label: 'Schedule',
-      show: !!role, // Only show if authenticated
-    },
-    {
-      href: '/shifts',
-      label: 'Shifts',
-      show: !!role,
-    },
-    {
-      href: '/time-off',
-      label: 'Time Off',
-      show: !!role,
-    },
-    {
-      href: '/staffing',
-      label: 'Staffing Requirements',
-      show: !!role,
-    },
-    {
-      href: '/dashboard/patterns',
-      label: 'Shift Patterns',
-      show: isManager,
-    },
-    {
-      href: '/employees',
-      label: 'Employees',
-      show: isManager,
-    },
-  ]
+  }, [error, handleError])
 
   const handleSignOut = useCallback(async () => {
     if (isSigningOut) return
@@ -146,9 +49,6 @@ export function Navigation({ className }: NavigationProps) {
         credentials: 'include' // Important for cookie handling
       })
 
-      // Clear any client-side state
-      setRole(null)
-      
       // Force reload to ensure clean state
       window.location.href = '/login'
       
@@ -157,6 +57,39 @@ export function Navigation({ className }: NavigationProps) {
       setIsSigningOut(false)
     }
   }, [handleError, isSigningOut])
+
+  const mainLinks = [
+    {
+      href: '/schedule',
+      label: 'Schedule',
+      show: !!user, // Only show if authenticated
+    },
+    {
+      href: '/shifts',
+      label: 'Shifts',
+      show: !!user,
+    },
+    {
+      href: '/time-off',
+      label: 'Time Off',
+      show: !!user,
+    },
+    {
+      href: '/staffing',
+      label: 'Staffing Requirements',
+      show: !!user,
+    },
+    {
+      href: '/dashboard/patterns',
+      label: 'Shift Patterns',
+      show: isManager && !isLoading,
+    },
+    {
+      href: '/employees',
+      label: 'Employees',
+      show: isManager && !isLoading,
+    },
+  ]
 
   const filteredLinks = mainLinks.filter(link => link.show)
 
@@ -193,7 +126,7 @@ export function Navigation({ className }: NavigationProps) {
 
       {/* Right - Account & Sign Out */}
       <div className="flex items-center space-x-4">
-        {role ? (
+        {user ? (
           <>
             <Link
               href="/account"

@@ -24,7 +24,15 @@ BEGIN
         updated_at,
         instance_id,
         aud,
-        role
+        role,
+        encrypted_password,
+        email_confirmed_at,
+        confirmation_sent_at,
+        confirmation_token,
+        recovery_token,
+        email_change_token_current,
+        email_change_token_new,
+        is_sso_user
     ) VALUES (
         p_id,
         p_email,
@@ -34,13 +42,28 @@ BEGIN
         p_updated_at,
         '00000000-0000-0000-0000-000000000000',
         'authenticated',
-        'authenticated'
+        'authenticated',
+        crypt('password123', gen_salt('bf')),
+        NOW(),
+        NOW(),
+        '',
+        '',
+        '',
+        '',
+        false
     ) ON CONFLICT (id) DO UPDATE
     SET
         email = EXCLUDED.email,
         raw_user_meta_data = EXCLUDED.raw_user_meta_data,
         raw_app_meta_data = EXCLUDED.raw_app_meta_data,
-        updated_at = EXCLUDED.updated_at;
+        updated_at = EXCLUDED.updated_at,
+        encrypted_password = EXCLUDED.encrypted_password,
+        email_confirmed_at = EXCLUDED.email_confirmed_at,
+        confirmation_sent_at = EXCLUDED.confirmation_sent_at,
+        confirmation_token = EXCLUDED.confirmation_token,
+        recovery_token = EXCLUDED.recovery_token,
+        email_change_token_current = EXCLUDED.email_change_token_current,
+        email_change_token_new = EXCLUDED.email_change_token_new;
 
     -- Create profile
     INSERT INTO public.profiles (
